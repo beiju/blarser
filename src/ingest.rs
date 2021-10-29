@@ -1,3 +1,4 @@
+use std::error::Error;
 use std::sync::mpsc;
 use std::thread;
 
@@ -14,7 +15,21 @@ pub enum IngestObject {
     TeamsUpdate(ChroniclerItem),
 }
 
-pub fn ingest() -> mpsc::Receiver<IngestObject> {
+pub fn ingest() -> Result<(), impl Error> {
+    let recv = merged_feed_and_chron();
+
+    loop {
+        match recv.recv() {
+            Ok(IngestObject::EventuallyEvent(_)) => println!("Event"),
+            Ok(IngestObject::PlayersUpdate(_)) => println!("Players"),
+            Ok(IngestObject::TeamsUpdate(_)) => println!("Teams"),
+            Err(e) => return Err(e),
+        }
+    };
+
+}
+
+pub fn merged_feed_and_chron() -> mpsc::Receiver<IngestObject> {
     let (sender, receiver) = mpsc::sync_channel(16);
     thread::spawn(move || ingest_thread(sender) );
     receiver
