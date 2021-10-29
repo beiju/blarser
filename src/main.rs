@@ -1,8 +1,10 @@
 use blarser::ingest;
 use std::error::Error;
+use tokio;
 
-fn main() -> Result<(), Box<dyn Error>> {
-    ingest::ingest()?;
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
+    ingest::ingest().await?;
 
     Ok(())
 }

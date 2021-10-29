@@ -19,8 +19,6 @@ impl IntoIterator for EventuallyResponse {
     }
 }
 
-
-
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct EventuallyEvent {
