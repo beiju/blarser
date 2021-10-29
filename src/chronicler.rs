@@ -1,18 +1,19 @@
-use futures::stream;
-use reqwest::Client;
+use chrono::{DateTime, Utc};
+use futures::{stream, StreamExt, TryFutureExt, TryStreamExt};
+use reqwest::{Client, RequestBuilder};
 use serde::Deserialize;
 use serde_json::value;
-
-type ChroniclerItems = Vec<value::Value>;
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ChroniclerResponse {
-    next_page: String,
-    items: ChroniclerItems,
-}
+use crate::chronicler_schema::{ChroniclerItem, ChroniclerItems, ChroniclerResponse};
 
 pub fn chron_versions<'a>(
+    client: &'a Client, entity_type: &'a str, after: &'a str,
+) -> impl stream::Stream<Item=ChroniclerItem> + 'a
+{
+    chron_pages(client, entity_type, after)
+        .flat_map(|items| stream::iter(items))
+}
+
+fn chron_pages<'a>(
     client: &'a Client, entity_type: &'a str, after: &'a str,
 ) -> impl stream::Stream<Item=ChroniclerItems> + 'a
 {
@@ -36,11 +37,21 @@ pub fn chron_versions<'a>(
                 State::End => return None,
             };
 
-            let resp = req.query(&cont_token)
-                .send().await.unwrap()
-                .json::<ChroniclerResponse>().await.unwrap();
+            let req = req.query(&cont_token);
 
-            Some((resp.items, State::Next(resp.next_page.clone())))
+            match chron_request(req).await {
+                Ok(r) => Some((r.items, State::Next(r.next_page))),
+                Err(e) => {
+                    dbg!("{}", e);
+                    None
+                }
+            }
         }
     }))
+}
+
+async fn chron_request(req: RequestBuilder) -> reqwest::Result<ChroniclerResponse> {
+    req
+        .send().await?
+        .json::<ChroniclerResponse>().await
 }
