@@ -27,7 +27,3 @@ pub struct EventuallyEvent {
     pub category: i32,
     pub description: String,
 }
-
-pub enum IngestObject {
-    EventuallyEvent(EventuallyEvent)
-}

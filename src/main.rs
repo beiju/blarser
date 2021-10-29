@@ -1,10 +1,15 @@
-use blarser::ingest;
+use blarser::ingest::{ingest, IngestObject};
 use std::error::Error;
-use tokio;
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
-    ingest::ingest().await?;
+fn main() -> Result<(), impl Error> {
+    let recv = ingest();
 
-    Ok(())
+    loop {
+        match recv.recv() {
+            Ok(IngestObject::EventuallyEvent(_)) => println!("Event"),
+            Ok(IngestObject::PlayersUpdate(_)) => println!("Players"),
+            Ok(IngestObject::TeamsUpdate(_)) => println!("Teams"),
+            Err(e) => return Err(e),
+        }
+    };
 }
