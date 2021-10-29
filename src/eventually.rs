@@ -1,10 +1,9 @@
 use std::sync::mpsc;
-use std::sync::mpsc::Receiver;
 use std::thread;
 
 use crate::eventually_schema::{EventuallyResponse, EventuallyEvent};
 
-pub fn events(start: &'static str) -> Receiver<EventuallyEvent> {
+pub fn events(start: &'static str) -> mpsc::Receiver<EventuallyEvent> {
     let (sender, receiver) = mpsc::sync_channel(16);
     thread::spawn(move || events_thread(sender, start) );
     receiver
