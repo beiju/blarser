@@ -124,10 +124,10 @@ implemented yet.
   would cause a validation failure in the best case and an 
   erroneously-concretized placeholder in the worst case. I plan to handle this
   by brute force, applying the update to every `BlaseballState` since the 
-  earliest state that passed validation for the previous state. The validation
-  function will return a list of values that were concretized by that 
-  validation, and my first implementation will just assert that all states that 
-  validate cause identical concretizations. If that assert ever fails, my 
+  earliest state that passed validation for the previous chron update. The 
+  validation function will return a list of values that were concretized by 
+  that validation, and my first implementation will just assert that all states
+  that validate cause identical concretizations. If that assert ever fails, my 
   backup plan is multiple timelines. Just keep a list of parallel 
   `BlaseballState`s representing multiple timelines. Apply each feed and 
   chron update to all of them, and whenever a Chron update completely fails 
