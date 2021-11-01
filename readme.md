@@ -46,6 +46,9 @@ Blarser will have done its job if, among other things, it can be used to:
 * Reconstruct the feed, for seasons before the feed existed
 * Tell you the sources of every change to the objects Chron records
 * Provide the source data for the datablase
+* Generate expected game updates for the unseen Gamma seasons (which probably
+  can't be fully determined, at least for baserunner positions, but you could
+  represent the uncertainty)
 * Run hypothetical scenarios, such as what a particular season would've looked 
   like without a particular rule (e.g. "what if the Crabs hadn't had the 
   fourth strike in Season 13")
