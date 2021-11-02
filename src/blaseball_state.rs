@@ -1,52 +1,52 @@
-use std::collections::{HashMap, HashSet};
+use im;
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
-use serde_json::Value;
-use serde_json::value as json;
+use serde_json as json;
 use crate::chronicler;
 
-struct Uuid(String);
+pub struct Uuid(String);
 
-type RecordSet = HashSet<Record>;
-
-struct Event {
-    // TODO
+pub enum Event {
+    Start,
+    FeedEvent, // TODO
 }
 
-struct BlaseballState {
-    predecessor: Option<Rc<BlaseballState>>,
-    from_event: Option<Rc<Event>>,
-    sim: String,
-    players: RecordSet,
-    teams: RecordSet,
+pub struct BlaseballState {
+    pub predecessor: Option<Rc<BlaseballState>>,
+    pub from_event: Rc<Event>,
+    pub data: im::HashMap<&'static str, EntitySet>,
 }
 
-type PropertySet = HashSet<Property>;
+// The top levels of the state need to be handled directly, because they're separate objects in
+// Chron.
+pub type EntitySet = im::HashMap<Uuid, Value>;
 
-struct Record {
-    id: Uuid,
-    properties: PropertySet,
+pub enum Value {
+    Object(im::HashMap<String, Value>),
+    Array(im::Vector<Value>),
+    Value(Rc<TrackedValue>),
 }
 
-struct Property {
-    name: String,
-    predecessor: Option<Rc<Property>>,
-    value: PropertyValue,
+pub struct TrackedValue {
+    pub predecessor: Option<Rc<TrackedValue>>,
+    pub value: PropertyValue,
 }
 
-enum PropertyValue {
+pub enum PropertyValue {
     Known(KnownValue),
-    Unknown(UnknownValue)
+    Unknown(UnknownValue),
 }
 
-enum KnownValue {
+pub enum KnownValue {
+    Null,
+    Bool(bool),
     Int(i64),
     Double(f64),
     String(String),
     Deleted,
 }
 
-enum UnknownValue {
+pub enum UnknownValue {
     IntRange {
         lower: i64,
         upper: i64,
@@ -57,85 +57,78 @@ enum UnknownValue {
     },
 }
 
-impl Hash for Record {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.id.hash(state)
-    }
-}
-
-impl PartialEq<Self> for Record {
-    fn eq(&self, other: &Self) -> bool {
-        self.id.0.eq(&other.id.0)
-    }
-}
-
-impl Eq for Record {
-
-}
-
-impl Hash for Property {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.name.hash(state)
-    }
-}
-
-impl PartialEq<Self> for Property {
-    fn eq(&self, other: &Self) -> bool {
-        self.name.eq(&other.name)
-    }
-}
-
-impl Eq for Property {
-
-}
-
 impl Hash for Uuid {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.0.hash(state)
     }
 }
 
-impl BlaseballState {
-    pub fn from_chron_at_time(sim: String, at_time: &'static str) -> BlaseballState {
-        BlaseballState {
-            predecessor: None,
-            from_event: None,
-            players: records_from_chron_at_time(&sim, "player", at_time),
-            teams: records_from_chron_at_time(&sim, "team", at_time),
-            sim: sim.into(),
+impl Clone for Uuid {
+    fn clone(&self) -> Self {
+        Uuid(self.0.clone())
+    }
+}
+
+impl PartialEq<Self> for Uuid {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.eq(&other.0)
+    }
+}
+
+impl Eq for Uuid {
+
+}
+
+impl Clone for Value {
+    fn clone(&self) -> Self {
+        match self {
+            Value::Object(o) => Value::Object(o.clone()),
+            Value::Array(a) => Value::Array(a.clone()),
+            Value::Value(v) => Value::Value(v.clone()),
         }
     }
 }
 
-fn records_from_chron_at_time(_sim: &str, entity_type: &'static str, at_time: &'static str) -> RecordSet {
-    chronicler::entities(entity_type, at_time).into_iter()
-        .map(|item| Record{
-            id: Uuid(item.entity_id),
-            properties: properties_from_json(item.data)
-        })
-        .collect()
-}
-
-fn properties_from_json(data: HashMap<String, json::Value>) -> PropertySet {
-    data.into_iter()
-        .map(|(key, value)| Property{
-            name: key,
+impl BlaseballState {
+    pub fn from_chron_at_time(at_time: &'static str) -> BlaseballState {
+        BlaseballState {
             predecessor: None,
-            value: value_from_json(value)
-        })
+            from_event: Rc::new(Event::Start),
+            data: im::hashmap! {
+                "player" => records_from_chron_at_time("player", at_time),
+                "team" => records_from_chron_at_time("team", at_time),
+            },
+        }
+    }
+}
+
+fn records_from_chron_at_time(entity_type: &'static str, at_time: &'static str) -> EntitySet {
+    chronicler::entities(entity_type, at_time).into_iter()
+        .map(|item| (Uuid(item.entity_id), node_from_json(item.data)))
         .collect()
 }
 
-fn value_from_json(value: json::Value) -> PropertyValue {
+fn node_from_json(value: json::Value) -> Value {
     match value {
-        json::Value::Null => panic!("Unexpected null"),
-        json::Value::Bool(_) => panic!("Unexpected bool"),
+        json::Value::Null => root_property(KnownValue::Null),
+        json::Value::Bool(b) => root_property(KnownValue::Bool(b)),
         json::Value::Number(n) => match n.as_i64() {
-            Some(i) => PropertyValue::Known(KnownValue::Int(i)),
-            None => PropertyValue::Known(KnownValue::Double(n.as_f64().unwrap()))
+            Some(i) => root_property(KnownValue::Int(i)),
+            None => root_property(KnownValue::Double(n.as_f64().unwrap()))
         },
-        Value::String(s) => PropertyValue::Known(KnownValue::String(s)),
-        Value::Array(_) => panic!("Unexpected array"),
-        Value::Object(_) => panic!("Unexpected object"),
+        json::Value::String(s) => root_property(KnownValue::String(s)),
+        json::Value::Array(arr) => Value::Array(
+            arr.into_iter().map(|item| node_from_json(item)).collect()
+        ),
+        json::Value::Object(obj) => Value::Object(
+            obj.into_iter().map(|(key, item)| (key, node_from_json(item))).collect()
+        ),
     }
+}
+
+fn root_property(value: KnownValue) -> Value {
+    Value::Value(Rc::new(TrackedValue {
+        predecessor: None,
+        value: PropertyValue::Known(value),
+    }))
 }

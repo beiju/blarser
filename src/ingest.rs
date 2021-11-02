@@ -9,6 +9,7 @@ use crate::chronicler_schema::ChroniclerItem;
 use crate::eventually;
 use crate::eventually_schema::EventuallyEvent;
 use crate::ingest::IngestObject::{FeedEvent, ChronPlayerUpdate, ChronTeamUpdate};
+use crate::blaseball_state::BlaseballState;
 
 const EXPANSION_ERA_START: &str = "2021-03-01T00:00:00Z";
 
@@ -19,27 +20,33 @@ pub enum IngestObject {
 }
 
 impl IngestObject {
-    fn date(&self) -> DateTime<Utc> {
-        match self {
-            FeedEvent(e) => e.created,
-            ChronPlayerUpdate(u) => u.valid_from,
-            ChronTeamUpdate(u) => u.valid_from,
-        }
-    }
+    // fn date(&self) -> DateTime<Utc> {
+    //     match self {
+    //         FeedEvent(e) => e.created,
+    //         ChronPlayerUpdate(u) => u.valid_from,
+    //         ChronTeamUpdate(u) => u.valid_from,
+    //     }
+    // }
 }
 
-pub fn ingest() -> Result<(), impl Error> {
-    let recv = merged_feed_and_chron();
+pub fn ingest() -> Result<(), Box<dyn Error>> {
+    let latest_state = BlaseballState::from_chron_at_time(EXPANSION_ERA_START);
 
-    loop {
-        match recv.recv() {
-            Ok(FeedEvent(_)) => println!("Event"),
-            Ok(ChronPlayerUpdate(_)) => println!("Players"),
-            Ok(ChronTeamUpdate(_)) => println!("Teams"),
-            Err(e) => return Err(e),
-        }
-    };
+    for (name, values) in latest_state.data.into_iter() {
+        println!("Endpoint {} had {} values", name, values.len());
+    }
 
+    // let recv = merged_feed_and_chron();
+    //
+    // loop {
+    //     match recv.recv() {
+    //         Ok(FeedEvent(_)) => println!("Event"),
+    //         Ok(ChronPlayerUpdate(_)) => println!("Players"),
+    //         Ok(ChronTeamUpdate(_)) => println!("Teams"),
+    //         Err(e) => return Err(e),
+    //     }
+    // };
+    Ok(())
 }
 
 pub fn merged_feed_and_chron() -> mpsc::Receiver<IngestObject> {
@@ -63,10 +70,10 @@ fn ingest_thread(sender: mpsc::SyncSender<IngestObject>) -> () {
         &mut teams_iter as &mut dyn Iterator<Item=IngestObject>,
     ];
 
-    let sources_merged = sources.into_iter()
-        .kmerge_by(|a, b| a.date() < b.date());
-
-    for item in sources_merged {
-        sender.send(item);
-    }
+    // let sources_merged = sources.into_iter()
+    //     .kmerge_by(|a, b| a.date() < b.date());
+    //
+    // for item in sources_merged {
+    //     sender.send(item);
+    // }
 }
