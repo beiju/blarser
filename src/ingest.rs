@@ -1,18 +1,31 @@
 use std::error::Error;
 use std::sync::mpsc;
 use std::thread;
+use chrono::{DateTime, Utc};
+use itertools::Itertools;
 
 use crate::chronicler;
 use crate::chronicler_schema::ChroniclerItem;
 use crate::eventually;
 use crate::eventually_schema::EventuallyEvent;
+use crate::ingest::IngestObject::{FeedEvent, ChronPlayerUpdate, ChronTeamUpdate};
 
 const EXPANSION_ERA_START: &str = "2021-03-01T00:00:00Z";
 
 pub enum IngestObject {
-    EventuallyEvent(EventuallyEvent),
-    PlayersUpdate(ChroniclerItem),
-    TeamsUpdate(ChroniclerItem),
+    FeedEvent(EventuallyEvent),
+    ChronPlayerUpdate(ChroniclerItem),
+    ChronTeamUpdate(ChroniclerItem),
+}
+
+impl IngestObject {
+    fn date(&self) -> DateTime<Utc> {
+        match self {
+            FeedEvent(e) => e.created,
+            ChronPlayerUpdate(u) => u.valid_from,
+            ChronTeamUpdate(u) => u.valid_from,
+        }
+    }
 }
 
 pub fn ingest() -> Result<(), impl Error> {
@@ -20,9 +33,9 @@ pub fn ingest() -> Result<(), impl Error> {
 
     loop {
         match recv.recv() {
-            Ok(IngestObject::EventuallyEvent(_)) => println!("Event"),
-            Ok(IngestObject::PlayersUpdate(_)) => println!("Players"),
-            Ok(IngestObject::TeamsUpdate(_)) => println!("Teams"),
+            Ok(FeedEvent(_)) => println!("Event"),
+            Ok(ChronPlayerUpdate(_)) => println!("Players"),
+            Ok(ChronTeamUpdate(_)) => println!("Teams"),
             Err(e) => return Err(e),
         }
     };
@@ -40,66 +53,20 @@ fn ingest_thread(sender: mpsc::SyncSender<IngestObject>) -> () {
     let players_recv = chronicler::versions("player", EXPANSION_ERA_START);
     let teams_recv = chronicler::versions("team", EXPANSION_ERA_START);
 
-    let mut next_event = Some(events_recv.recv().unwrap());
-    let mut next_player = Some(players_recv.recv().unwrap());
-    let mut next_team = Some(teams_recv.recv().unwrap());
+    // TODO Can this be less let-mut-y
+    let mut events_iter = events_recv.into_iter().map(|event| IngestObject::FeedEvent(event));
+    let mut players_iter = players_recv.into_iter().map(|update| IngestObject::ChronPlayerUpdate(update));
+    let mut teams_iter = teams_recv.into_iter().map(|update| IngestObject::ChronTeamUpdate(update));
+    let sources = vec![
+        &mut events_iter as &mut dyn Iterator<Item=IngestObject>,
+        &mut players_iter as &mut dyn Iterator<Item=IngestObject>,
+        &mut teams_iter as &mut dyn Iterator<Item=IngestObject>,
+    ];
 
-    // what the hell have i done
-    loop {
-        if let Some(ref event) = next_event {
-            if let Some(ref player) = next_player {
-                if let Some(ref team) = next_team {
-                    if event.created < player.valid_from && event.created < player.valid_from {
-                        sender.send(IngestObject::EventuallyEvent(next_event.unwrap())).unwrap();
-                        next_event = Some(events_recv.recv().unwrap());
-                    } else if player.valid_from < event.created && player.valid_from < team.valid_from {
-                        sender.send(IngestObject::PlayersUpdate(next_player.unwrap())).unwrap();
-                        next_player = Some(players_recv.recv().unwrap());
-                    } else if team.valid_from < event.created && team.valid_from < player.valid_from {
-                        sender.send(IngestObject::TeamsUpdate(next_team.unwrap())).unwrap();
-                        next_team = Some(teams_recv.recv().unwrap());
-                    } else {
-                        panic!("Those options should have been exhaustive");
-                    }
-                } else {
-                    if event.created < player.valid_from {
-                        sender.send(IngestObject::EventuallyEvent(next_event.unwrap())).unwrap();
-                        next_event = Some(events_recv.recv().unwrap());
-                    } else {
-                        sender.send(IngestObject::PlayersUpdate(next_player.unwrap())).unwrap();
-                        next_player = Some(players_recv.recv().unwrap());
-                    }
-                }
-            } else if let Some(ref team) = next_team {
-                if event.created < team.valid_from {
-                    sender.send(IngestObject::EventuallyEvent(next_event.unwrap())).unwrap();
-                    next_event = Some(events_recv.recv().unwrap());
-                } else {
-                    sender.send(IngestObject::TeamsUpdate(next_team.unwrap())).unwrap();
-                    next_team = Some(teams_recv.recv().unwrap());
-                }
-            } else {
-                sender.send(IngestObject::EventuallyEvent(next_event.unwrap())).unwrap();
-                next_event = Some(events_recv.recv().unwrap());
-            }
-        } else if let Some(ref player) = next_player {
-            if let Some(ref team) = next_team {
-                if player.valid_from < team.valid_from {
-                    sender.send(IngestObject::PlayersUpdate(next_player.unwrap())).unwrap();
-                    next_player = Some(players_recv.recv().unwrap());
-                } else {
-                    sender.send(IngestObject::TeamsUpdate(next_team.unwrap())).unwrap();
-                    next_team = Some(teams_recv.recv().unwrap());
-                }
-            } else {
-                sender.send(IngestObject::PlayersUpdate(next_player.unwrap())).unwrap();
-                next_player = Some(players_recv.recv().unwrap());
-            }
-        } else if let Some(_) = next_team {
-            sender.send(IngestObject::TeamsUpdate(next_team.unwrap())).unwrap();
-            next_team = Some(teams_recv.recv().unwrap());
-        } else {
-            return
-        }
+    let sources_merged = sources.into_iter()
+        .kmerge_by(|a, b| a.date() < b.date());
+
+    for item in sources_merged {
+        sender.send(item);
     }
 }
