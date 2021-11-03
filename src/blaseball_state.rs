@@ -5,8 +5,10 @@ use serde_json as json;
 use crate::chronicler;
 use crate::chronicler::ENDPOINT_NAMES;
 
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct Uuid(String);
 
+#[derive(Debug)]
 pub enum Event {
     Start,
     BigDeal {
@@ -14,6 +16,7 @@ pub enum Event {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct BlaseballState {
     pub predecessor: Option<Rc<BlaseballState>>,
     pub from_event: Rc<Event>,
@@ -24,22 +27,26 @@ pub struct BlaseballState {
 // Chron.
 pub type EntitySet = im::HashMap<Uuid, Value>;
 
+#[derive(Debug, Clone)]
 pub enum Value {
     Object(im::HashMap<String, Value>),
     Array(im::Vector<Value>),
     Value(Rc<TrackedValue>),
 }
 
+#[derive(Debug)]
 pub struct TrackedValue {
     pub predecessor: Option<Rc<TrackedValue>>,
     pub value: PropertyValue,
 }
 
+#[derive(Debug)]
 pub enum PropertyValue {
     Known(KnownValue),
     Unknown(UnknownValue),
 }
 
+#[derive(Debug)]
 pub enum KnownValue {
     Null,
     Bool(bool),
@@ -49,6 +56,7 @@ pub enum KnownValue {
     Deleted,
 }
 
+#[derive(Debug)]
 pub enum UnknownValue {
     IntRange {
         lower: i64,
@@ -66,37 +74,6 @@ impl Uuid {
     }
 }
 
-impl Hash for Uuid {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.0.hash(state)
-    }
-}
-
-impl Clone for Uuid {
-    fn clone(&self) -> Self {
-        Uuid(self.0.clone())
-    }
-}
-
-impl PartialEq<Self> for Uuid {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.eq(&other.0)
-    }
-}
-
-impl Eq for Uuid {
-
-}
-
-impl Clone for Value {
-    fn clone(&self) -> Self {
-        match self {
-            Value::Object(o) => Value::Object(o.clone()),
-            Value::Array(a) => Value::Array(a.clone()),
-            Value::Value(v) => Value::Value(v.clone()),
-        }
-    }
-}
 
 impl BlaseballState {
     pub fn from_chron_at_time(at_time: &'static str) -> BlaseballState {
