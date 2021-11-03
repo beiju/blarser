@@ -1,6 +1,7 @@
 use std::sync::mpsc;
 use std::thread;
 use serde::Serialize;
+use bincode;
 
 use crate::chronicler_schema::{ChroniclerItem, ChroniclerResponse};
 
@@ -38,8 +39,9 @@ fn chron_thread(sender: mpsc::SyncSender<Vec<ChroniclerItem>>,
 
     let mut page: Option<String> = None;
 
+    let cache: sled::Db = sled::open("http_cache/chron/".to_owned() + entity_type).unwrap();
+
     loop {
-        println!("Fetching chron page of type {}", entity_type);
         let request = client.get(url).query(&[
             ("type", &entity_type),
             ("at", &start)
@@ -50,9 +52,25 @@ fn chron_thread(sender: mpsc::SyncSender<Vec<ChroniclerItem>>,
             None => request
         };
 
-        let response: ChroniclerResponse = request
-            .send().expect("Chronicler API call failed")
-            .json().expect("Chronicler JSON decode failed");
+        let request = request.build().unwrap();
+
+        let cache_key = request.url().to_string();
+        let response = match cache.get(&cache_key).unwrap() {
+            Some(text) => bincode::deserialize(&text).unwrap(),
+            None => {
+                println!("Fetching chron page of type {} from network", entity_type);
+
+                let text = client
+                    .execute(request).expect("Chronicler API call failed")
+                    .text().expect("Chronicler text decode failed");
+
+                cache.insert(&cache_key, bincode::serialize(&text).unwrap());
+
+                text
+            }
+        };
+
+        let response: ChroniclerResponse = serde_json::from_str(&response).unwrap();
 
         sender.send(response.items).unwrap();
 
