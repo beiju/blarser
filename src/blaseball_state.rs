@@ -3,12 +3,15 @@ use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 use serde_json as json;
 use crate::chronicler;
+use crate::chronicler::ENDPOINT_NAMES;
 
 pub struct Uuid(String);
 
 pub enum Event {
     Start,
-    FeedEvent, // TODO
+    BigDeal {
+        feed_event_id: Uuid,
+    }
 }
 
 pub struct BlaseballState {
@@ -57,6 +60,12 @@ pub enum UnknownValue {
     },
 }
 
+impl Uuid {
+    pub fn new(s: String) -> Uuid {
+        Uuid(s)
+    }
+}
+
 impl Hash for Uuid {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.0.hash(state)
@@ -94,10 +103,9 @@ impl BlaseballState {
         BlaseballState {
             predecessor: None,
             from_event: Rc::new(Event::Start),
-            data: im::hashmap! {
-                "player" => records_from_chron_at_time("player", at_time),
-                "team" => records_from_chron_at_time("team", at_time),
-            },
+            data: ENDPOINT_NAMES.into_iter().map(|endpoint_name|
+                (endpoint_name, records_from_chron_at_time(endpoint_name, at_time))
+            ).collect(),
         }
     }
 }

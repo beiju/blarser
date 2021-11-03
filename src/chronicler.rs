@@ -4,6 +4,18 @@ use serde::Serialize;
 
 use crate::chronicler_schema::{ChroniclerItem, ChroniclerResponse};
 
+pub const ENDPOINT_NAMES: [&str; 51] = [
+    "player", "team", "stream", "idols", "tributes", "temporal", "tiebreakers", "sim",
+    "globalevents", "offseasonsetup", "standings", "season", "league", "subleague", "division",
+    "gamestatsheet", "teamstatsheet", "playerstatsheet", "seasonstatsheet", "bossfight",
+    "offseasonrecap", "bonusresult", "decreeresult", "eventresult", "playoffs", "playoffround",
+    "playoffmatchup", "tournament", "stadium", "renovationprogress", "teamelectionstats", "item",
+    "communitychestprogress", "giftprogress", "shopsetup", "sunsun", "librarystory", "vault",
+    "risingstars", "fuelprogress", "nullified", "fanart", "glossarywords", "library", "sponsordata",
+    "stadiumprefabs", "feedseasonlist", "thebeat", "thebook", "championcallout",
+    "dayssincelastincineration"
+];
+
 pub fn versions(entity_type: &'static str, start: &'static str) -> impl Iterator<Item=ChroniclerItem> {
     // This sends Vec<ChroniclerItem>, rather than just ChroniclerItem, so the sync_channel's
     // internal buffer can be used for prefetching the next page.
