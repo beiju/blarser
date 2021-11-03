@@ -152,3 +152,14 @@ implemented yet.
   code generates the data that will feed the eventual API responses, because 
   the `BlaseballState` object is definitely the wrong form to use for answering 
   queries.
+* Sometimes, one possible resolution of an unknown value is that it didn't 
+  change. In that case, you might not get an update for it. I'm not sure if this
+  will be an issue because the only way I can think of to get a "maybe changed, 
+  maybe not" situation is baserunner advancement, and stream events get picked 
+  up more or less continuously while a game is going. However, if it happens, I 
+  think it's reasonable to handle it by keeping track of last update for each 
+  Chron entity, and when you get an update for id X, look up when the last 
+  update was for that ID and expire all unknown changes from before that time. 
+  The reasoning here is that once you've seen two updates for a given ID, you
+  would definitely have seen any update for another ID. Oh wait, unless the 
+  iteration order isn't stable. Maybe it should be 3 updates.

@@ -103,7 +103,7 @@ impl BlaseballState {
 }
 
 fn records_from_chron_at_time(entity_type: &'static str, at_time: &'static str) -> EntitySet {
-    chronicler::entities(entity_type, at_time).into_iter()
+    chronicler::entities(entity_type, at_time)
         .map(|item| (Uuid(item.entity_id), node_from_json(item.data)))
         .collect()
 }

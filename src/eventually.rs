@@ -3,10 +3,10 @@ use std::thread;
 
 use crate::eventually_schema::{EventuallyResponse, EventuallyEvent};
 
-pub fn events(start: &'static str) -> mpsc::Receiver<EventuallyEvent> {
+pub fn events(start: &'static str) -> impl Iterator<Item=EventuallyEvent> {
     let (sender, receiver) = mpsc::sync_channel(16);
     thread::spawn(move || events_thread(sender, start) );
-    receiver
+    receiver.into_iter()
 }
 
 fn events_thread(sender: mpsc::SyncSender<EventuallyEvent>, start: &str) -> () {

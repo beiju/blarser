@@ -4,26 +4,28 @@ use serde::Serialize;
 
 use crate::chronicler_schema::{ChroniclerItem, ChroniclerResponse};
 
-pub fn versions(entity_type: &'static str, start: &'static str) -> mpsc::Receiver<ChroniclerItem> {
-    let (sender, receiver) = mpsc::sync_channel(16);
+pub fn versions(entity_type: &'static str, start: &'static str) -> impl Iterator<Item=ChroniclerItem> {
+    // This sends Vec<ChroniclerItem>, rather than just ChroniclerItem, so the sync_channel's
+    // internal buffer can be used for prefetching the next page.
+    let (sender, receiver) = mpsc::sync_channel(2);
     thread::spawn(move || chron_thread(sender, "https://api.sibr.dev/chronicler/v2/versions", &[
         ("type", &entity_type),
         ("after", &start)
     ]));
-    receiver
+    receiver.into_iter().flatten()
 }
 
-pub fn entities(entity_type: &'static str, start: &'static str) -> mpsc::Receiver<ChroniclerItem> {
-    let (sender, receiver) = mpsc::sync_channel(16);
+pub fn entities(entity_type: &'static str, start: &'static str) -> impl Iterator<Item=ChroniclerItem> {
+    let (sender, receiver) = mpsc::sync_channel(2);
     thread::spawn(move || chron_thread(sender, "https://api.sibr.dev/chronicler/v2/entities", &[
         ("type", &entity_type),
         ("at", &start)
     ]));
-    receiver
+    receiver.into_iter().flatten()
 }
 
 fn chron_thread<T: Serialize + ?Sized>(
-    sender: mpsc::SyncSender<ChroniclerItem>, url: &'static str, params: &T,
+    sender: mpsc::SyncSender<Vec<ChroniclerItem>>, url: &'static str, params: &T,
 ) -> () {
     let client = reqwest::blocking::Client::new();
 
@@ -37,17 +39,11 @@ fn chron_thread<T: Serialize + ?Sized>(
             None => request
         };
 
-        let response = request
-            .send().expect("Chronicler API call failed");
+        let response: ChroniclerResponse = request
+            .send().expect("Chronicler API call failed")
+            .json().expect("Chronicler JSON decode failed");
 
-        let text = response.text().unwrap();
-        println!("{}", text.chars().into_iter().take(200).collect::<String>());
-
-        let response: ChroniclerResponse = serde_json::from_str(&text).expect("Chronicler JSON decode failed");
-
-        for item in response.items {
-            sender.send(item).unwrap();
-        }
+        sender.send(response.items).unwrap();
 
         page = match response.next_page {
             Some(p) => Some(p),
