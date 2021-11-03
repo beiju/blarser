@@ -13,7 +13,7 @@ pub enum Event {
     Start,
     BigDeal {
         feed_event_id: Uuid,
-    }
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -77,20 +77,23 @@ impl Uuid {
 
 impl BlaseballState {
     pub fn from_chron_at_time(at_time: &'static str) -> BlaseballState {
+        // Start all the endpoints first
+        let endpoints: Vec<_> = ENDPOINT_NAMES.into_iter().map(|endpoint_name|
+            (endpoint_name, records_from_chron_at_time(endpoint_name, at_time))).collect();
+
         BlaseballState {
             predecessor: None,
             from_event: Rc::new(Event::Start),
-            data: ENDPOINT_NAMES.into_iter().map(|endpoint_name|
-                (endpoint_name, records_from_chron_at_time(endpoint_name, at_time))
+            data: endpoints.into_iter().map(|(endpoint_name, endpoint_iter)|
+                (endpoint_name, endpoint_iter.collect())
             ).collect(),
         }
     }
 }
 
-fn records_from_chron_at_time(entity_type: &'static str, at_time: &'static str) -> EntitySet {
+fn records_from_chron_at_time(entity_type: &'static str, at_time: &'static str) -> impl Iterator<Item=(Uuid, Value)> {
     chronicler::entities(entity_type, at_time)
         .map(|item| (Uuid(item.entity_id), node_from_json(item.data)))
-        .collect()
 }
 
 fn node_from_json(value: json::Value) -> Value {

@@ -1,6 +1,6 @@
 use blarser::ingest;
 use std::error::Error;
 
-fn main() -> Result<(), impl Error> {
+fn main() -> () {
     ingest::ingest()
 }

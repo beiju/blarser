@@ -3,7 +3,7 @@ use serde::Deserialize;
 use serde_repr::Deserialize_repr;
 
 #[derive(Deserialize)]
-pub struct EventuallyResponse(Vec<EventuallyEvent>);
+pub struct EventuallyResponse(pub(crate) Vec<EventuallyEvent>);
 
 impl EventuallyResponse {
     pub(crate) fn len(&self) -> usize {
