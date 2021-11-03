@@ -1,6 +1,5 @@
 use std::sync::mpsc;
 use std::thread;
-use serde::Serialize;
 use bincode;
 
 use crate::chronicler_schema::{ChroniclerItem, ChroniclerResponse};
@@ -64,7 +63,7 @@ fn chron_thread(sender: mpsc::SyncSender<Vec<ChroniclerItem>>,
                     .execute(request).expect("Chronicler API call failed")
                     .text().expect("Chronicler text decode failed");
 
-                cache.insert(&cache_key, bincode::serialize(&text).unwrap());
+                cache.insert(&cache_key, bincode::serialize(&text).unwrap()).unwrap();
 
                 text
             }

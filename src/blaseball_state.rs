@@ -1,9 +1,8 @@
 use im;
-use std::hash::{Hash, Hasher};
+use std::hash::Hash;
 use std::rc::Rc;
 use serde_json as json;
 use crate::chronicler;
-use crate::chronicler::ENDPOINT_NAMES;
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct Uuid(String);
@@ -78,7 +77,7 @@ impl Uuid {
 impl BlaseballState {
     pub fn from_chron_at_time(at_time: &'static str) -> BlaseballState {
         // Start all the endpoints first
-        let endpoints: Vec<_> = ENDPOINT_NAMES.into_iter().map(|endpoint_name|
+        let endpoints: Vec<_> = chronicler::ENDPOINT_NAMES.into_iter().map(|endpoint_name|
             (endpoint_name, records_from_chron_at_time(endpoint_name, at_time))).collect();
 
         BlaseballState {

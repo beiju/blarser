@@ -41,7 +41,7 @@ fn events_thread(sender: mpsc::SyncSender<Vec<EventuallyEvent>>, start: &str) ->
                     .execute(request).expect("Eventually API call failed")
                     .text().unwrap();
 
-                cache.insert(&cache_key, bincode::serialize(&text).unwrap());
+                cache.insert(&cache_key, bincode::serialize(&text).unwrap()).unwrap();
 
                 text
             }
