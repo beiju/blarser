@@ -51,8 +51,15 @@ fn events_thread(sender: mpsc::SyncSender<Vec<EventuallyEvent>>, start: &str) ->
 
 
         let len = response.len();
-        sender.send(response.0).unwrap();
 
+
+        match sender.send(response.0) {
+            Ok(_) => { },
+            Err(err) => {
+                println!("Exiting eventually thread due to {:?}", err);
+                return;
+            }
+        }
         if len < PAGE_SIZE {
             break;
         }

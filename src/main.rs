@@ -1,5 +1,7 @@
 use blarser::ingest;
+use anyhow::Result;
 
-fn main() -> () {
-    ingest::ingest()
+fn main() -> Result<()> {
+    ingest::ingest()?;
+    Ok(())
 }

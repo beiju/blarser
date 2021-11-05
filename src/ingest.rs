@@ -1,27 +1,56 @@
+use std::io::{self, Write};
 use std::rc::Rc;
 use itertools::Itertools;
+use anyhow::{Context, Error, Result};
+use console::style;
 
 use crate::chronicler;
 use crate::eventually;
 use crate::blaseball_state::BlaseballState;
-use crate::parse;
-use crate::parse::{IngestEvent, IngestObject};
+use crate::parse::{self, IngestEvent, IngestObject};
 
 const EXPANSION_ERA_START: &str = "2021-03-01T00:00:00Z";
 
-pub fn ingest() -> () {
+pub fn ingest() -> Result<Rc<BlaseballState>> {
     println!("Starting ingest");
-    let mut latest_state = Rc::new(BlaseballState::from_chron_at_time(EXPANSION_ERA_START));
+    let start_state = Rc::new(BlaseballState::from_chron_at_time(EXPANSION_ERA_START));
     println!("Got initial state");
 
-    for object in merged_feed_and_chron() {
-        match object {
-            IngestObject::Event(event) => {
-                latest_state = parse::apply_event(latest_state, event)
+    let (final_state, stored_error) = merged_feed_and_chron()
+        .try_fold((start_state, None), |(latest_state, mut stored_error), object| {
+            match object {
+                IngestObject::Event(event) => {
+                    Ok((parse::apply_event(latest_state, event), None))
+                }
+                IngestObject::Update { endpoint, item } => {
+                    let res = parse::apply_update(&latest_state, endpoint, item.entity_id, item.data)
+                        .with_context(|| format!("Failed to apply {} update from {} ({})",
+                                                 &endpoint,
+                                                 item.valid_from,
+                                                 item.valid_from.to_rfc2822()));
+
+                    match res {
+                        Ok(()) => {}
+                        Err(e) => {
+                            // I would print to stderr, but CLion has ordering problems
+                            // TODO Use a more robust logging solution
+                            println!("{}", style(format!("{:#}", e)).red());
+                            stored_error = match stored_error {
+                                None => Some((e, 1)),
+                                Some((stored_e, count)) if count < 25 => Some((stored_e, count + 1)),
+                                Some((stored_e, _)) => return Err(stored_e),
+                            }
+                        }
+                    }
+                    Ok((latest_state, stored_error))
+                }
             }
-            IngestObject::Update { endpoint, .. } => println!("Chron update: {}", endpoint),
-        }
-    };
+        })?;
+
+    match stored_error {
+        None => Ok(final_state),
+        Some((e, _)) => Err(e)
+    }
 }
 
 
