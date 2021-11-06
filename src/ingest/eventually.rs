@@ -2,7 +2,7 @@ use std::sync::mpsc;
 use std::thread;
 use log::{debug, warn};
 
-use crate::eventually_schema::{EventuallyResponse, EventuallyEvent};
+use crate::ingest::eventually_schema::{EventuallyResponse, EventuallyEvent};
 
 pub fn events(start: &'static str) -> impl Iterator<Item=EventuallyEvent> {
     let (sender, receiver) = mpsc::sync_channel(2);

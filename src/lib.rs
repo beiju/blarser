@@ -1,7 +1,4 @@
-pub mod ingest;
-mod eventually_schema;
-mod chronicler;
-mod chronicler_schema;
-mod eventually;
+pub mod process;
+mod ingest;
 mod blaseball_state;
 mod parse;

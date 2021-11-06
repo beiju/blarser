@@ -2,7 +2,7 @@ use im;
 use std::hash::Hash;
 use std::rc::Rc;
 use serde_json as json;
-use crate::chronicler;
+use crate::ingest::chronicler;
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct Uuid(String);

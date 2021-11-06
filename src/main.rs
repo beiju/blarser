@@ -1,4 +1,3 @@
-use blarser::ingest;
 use anyhow::Result;
 
 fn main() -> Result<()> {
@@ -6,6 +5,6 @@ fn main() -> Result<()> {
         .target(pretty_env_logger::env_logger::Target::Stdout)
         .init();
 
-    ingest::ingest()?;
+    blarser::process::run()?;
     Ok(())
 }

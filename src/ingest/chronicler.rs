@@ -3,7 +3,7 @@ use std::thread;
 use bincode;
 use log::{debug, warn};
 
-use crate::chronicler_schema::{ChroniclerItem, ChroniclerResponse};
+use crate::ingest::chronicler_schema::{ChroniclerItem, ChroniclerResponse};
 
 pub const ENDPOINT_NAMES: [&str; 44] = [
     "player", "team", "temporal", "tiebreakers", "sim",
