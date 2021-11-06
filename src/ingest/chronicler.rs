@@ -26,7 +26,7 @@ impl IngestItem for ChronUpdate {
         self.item.valid_from
     }
 
-    fn apply(&self, state: Rc<BlaseballState>) -> Result<Rc<BlaseballState>, IngestError> {
+    fn apply(self: Box<Self>, state: Rc<BlaseballState>) -> Result<Rc<BlaseballState>, IngestError> {
         info!("Applying chron update for {}", self.endpoint);
 
         Ok(state)

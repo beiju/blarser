@@ -10,5 +10,5 @@ pub enum IngestError {}
 
 pub trait IngestItem {
     fn date(&self) -> DateTime<Utc>;
-    fn apply(&self, state: Rc<BlaseballState>) -> Result<Rc<BlaseballState>, IngestError>;
+    fn apply(self: Box<Self>, state: Rc<BlaseballState>) -> Result<Rc<BlaseballState>, IngestError>;
 }

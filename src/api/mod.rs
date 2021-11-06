@@ -4,4 +4,4 @@ pub mod eventually;
 mod eventually_schema;
 
 pub use chronicler_schema::ChroniclerItem;
-pub use eventually_schema::EventuallyEvent;
+pub use eventually_schema::{EventuallyEvent, EventType};
