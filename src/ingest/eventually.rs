@@ -7,9 +7,11 @@ use crate::blaseball_state::BlaseballState;
 use crate::ingest::IngestItem;
 use crate::ingest::source::IngestError;
 
-pub fn sources(start: &'static str) -> impl Iterator<Item=Box<impl IngestItem>> {
-    eventually::events(start)
-        .map(|event| Box::new(event))
+pub fn sources(start: &'static str) -> Vec<Box<dyn Iterator<Item=Box<dyn IngestItem>>>> {
+    vec![
+        Box::new(eventually::events(start)
+            .map(|event| Box::new(event) as Box<dyn IngestItem>))
+    ]
 }
 
 impl IngestItem for EventuallyEvent {

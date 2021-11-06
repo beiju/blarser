@@ -11,22 +11,6 @@ use crate::ingest::chronicler::ChroniclerItem;
 use crate::ingest::{IngestItem};
 use crate::ingest::chronicler::error::{IngestError, UpdateMismatchError};
 
-pub struct ChronUpdate {
-    endpoint: &'static str,
-    item: ChroniclerItem,
-}
-
-
-impl IngestItem for ChronUpdate {
-    fn date(&self) -> DateTime<Utc> {
-        self.update.valid_from
-    }
-
-    fn apply(&self, state: Rc<BlaseballState>) -> Result<Rc<BlaseballState>, IngestError> {
-        todo!()
-    }
-
-}
 
 pub fn apply_update(state: &Rc<BlaseballState>, endpoint_name: &str, entity_id: String, data: JsonValue) -> Result<(), UpdateMismatchError> {
     debug!("Applying update for {}", endpoint_name);

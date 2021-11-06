@@ -4,16 +4,17 @@ use chrono::SecondsFormat;
 use log::{error, info};
 
 use crate::blaseball_state::BlaseballState;
-use crate::ingest::{eventually, IngestItem, IngestError};
+use crate::ingest::{eventually, chronicler, IngestItem, IngestError};
 
 const EXPANSION_ERA_START: &str = "2021-03-01T00:00:00Z";
 
-fn all_sources(start: &'static str) -> impl Iterator<Item=Box<impl IngestItem>> {
-    vec![
+fn all_sources(start: &'static str) -> impl Iterator<Item=Box<dyn IngestItem>> {
+    [
         eventually::sources(start),
-        // chron_updates::sources(start),
+        chronicler::sources(start),
     ]
         .into_iter()
+        .flatten()
         .kmerge_by(|a, b| a.date() < b.date())
 }
 

@@ -1,8 +1,8 @@
 pub mod ingest;
 // pub mod parse;
 mod source;
-// mod chron_updates;
 mod eventually;
+mod chronicler;
 
 pub use source::{IngestItem, IngestError};
 pub use ingest::run;
