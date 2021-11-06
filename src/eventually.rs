@@ -1,5 +1,6 @@
 use std::sync::mpsc;
 use std::thread;
+use log::{debug, warn};
 
 use crate::eventually_schema::{EventuallyResponse, EventuallyEvent};
 
@@ -35,7 +36,7 @@ fn events_thread(sender: mpsc::SyncSender<Vec<EventuallyEvent>>, start: &str) ->
         let response = match cache.get(&cache_key).unwrap() {
             Some(text) => bincode::deserialize(&text).unwrap(),
             None => {
-                println!("Fetching page of feed events from network");
+                debug!("Fetching page of feed events from network");
 
                 let text = client
                     .execute(request).expect("Eventually API call failed")
@@ -56,7 +57,7 @@ fn events_thread(sender: mpsc::SyncSender<Vec<EventuallyEvent>>, start: &str) ->
         match sender.send(response.0) {
             Ok(_) => { },
             Err(err) => {
-                println!("Exiting eventually thread due to {:?}", err);
+                warn!("Exiting eventually thread due to {:?}", err);
                 return;
             }
         }

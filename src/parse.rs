@@ -1,12 +1,11 @@
-use std::any::Any;
 use std::collections::HashSet;
 use std::rc::Rc;
 use chrono::{DateTime, Utc};
-use itertools::Itertools;
 use thiserror::Error;
 use std::fmt::Write;
 use serde_json::Value as JsonValue;
 use indenter::indented;
+use log::debug;
 use crate::blaseball_state::{BlaseballState, Event, KnownValue, PropertyValue, Uuid, Value as StateValue, Value};
 use crate::chronicler_schema::ChroniclerItem;
 use crate::eventually_schema::{EventType, EventuallyEvent};
@@ -42,7 +41,7 @@ impl std::fmt::Display for BlarseError {
                 write!(f, "Chron update has `{}` where we expected something of type {}", actual_value, expected_type)
             }
             BlarseError::ExtraKeys(pairs) => {
-                write!(f, "Chron update has extra keys:");
+                write!(f, "Chron update has extra keys:")?;
                 for (key, value) in pairs {
                     write!(f, "\n    - {}: `{}`", key, value)?;
                 }
@@ -59,7 +58,7 @@ impl std::fmt::Display for BlarseError {
             }
             BlarseError::NestedError(nested) => {
                 for (key, err) in nested {
-                    write!(f, "\n    - {}: ", key);
+                    write!(f, "\n    - {}: ", key)?;
                     write!(indented(f).with_str("    "), "{}", err)?;
                 }
                 Ok(())
@@ -97,7 +96,7 @@ pub fn apply_event(state: Rc<BlaseballState>, event: IngestEvent) -> Rc<Blasebal
 }
 
 fn apply_feed_event(state: Rc<BlaseballState>, event: EventuallyEvent) -> Rc<BlaseballState> {
-    println!("Applying event: {}", event.description);
+    debug!("Applying event: {}", event.description);
 
     match event.r#type {
         EventType::BigDeal => apply_big_deal(state, event),
@@ -106,7 +105,7 @@ fn apply_feed_event(state: Rc<BlaseballState>, event: EventuallyEvent) -> Rc<Bla
 }
 
 fn apply_big_deal(state: Rc<BlaseballState>, event: EventuallyEvent) -> Rc<BlaseballState> {
-    println!("Applying BigDeal event");
+    debug!("Applying BigDeal event");
 
     Rc::new(BlaseballState {
         predecessor: Some(state.clone()),
@@ -118,7 +117,7 @@ fn apply_big_deal(state: Rc<BlaseballState>, event: EventuallyEvent) -> Rc<Blase
 }
 
 pub fn apply_update(state: &Rc<BlaseballState>, endpoint_name: &str, entity_id: String, data: JsonValue) -> Result<(), BlarseError> {
-    println!("Applying update for {}", endpoint_name);
+    debug!("Applying update for {}", endpoint_name);
     let entity_state = &state.data[endpoint_name][&Uuid::new(entity_id)];
     apply_entity_update(entity_state, &data)
 }
@@ -127,9 +126,9 @@ fn apply_entity_update(entity_state: &StateValue, entity_update: &JsonValue) -> 
     match entity_state {
         Value::Object(state_obj) => {
             let update_obj = entity_update.as_object()
-                .ok_or(BlarseError::TypeMismatch{
+                .ok_or(BlarseError::TypeMismatch {
                     expected_type: "object".to_owned(),
-                    actual_value: format!("{}", entity_update)
+                    actual_value: format!("{}", entity_update),
                 })?;
             let state_keys: HashSet<_> = state_obj.keys().into_iter().collect();
             let update_keys: HashSet<_> = update_obj.keys().into_iter().collect();
@@ -163,19 +162,19 @@ fn apply_entity_update(entity_state: &StateValue, entity_update: &JsonValue) -> 
         }
         Value::Array(state_arr) => {
             let update_arr = entity_update.as_array()
-                .ok_or(BlarseError::TypeMismatch{
+                .ok_or(BlarseError::TypeMismatch {
                     expected_type: "array".to_owned(),
-                    actual_value: format!("{}", entity_update)
+                    actual_value: format!("{}", entity_update),
                 })?;
 
             if state_arr.len() != update_arr.len() {
-                return Err(BlarseError::ArraySizeMismatch{
+                return Err(BlarseError::ArraySizeMismatch {
                     expected: state_arr.len(),
-                    actual: update_arr.len()
+                    actual: update_arr.len(),
                 });
             }
 
-            let nested_errs: Vec<(_, _)>= itertools::enumerate(itertools::zip(state_arr, update_arr))
+            let nested_errs: Vec<(_, _)> = itertools::enumerate(itertools::zip(state_arr, update_arr))
                 .filter_map(|(i, (state_item, update_item))|
                     match apply_entity_update(state_item, update_item) {
                         Ok(_) => None,
@@ -188,49 +187,49 @@ fn apply_entity_update(entity_state: &StateValue, entity_update: &JsonValue) -> 
             } else {
                 Err(BlarseError::NestedError { 0: nested_errs })
             }
-        },
+        }
         Value::Value(state_val) => {
             match &state_val.value {
                 PropertyValue::Known(known) => match known {
                     KnownValue::Null => {
                         entity_update.as_null()
-                            .ok_or(BlarseError::TypeMismatch{
+                            .ok_or(BlarseError::TypeMismatch {
                                 expected_type: "null".to_owned(),
-                                actual_value: format!("{}", entity_update)
+                                actual_value: format!("{}", entity_update),
                             })
-                    },
+                    }
                     KnownValue::Bool(state_bool) => {
                         let entity_bool = entity_update.as_bool()
-                            .ok_or(BlarseError::TypeMismatch{
+                            .ok_or(BlarseError::TypeMismatch {
                                 expected_type: "bool".to_owned(),
-                                actual_value: format!("{}", entity_update)
+                                actual_value: format!("{}", entity_update),
                             })?;
 
                         apply_value(state_bool, &entity_bool)
                     }
                     KnownValue::Int(state_int) => {
                         let entity_int = entity_update.as_i64()
-                            .ok_or(BlarseError::TypeMismatch{
+                            .ok_or(BlarseError::TypeMismatch {
                                 expected_type: "i64".to_owned(),
-                                actual_value: format!("{}", entity_update)
+                                actual_value: format!("{}", entity_update),
                             })?;
 
                         apply_value(state_int, &entity_int)
                     }
                     KnownValue::Double(state_double) => {
                         let entity_double = entity_update.as_f64()
-                            .ok_or(BlarseError::TypeMismatch{
+                            .ok_or(BlarseError::TypeMismatch {
                                 expected_type: "f64".to_owned(),
-                                actual_value: format!("{}", entity_update)
+                                actual_value: format!("{}", entity_update),
                             })?;
 
                         apply_value(state_double, &entity_double)
                     }
                     KnownValue::String(state_str) => {
                         let entity_str = entity_update.as_str()
-                            .ok_or(BlarseError::TypeMismatch{
+                            .ok_or(BlarseError::TypeMismatch {
                                 expected_type: "str".to_owned(),
-                                actual_value: format!("{}", entity_update)
+                                actual_value: format!("{}", entity_update),
                             })?;
 
                         apply_value(&state_str.as_str(), &entity_str)
@@ -245,12 +244,11 @@ fn apply_entity_update(entity_state: &StateValue, entity_update: &JsonValue) -> 
 
 fn apply_value<T: std::fmt::Display + std::cmp::PartialEq>(state_val: &T, entity_val: &T) -> Result<(), BlarseError> {
     if state_val != entity_val {
-        Err(BlarseError::ValueMismatch{
+        Err(BlarseError::ValueMismatch {
             expected: format!("{}", state_val),
             actual: format!("{}", entity_val),
         })
     } else {
         Ok(())
     }
-
 }

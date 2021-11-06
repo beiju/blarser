@@ -1,8 +1,8 @@
-use std::io::{self, Write};
 use std::rc::Rc;
 use itertools::Itertools;
-use anyhow::{Context, Error, Result};
-use console::style;
+use anyhow::{Context, Result};
+use chrono::SecondsFormat;
+use log::{info, error};
 
 use crate::chronicler;
 use crate::eventually;
@@ -12,9 +12,9 @@ use crate::parse::{self, IngestEvent, IngestObject};
 const EXPANSION_ERA_START: &str = "2021-03-01T00:00:00Z";
 
 pub fn ingest() -> Result<Rc<BlaseballState>> {
-    println!("Starting ingest");
+    info!("Starting ingest");
     let start_state = Rc::new(BlaseballState::from_chron_at_time(EXPANSION_ERA_START));
-    println!("Got initial state");
+    info!("Got initial state");
 
     let (final_state, stored_error) = merged_feed_and_chron()
         .try_fold((start_state, None), |(latest_state, mut stored_error), object| {
@@ -26,15 +26,13 @@ pub fn ingest() -> Result<Rc<BlaseballState>> {
                     let res = parse::apply_update(&latest_state, endpoint, item.entity_id, item.data)
                         .with_context(|| format!("Failed to apply {} update from {} ({})",
                                                  &endpoint,
-                                                 item.valid_from,
+                                                 item.valid_from.to_rfc3339_opts(SecondsFormat::Secs, true),
                                                  item.valid_from.to_rfc2822()));
 
                     match res {
                         Ok(()) => {}
                         Err(e) => {
-                            // I would print to stderr, but CLion has ordering problems
-                            // TODO Use a more robust logging solution
-                            println!("{}", style(format!("{:#}", e)).red());
+                            error!("{:#}", e);
                             stored_error = match stored_error {
                                 None => Some((e, 1)),
                                 Some((stored_e, count)) if count < 25 => Some((stored_e, count + 1)),

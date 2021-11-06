@@ -1,6 +1,7 @@
 use std::sync::mpsc;
 use std::thread;
 use bincode;
+use log::{debug, warn};
 
 use crate::chronicler_schema::{ChroniclerItem, ChroniclerResponse};
 
@@ -62,7 +63,7 @@ fn chron_thread(sender: mpsc::SyncSender<Vec<ChroniclerItem>>,
         let response = match cache.get(&cache_key).unwrap() {
             Some(text) => bincode::deserialize(&text).unwrap(),
             None => {
-                println!("Fetching chron {} page of type {} from network", endpoint, entity_type);
+                debug!("Fetching chron {} page of type {} from network", endpoint, entity_type);
 
                 let text = client
                     .execute(request).expect("Chronicler API call failed")
@@ -79,7 +80,7 @@ fn chron_thread(sender: mpsc::SyncSender<Vec<ChroniclerItem>>,
         match sender.send(response.items) {
             Ok(_) => { },
             Err(err) => {
-                println!("Exiting chron {} thread due to {:?}", entity_type, err);
+                warn!("Exiting chron {} thread due to {:?}", entity_type, err);
                 return;
             }
         }
