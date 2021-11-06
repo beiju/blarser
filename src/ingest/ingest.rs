@@ -4,7 +4,8 @@ use chrono::SecondsFormat;
 use log::{error, info};
 
 use crate::blaseball_state::BlaseballState;
-use crate::ingest::{eventually, chronicler, IngestItem, IngestError};
+use crate::ingest::{chronicler, eventually, IngestItem};
+use crate::ingest::error::IngestError;
 
 const EXPANSION_ERA_START: &str = "2021-03-01T00:00:00Z";
 

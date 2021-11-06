@@ -1,6 +1,6 @@
 use indenter::indented;
 use thiserror::Error;
-
+use std::fmt::Write;
 
 #[derive(Error, Debug)]
 pub enum UpdateMismatchError {
@@ -57,4 +57,12 @@ impl std::fmt::Display for UpdateMismatchError {
             }
         }
     }
+}
+
+
+#[derive(Error, Debug)]
+pub enum IngestError {
+    #[error("Update didn't match expected value")]
+    UpdateMismatch(#[from] UpdateMismatchError),
+
 }

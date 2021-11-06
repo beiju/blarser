@@ -3,10 +3,7 @@ use chrono::{DateTime, Utc};
 use thiserror::Error;
 
 use crate::blaseball_state::BlaseballState;
-
-
-#[derive(Error, Debug)]
-pub enum IngestError {}
+use crate::ingest::IngestError;
 
 pub trait IngestItem {
     fn date(&self) -> DateTime<Utc>;

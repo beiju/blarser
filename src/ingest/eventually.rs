@@ -5,7 +5,7 @@ use log::debug;
 use crate::api::{eventually, EventuallyEvent, EventType};
 use crate::blaseball_state as bs;
 use crate::ingest::IngestItem;
-use crate::ingest::source::IngestError;
+use crate::ingest::error::IngestError;
 
 pub fn sources(start: &'static str) -> Vec<Box<dyn Iterator<Item=Box<dyn IngestItem>>>> {
     vec![
