@@ -30,7 +30,8 @@ impl IngestItem for ChronUpdate {
     }
 
     fn apply(self: Box<Self>, state: Rc<bs::BlaseballState>) -> Result<Rc<bs::BlaseballState>, IngestError> {
-        apply_update(&state, self.endpoint, self.item.entity_id, self.item.data)?;
+        apply_update(&state, self.endpoint, self.item.entity_id, self.item.data)
+            .map_err(|e| IngestError::UpdateMismatch {endpoint: self.endpoint, source: e })?;
 
         Ok(state)
     }

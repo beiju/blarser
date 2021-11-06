@@ -5,8 +5,8 @@ use log::{debug, warn};
 
 use crate::api::chronicler_schema::{ChroniclerItem, ChroniclerResponse};
 
-pub const ENDPOINT_NAMES: [&str; 44] = [
-    "player", "team", "temporal", "tiebreakers", "sim",
+pub const ENDPOINT_NAMES: [&str; 43] = [
+    "player", "team", "tiebreakers", "sim",
     "globalevents", "offseasonsetup", "standings", "season", "league", "subleague", "division",
     "bossfight",
     "offseasonrecap", "bonusresult", "decreeresult", "eventresult", "playoffs", "playoffround",
