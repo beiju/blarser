@@ -1,7 +1,6 @@
 use std::rc::Rc;
 use itertools::Itertools;
-use chrono::SecondsFormat;
-use log::{error, info};
+use log::{info};
 
 use crate::blaseball_state::BlaseballState;
 use crate::ingest::{chronicler, eventually, IngestItem};

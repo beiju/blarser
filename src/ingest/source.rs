@@ -1,6 +1,5 @@
 use std::rc::Rc;
 use chrono::{DateTime, Utc};
-use thiserror::Error;
 
 use crate::blaseball_state::BlaseballState;
 use crate::ingest::IngestError;
