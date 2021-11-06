@@ -1,70 +1,24 @@
-use std::sync::mpsc;
-use std::thread;
-use log::{debug, warn};
+use std::rc::Rc;
+use chrono::{DateTime, Utc};
+use log::info;
 
-use crate::ingest::eventually_schema::{EventuallyResponse, EventuallyEvent};
+use crate::api::{eventually, EventuallyEvent};
+use crate::blaseball_state::BlaseballState;
+use crate::ingest::IngestItem;
+use crate::ingest::source::IngestError;
 
-pub fn events(start: &'static str) -> impl Iterator<Item=EventuallyEvent> {
-    let (sender, receiver) = mpsc::sync_channel(2);
-    thread::spawn(move || events_thread(sender, start));
-    receiver.into_iter().flatten()
+pub fn sources(start: &'static str) -> impl Iterator<Item=Box<impl IngestItem>> {
+    eventually::events(start)
+        .map(|event| Box::new(event))
 }
 
-fn events_thread(sender: mpsc::SyncSender<Vec<EventuallyEvent>>, start: &str) -> () {
-    let client = reqwest::blocking::Client::new();
+impl IngestItem for EventuallyEvent {
+    fn date(&self) -> DateTime<Utc> {
+        self.created
+    }
 
-    let mut page = 0;
-    const PAGE_SIZE: usize = 100;
-    let cache: sled::Db = sled::open("http_cache/eventually/").unwrap();
-
-    loop {
-        let request = client.get("https://api.sibr.dev/eventually/v2/events")
-            .query(&[
-                ("limit", PAGE_SIZE),
-                ("offset", page * PAGE_SIZE),
-            ])
-            .query(&[
-                ("sortby", "{created}"),
-                ("sortorder", "asc"),
-                ("after", start)
-            ]);
-
-        let request = request.build().unwrap();
-
-        let cache_key = request.url().to_string();
-
-        let response = match cache.get(&cache_key).unwrap() {
-            Some(text) => bincode::deserialize(&text).unwrap(),
-            None => {
-                debug!("Fetching page of feed events from network");
-
-                let text = client
-                    .execute(request).expect("Eventually API call failed")
-                    .text().unwrap();
-
-                cache.insert(&cache_key, bincode::serialize(&text).unwrap()).unwrap();
-
-                text
-            }
-        };
-
-        let response: EventuallyResponse = serde_json::from_str(&response).unwrap();
-
-
-        let len = response.len();
-
-
-        match sender.send(response.0) {
-            Ok(_) => { },
-            Err(err) => {
-                warn!("Exiting eventually thread due to {:?}", err);
-                return;
-            }
-        }
-        if len < PAGE_SIZE {
-            break;
-        }
-
-        page = page + 1;
+    fn apply(&self, state: Rc<BlaseballState>) -> Result<Rc<BlaseballState>, IngestError> {
+        info!("Applying {}", self.description);
+        Ok(state)
     }
 }

@@ -1,0 +1,70 @@
+use std::sync::mpsc;
+use std::thread;
+use log::{debug, warn};
+
+pub use crate::api::eventually_schema::{EventuallyEvent, EventuallyResponse};
+
+pub fn events(start: &'static str) -> impl Iterator<Item=EventuallyEvent> {
+    let (sender, receiver) = mpsc::sync_channel(2);
+    thread::spawn(move || events_thread(sender, start));
+    receiver.into_iter().flatten()
+}
+
+fn events_thread(sender: mpsc::SyncSender<Vec<EventuallyEvent>>, start: &str) -> () {
+    let client = reqwest::blocking::Client::new();
+
+    let mut page = 0;
+    const PAGE_SIZE: usize = 100;
+    let cache: sled::Db = sled::open("http_cache/eventually/").unwrap();
+
+    loop {
+        let request = client.get("https://api.sibr.dev/eventually/v2/events")
+            .query(&[
+                ("limit", PAGE_SIZE),
+                ("offset", page * PAGE_SIZE),
+            ])
+            .query(&[
+                ("sortby", "{created}"),
+                ("sortorder", "asc"),
+                ("after", start)
+            ]);
+
+        let request = request.build().unwrap();
+
+        let cache_key = request.url().to_string();
+
+        let response = match cache.get(&cache_key).unwrap() {
+            Some(text) => bincode::deserialize(&text).unwrap(),
+            None => {
+                debug!("Fetching page of feed events from network");
+
+                let text = client
+                    .execute(request).expect("Eventually API call failed")
+                    .text().unwrap();
+
+                cache.insert(&cache_key, bincode::serialize(&text).unwrap()).unwrap();
+
+                text
+            }
+        };
+
+        let response: EventuallyResponse = serde_json::from_str(&response).unwrap();
+
+
+        let len = response.len();
+
+
+        match sender.send(response.0) {
+            Ok(_) => { },
+            Err(err) => {
+                warn!("Exiting eventually thread due to {:?}", err);
+                return;
+            }
+        }
+        if len < PAGE_SIZE {
+            break;
+        }
+
+        page = page + 1;
+    }
+}

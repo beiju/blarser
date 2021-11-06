@@ -1,4 +1,3 @@
-pub mod process;
-mod ingest;
+pub mod ingest;
 mod blaseball_state;
-mod parse;
+mod api;

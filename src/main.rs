@@ -5,6 +5,6 @@ fn main() -> Result<()> {
         .target(env_logger::Target::Stdout)
         .init();
 
-    blarser::process::run()?;
+    blarser::ingest::run()?;
     Ok(())
 }

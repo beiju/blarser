@@ -1,90 +1,31 @@
 use std::collections::HashSet;
 use std::rc::Rc;
-use thiserror::Error;
-use std::fmt::Write;
-use serde_json::Value as JsonValue;
+use chrono::{DateTime, Utc};
 use indenter::indented;
+use serde_json::Value as JsonValue;
 use log::debug;
+use thiserror::Error;
 
 use crate::blaseball_state::{BlaseballState, Event, KnownValue, PropertyValue, Uuid, Value as StateValue, Value};
-use crate::ingest::eventually_schema::{EventType, EventuallyEvent};
+use crate::ingest::chronicler::ChroniclerItem;
+use crate::ingest::{IngestItem};
+use crate::ingest::chronicler::error::{IngestError, UpdateMismatchError};
 
-#[derive(Error, Debug)]
-pub enum UpdateMismatchError {
-    TypeMismatch {
-        expected_type: String,
-        actual_value: String,
-    },
-
-    ExtraKeys(Vec<(String, String)>),
-
-    MissingKeys(Vec<String>),
-
-    ArraySizeMismatch {
-        expected: usize,
-        actual: usize,
-    },
-
-    ValueMismatch {
-        expected: String,
-        actual: String,
-    },
-
-    NestedError(Vec<(String, UpdateMismatchError)>),
+pub struct ChronUpdate {
+    endpoint: &'static str,
+    item: ChroniclerItem,
 }
 
-impl std::fmt::Display for UpdateMismatchError {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match self {
-            UpdateMismatchError::TypeMismatch { expected_type, actual_value } => {
-                write!(f, "Chron update has `{}` where we expected something of type {}", actual_value, expected_type)
-            }
-            UpdateMismatchError::ExtraKeys(pairs) => {
-                write!(f, "Chron update has extra keys:")?;
-                for (key, value) in pairs {
-                    write!(f, "\n    - {}: `{}`", key, value)?;
-                }
-                Ok(())
-            }
-            UpdateMismatchError::MissingKeys(keys) => {
-                write!(f, "Chron update is missing keys: {}", keys.join(", "))
-            }
-            UpdateMismatchError::ArraySizeMismatch { actual, expected } => {
-                write!(f, "Chron update has an array of length {} where we expected an array of length {}", actual, expected)
-            }
-            UpdateMismatchError::ValueMismatch { actual, expected } => {
-                write!(f, "Chron update has `{}` where we expected `{}`", actual, expected)
-            }
-            UpdateMismatchError::NestedError(nested) => {
-                for (key, err) in nested {
-                    write!(f, "\n    - {}: ", key)?;
-                    write!(indented(f).with_str("    "), "{}", err)?;
-                }
-                Ok(())
-            }
-        }
+
+impl IngestItem for ChronUpdate {
+    fn date(&self) -> DateTime<Utc> {
+        self.update.valid_from
     }
-}
 
-pub fn apply_feed_event(state: Rc<BlaseballState>, event: EventuallyEvent) -> Rc<BlaseballState> {
-    debug!("Applying event: {}", event.description);
-
-    match event.r#type {
-        EventType::BigDeal => apply_big_deal(state, event),
-        _ => todo!()
+    fn apply(&self, state: Rc<BlaseballState>) -> Result<Rc<BlaseballState>, IngestError> {
+        todo!()
     }
-}
 
-fn apply_big_deal(state: Rc<BlaseballState>, event: EventuallyEvent) -> Rc<BlaseballState> {
-    debug!("Applying BigDeal event");
-
-    Rc::new(BlaseballState {
-        predecessor: Some(state.clone()),
-        from_event: Rc::new(Event::BigDeal {
-            feed_event_id: Uuid::new(event.id)
-        }),
-        data: state.data.clone(),
-    })
 }
 
 pub fn apply_update(state: &Rc<BlaseballState>, endpoint_name: &str, entity_id: String, data: JsonValue) -> Result<(), UpdateMismatchError> {

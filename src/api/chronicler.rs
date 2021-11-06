@@ -3,7 +3,7 @@ use std::thread;
 use bincode;
 use log::{debug, warn};
 
-use crate::ingest::chronicler_schema::{ChroniclerItem, ChroniclerResponse};
+use crate::api::chronicler_schema::{ChroniclerItem, ChroniclerResponse};
 
 pub const ENDPOINT_NAMES: [&str; 44] = [
     "player", "team", "temporal", "tiebreakers", "sim",
@@ -84,8 +84,6 @@ fn chron_thread(sender: mpsc::SyncSender<Vec<ChroniclerItem>>,
                 return;
             }
         }
-
-        // Apparently some endpoints just send the same page
 
         page = match response.next_page {
             Some(p) => Some(p),

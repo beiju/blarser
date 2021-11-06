@@ -2,7 +2,6 @@ use im;
 use std::hash::Hash;
 use std::rc::Rc;
 use serde_json as json;
-use crate::ingest::chronicler;
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct Uuid(String);
@@ -77,7 +76,7 @@ impl Uuid {
 impl BlaseballState {
     pub fn from_chron_at_time(at_time: &'static str) -> BlaseballState {
         // Start all the endpoints first
-        let endpoints: Vec<_> = chronicler::ENDPOINT_NAMES.into_iter().map(|endpoint_name|
+        let endpoints: Vec<_> = crate::api::chronicler::ENDPOINT_NAMES.into_iter().map(|endpoint_name|
             (endpoint_name, records_from_chron_at_time(endpoint_name, at_time))).collect();
 
         BlaseballState {
@@ -91,7 +90,7 @@ impl BlaseballState {
 }
 
 fn records_from_chron_at_time(entity_type: &'static str, at_time: &'static str) -> impl Iterator<Item=(Uuid, Value)> {
-    chronicler::entities(entity_type, at_time)
+    crate::api::chronicler::entities(entity_type, at_time)
         .map(|item| (Uuid(item.entity_id), node_from_json(item.data)))
 }
 
