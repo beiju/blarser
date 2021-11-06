@@ -62,6 +62,6 @@ impl std::fmt::Display for UpdateMismatchError {
 
 #[derive(Error, Debug)]
 pub enum IngestError {
-    #[error("Chron update for {endpoint} didn't match the expected value")]
+    #[error("Chron {endpoint} update didn't match the expected value")]
     UpdateMismatch { endpoint: &'static str, source: UpdateMismatchError },
 }

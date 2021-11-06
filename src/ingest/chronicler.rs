@@ -38,7 +38,7 @@ impl IngestItem for ChronUpdate {
 }
 
 pub fn apply_update(state: &Rc<bs::BlaseballState>, endpoint_name: &str, entity_id: String, data: JsonValue) -> Result<(), UpdateMismatchError> {
-    debug!("Applying update for {}", endpoint_name);
+    debug!("Applying Chron {} update", endpoint_name);
     let entity_state = &state.data[endpoint_name][&bs::Uuid::new(entity_id)];
     apply_entity_update(entity_state, &data)
 }

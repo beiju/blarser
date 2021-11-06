@@ -25,7 +25,7 @@ impl IngestItem for EventuallyEvent {
 }
 
 pub fn apply_feed_event(state: Rc<bs::BlaseballState>, event: Box<EventuallyEvent>) -> Rc<bs::BlaseballState> {
-    debug!("Applying event: {}", event.description);
+    debug!("Applying Feed event: {}", event.description);
 
     match event.r#type {
         EventType::BigDeal => apply_big_deal(state, event),
@@ -33,14 +33,7 @@ pub fn apply_feed_event(state: Rc<bs::BlaseballState>, event: Box<EventuallyEven
     }
 }
 
-fn apply_big_deal(state: Rc<bs::BlaseballState>, event: Box<EventuallyEvent>) -> Rc<bs::BlaseballState> {
-    debug!("Applying BigDeal event");
-
-    Rc::new(bs::BlaseballState {
-        predecessor: Some(state.clone()),
-        from_event: Rc::new(bs::Event::BigDeal {
-            feed_event_id: bs::Uuid::new(event.id)
-        }),
-        data: state.data.clone(),
-    })
+fn apply_big_deal(state: Rc<bs::BlaseballState>, _: Box<EventuallyEvent>) -> Rc<bs::BlaseballState> {
+    debug!("Ignoring BigDeal event");
+    state
 }
