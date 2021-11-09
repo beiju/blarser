@@ -1,6 +1,9 @@
+use std::collections;
 use im;
 use std::hash::Hash;
 use std::rc::Rc;
+use indenter::indented;
+use std::fmt::Write;
 use serde_json as json;
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
@@ -9,6 +12,9 @@ pub struct Uuid(String);
 #[derive(Debug)]
 pub enum Event {
     Start,
+    StructuralUpdate {
+        endpoint: &'static str,
+    },
     BigDeal {
         feed_event_id: Uuid,
     },
@@ -65,6 +71,80 @@ pub enum UnknownValue {
         upper: f64,
     },
 }
+
+pub enum ValueDiff<'a> {
+    KeysRemoved(Vec<String>),
+
+    KeysAdded(collections::HashMap<String, &'a json::Value>),
+
+    ArraySizeChanged {
+        before: usize,
+        after: usize,
+    },
+
+    ValueChanged {
+        before: &'a Value,
+        after: &'a json::Value,
+    },
+
+    ObjectDiff(collections::HashMap<String, ValueDiff<'a>>),
+    ArrayDiff(collections::HashMap<usize, ValueDiff<'a>>),
+}
+
+impl ValueDiff<'_> {
+    pub(crate) fn is_valid_structural_update(&self) -> bool {
+        match self {
+            ValueDiff::KeysRemoved(_) => true,
+            ValueDiff::KeysAdded(_) => true,
+            ValueDiff::ArraySizeChanged { after, .. } => after == &0,
+            ValueDiff::ValueChanged { .. } => false,
+            ValueDiff::ObjectDiff(children) => {
+                children.into_iter().all(|(_, diff)| diff.is_valid_structural_update())
+            }
+            ValueDiff::ArrayDiff(children) => {
+                children.into_iter().all(|(_, diff)| diff.is_valid_structural_update())
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for ValueDiff<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            ValueDiff::KeysRemoved(keys) => {
+                write!(f, "Keys removed: {}", keys.join(", "))
+            }
+            ValueDiff::KeysAdded(pairs) => {
+                write!(f, "Keys added:")?;
+                for (key, value) in pairs {
+                    write!(f, "\n    - {}: `{:?}`", key, value)?;
+                }
+                Ok(())
+            }
+            ValueDiff::ArraySizeChanged { before, after } => {
+                write!(f, "Array size changed from {} to {}", before, after)
+            }
+            ValueDiff::ValueChanged { before, after } => {
+                write!(f, "Value changed from `{:?}` to `{:?}`", before, after)
+            }
+            ValueDiff::ObjectDiff(children) => {
+                    for (key, err) in children {
+                        write!(f, "\n    - {}: ", key)?;
+                        write!(indented(f).with_str("    "), "{}", err)?;
+                    }
+                    Ok(())
+            }
+            ValueDiff::ArrayDiff(children) => {
+                    for (index, err) in children {
+                        write!(f, "\n    - {}: ", index)?;
+                        write!(indented(f).with_str("    "), "{}", err)?;
+                    }
+                    Ok(())
+            }
+        }
+    }
+}
+
 
 impl Uuid {
     pub fn new(s: String) -> Uuid {
