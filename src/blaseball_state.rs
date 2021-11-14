@@ -1,7 +1,7 @@
 use std::collections;
 use im;
 use std::hash::Hash;
-use std::rc::Rc;
+use std::sync::Arc;
 use indenter::indented;
 use std::fmt::Write;
 use serde_json as json;
@@ -42,8 +42,8 @@ pub enum Event {
 
 #[derive(Debug, Clone)]
 pub struct BlaseballState {
-    pub predecessor: Option<Rc<BlaseballState>>,
-    pub from_event: Rc<Event>,
+    pub predecessor: Option<Arc<BlaseballState>>,
+    pub from_event: Arc<Event>,
     pub data: im::HashMap<&'static str, EntitySet>,
 }
 
@@ -55,12 +55,12 @@ pub type EntitySet = im::HashMap<Uuid, Value>;
 pub enum Value {
     Object(im::HashMap<String, Value>),
     Array(im::Vector<Value>),
-    Value(Rc<TrackedValue>),
+    Value(Arc<TrackedValue>),
 }
 
 #[derive(Debug)]
 pub struct TrackedValue {
-    pub predecessor: Option<Rc<TrackedValue>>,
+    pub predecessor: Option<Arc<TrackedValue>>,
     pub value: PropertyValue,
 }
 
@@ -198,7 +198,7 @@ impl BlaseballState {
 
         BlaseballState {
             predecessor: None,
-            from_event: Rc::new(Event::Start),
+            from_event: Arc::new(Event::Start),
             data: endpoints.into_iter().map(|(endpoint_name, endpoint_iter)|
                 (endpoint_name, endpoint_iter.collect())
             ).collect(),
@@ -230,7 +230,7 @@ fn node_from_json(value: json::Value) -> Value {
 }
 
 fn root_property(value: KnownValue) -> Value {
-    Value::Value(Rc::new(TrackedValue {
+    Value::Value(Arc::new(TrackedValue {
         predecessor: None,
         value: PropertyValue::Known(value),
     }))

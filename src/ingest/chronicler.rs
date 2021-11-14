@@ -1,11 +1,12 @@
 use std::collections;
 use std::collections::HashSet;
-use std::rc::Rc;
+use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use log::{debug};
 use serde_json::{Value as JsonValue};
 use dialoguer::Confirm;
 use im::hashmap::Entry;
+use rocket::async_trait;
 
 use crate::api::{chronicler, ChroniclerItem};
 use crate::blaseball_state as bs;
@@ -20,22 +21,23 @@ pub struct ChronUpdate {
     item: ChroniclerItem,
 }
 
-pub fn sources(start: &'static str) -> Vec<Box<dyn Iterator<Item=Box<dyn IngestItem>>>> {
+pub fn sources(start: &'static str) -> Vec<Box<dyn Iterator<Item=Box<dyn IngestItem + Send>> + Send>> {
     chronicler::ENDPOINT_NAMES.into_iter()
         .map(move |endpoint|
             Box::new(chronicler::versions(endpoint, start)
-                .map(|item| Box::new(ChronUpdate { endpoint, item }) as Box<dyn IngestItem>))
-                as Box<dyn Iterator<Item=Box<(dyn IngestItem)>>>
+                .map(|item| Box::new(ChronUpdate { endpoint, item }) as Box<dyn IngestItem + Send>))
+                as Box<dyn Iterator<Item=Box<dyn IngestItem + Send>> + Send>
         )
         .collect()
 }
 
+#[async_trait]
 impl IngestItem for ChronUpdate {
     fn date(&self) -> DateTime<Utc> {
         self.item.valid_from
     }
 
-    fn apply(self: Box<Self>, state: Rc<bs::BlaseballState>) -> Result<Rc<bs::BlaseballState>, IngestError> {
+    async fn apply(self: Box<Self>, state: Arc<bs::BlaseballState>) -> Result<Arc<bs::BlaseballState>, IngestError> {
         let endpoint = self.endpoint;
         let entity_id = bs::Uuid::new(self.item.entity_id.clone());
 
@@ -45,10 +47,10 @@ impl IngestItem for ChronUpdate {
             Err(diff) => {
                 if is_valid_structural_change(endpoint, &diff) {
                     let new_state = structural_change(state.clone(), endpoint, entity_id, diff);
-                    self.apply(new_state)
+                    self.apply(new_state).await
                 } else if is_valid_implicit_change(endpoint, &diff) {
                     let new_state = implicit_change(state.clone(), endpoint, entity_id, diff);
-                    self.apply(new_state)
+                    self.apply(new_state).await
                 } else {
                     Err(IngestError::UpdateMismatch { endpoint, diff: format!("{}", diff) })
                 }
@@ -57,7 +59,7 @@ impl IngestItem for ChronUpdate {
     }
 }
 
-pub fn apply_update<'a>(state: &'a Rc<bs::BlaseballState>, endpoint_name: &str, entity_id: &bs::Uuid, data: &'a JsonValue) -> Result<(), ValueDiff<'a>> {
+pub fn apply_update<'a>(state: &'a Arc<bs::BlaseballState>, endpoint_name: &str, entity_id: &bs::Uuid, data: &'a JsonValue) -> Result<(), ValueDiff<'a>> {
     debug!("Applying Chron {} update", endpoint_name);
     let entity_state = &state.data[endpoint_name][entity_id];
     apply_entity_update(entity_state, &data)
@@ -193,11 +195,11 @@ fn is_valid_structural_change(endpoint: &'static str, diff: &ValueDiff) -> bool 
     false
 }
 
-fn structural_change(state: Rc<BlaseballState>, endpoint: &'static str, entity_id: bs::Uuid, diff: ValueDiff) -> Rc<BlaseballState> {
+fn structural_change(state: Arc<BlaseballState>, endpoint: &'static str, entity_id: bs::Uuid, diff: ValueDiff) -> Arc<BlaseballState> {
     let new_data = apply_diff(&state, endpoint, entity_id, diff);
-    Rc::new(BlaseballState {
+    Arc::new(BlaseballState {
         predecessor: Some(state),
-        from_event: Rc::new(bs::Event::new_structural_change(endpoint)),
+        from_event: Arc::new(bs::Event::new_structural_change(endpoint)),
         data: new_data,
     })
 }
@@ -212,11 +214,11 @@ fn is_valid_implicit_change(endpoint: &'static str, diff: &ValueDiff) -> bool {
     false
 }
 
-fn implicit_change(state: Rc<BlaseballState>, endpoint: &'static str, entity_id: bs::Uuid, diff: ValueDiff) -> Rc<BlaseballState> {
+fn implicit_change(state: Arc<BlaseballState>, endpoint: &'static str, entity_id: bs::Uuid, diff: ValueDiff) -> Arc<BlaseballState> {
     let new_data = apply_diff(&state, endpoint, entity_id, diff);
-    Rc::new(BlaseballState {
+    Arc::new(BlaseballState {
         predecessor: Some(state),
-        from_event: Rc::new(bs::Event::new_implicit_change(endpoint)),
+        from_event: Arc::new(bs::Event::new_implicit_change(endpoint)),
         data: new_data,
     })
 }
@@ -233,7 +235,7 @@ fn apply_diff(state: &BlaseballState, endpoint: &'static str, entity_id: bs::Uui
 }
 
 fn new_primitive_value(val: KnownValue) -> Value {
-    Value::Value(Rc::new(TrackedValue {
+    Value::Value(Arc::new(TrackedValue {
         predecessor: None,
         value: PropertyValue::Known(val),
     }))

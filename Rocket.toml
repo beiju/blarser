@@ -1,0 +1,6 @@
+[default]
+port = 8765
+template_dir = "templates"
+
+[global.databases.blarser]
+url = "postgresql://blarser:blarser@localhost/blarser"
