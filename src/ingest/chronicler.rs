@@ -1,19 +1,19 @@
 use std::collections;
-use std::collections::hash_map::RandomState;
 use std::collections::HashSet;
 use std::rc::Rc;
 use chrono::{DateTime, Utc};
-use log::{debug, error};
+use log::{debug};
 use serde_json::{Value as JsonValue};
 use dialoguer::Confirm;
 use im::hashmap::Entry;
-
 
 use crate::api::{chronicler, ChroniclerItem};
 use crate::blaseball_state as bs;
 use crate::blaseball_state::{BlaseballState, KnownValue, PropertyValue, TrackedValue, Value, ValueDiff};
 use crate::ingest::IngestItem;
 use crate::ingest::error::IngestError;
+
+const IMPLICIT_UPDATE_ALLOWED: [&str; 1] = ["sim"];
 
 pub struct ChronUpdate {
     endpoint: &'static str,
@@ -25,7 +25,7 @@ pub fn sources(start: &'static str) -> Vec<Box<dyn Iterator<Item=Box<dyn IngestI
         .map(move |endpoint|
             Box::new(chronicler::versions(endpoint, start)
                 .map(|item| Box::new(ChronUpdate { endpoint, item }) as Box<dyn IngestItem>))
-            as Box<dyn Iterator<Item = Box<(dyn IngestItem)>>>
+                as Box<dyn Iterator<Item=Box<(dyn IngestItem)>>>
         )
         .collect()
 }
@@ -39,141 +39,21 @@ impl IngestItem for ChronUpdate {
         let endpoint = self.endpoint;
         let entity_id = bs::Uuid::new(self.item.entity_id.clone());
 
+        debug!("Applying update from {}", self.item.valid_from);
         match apply_update(&state, endpoint, &entity_id, &self.item.data) {
             Ok(()) => Ok(state),
-            Err(e) => {
-                try_structural_update(state.clone(), endpoint, entity_id, e)
-                    .and_then(|state| self.apply(state))
-
-            }
-        }
-    }
-}
-
-fn try_structural_update(state: Rc<BlaseballState>, endpoint: &'static str, entity_id: bs::Uuid, diff: ValueDiff) -> Result<Rc<BlaseballState>, IngestError> {
-    if diff.is_valid_structural_update() {
-        let prompt = format!("Change found in {}: {}\nApply this as a structural update?", endpoint, diff);
-        if Confirm::new().with_prompt(prompt).interact()? {
-            return Ok(apply_structural_update(state, endpoint, entity_id, diff))
-        }
-    }
-
-    Err(IngestError::UpdateMismatch {endpoint, diff: format!("{}", diff) })
-}
-
-fn apply_structural_update(state: Rc<BlaseballState>, endpoint: &'static str, entity_id: bs::Uuid, diff: ValueDiff) -> Rc<BlaseballState> {
-    let new_data = state.data.alter(|entity_set|
-        match entity_set {
-            Some(entity_set) => Some(entity_set.alter(|entity| match entity {
-                Some(data) => Some(apply_structural_update_to_value(&data, diff)),
-                None => panic!("Tried to apply structural update to nonexistent object")
-            }, entity_id)),
-            None => panic!("Tried to apply structural update to nonexistent endpoint")
-        }, endpoint);
-
-    Rc::new(BlaseballState {
-        predecessor: Some(state),
-        from_event: Rc::new(bs::Event::StructuralUpdate {endpoint}),
-        data: new_data
-    })
-}
-
-fn new_primitive_value(val: KnownValue) -> Value {
-    Value::Value(Rc::new(TrackedValue {
-        predecessor: None,
-        value: PropertyValue::Known(val),
-    }))
-}
-
-fn apply_structural_update_to_value(value: &Value, diff: ValueDiff) -> Value {
-    match diff {
-        ValueDiff::KeysRemoved(keys) => {
-            if let Value::Object(obj) = value {
-                let mut obj = obj.clone();
-                for key in keys {
-                    obj.remove(&*key);
-                }
-                Value::Object(obj)
-            } else {
-                panic!("Can't apply a KeysRemoved diff to a non-object");
-            }
-        }
-        ValueDiff::KeysAdded(children) => {
-            if let Value::Object(obj) = value {
-                let mut obj = obj.clone();
-                for (key, value) in children {
-                    obj.insert(key, json_to_state_value(value));
-                }
-
-                Value::Object(obj)
-            } else {
-                panic!("Can't apply a KeysRemoved diff to a non-object");
-            }
-        }
-        ValueDiff::ArraySizeChanged { after, .. } => {
-            if let Value::Array(_) = value {
-                if after == 0 {
-                    Value::Array(im::Vector::new())
+            Err(diff) => {
+                if is_valid_structural_change(endpoint, &diff) {
+                    let new_state = structural_change(state.clone(), endpoint, entity_id, diff);
+                    self.apply(new_state)
+                } else if is_valid_implicit_change(endpoint, &diff) {
+                    let new_state = implicit_change(state.clone(), endpoint, entity_id, diff);
+                    self.apply(new_state)
                 } else {
-                    panic!("Can't apply a non-0 ArraySizeChanged diff as a structural update")
+                    Err(IngestError::UpdateMismatch { endpoint, diff: format!("{}", diff) })
                 }
-            } else {
-                panic!("Can't apply an ArraySizeChanged diff to a non-array")
             }
         }
-        ValueDiff::ValueChanged { after, .. } => json_to_state_value(after),
-        ValueDiff::ObjectDiff(changes) => {
-            if let Value::Object(obj) = value {
-                let mut obj = obj.clone();
-                for (key, diff) in changes {
-                    match obj.entry(key.clone()) {
-                        Entry::Occupied(mut entry) => {
-                            entry.insert(apply_structural_update_to_value(entry.get(), diff));
-                        }
-                        Entry::Vacant(_) => panic!("Can't apply diff to nonexistent value {}", key)
-                    }
-                }
-
-                Value::Object(obj)
-            } else {
-                panic!("Can't apply an ObjectDiff to a non-object")
-            }
-        }
-        ValueDiff::ArrayDiff(changes) => {
-            if let Value::Array(arr) = value {
-                let mut arr = arr.clone();
-                for (i, diff) in changes {
-                    arr[i] = apply_structural_update_to_value(&arr[i], diff);
-                }
-
-                Value::Array(arr)
-            } else {
-                panic!("Can't apply an ArrayDiff to a non-array")
-            }
-        }
-    }
-}
-
-fn json_to_state_value(value: &JsonValue) -> Value {
-    match value {
-        JsonValue::Null => new_primitive_value(KnownValue::Null),
-        JsonValue::Bool(b) => new_primitive_value(KnownValue::Bool(*b)),
-        JsonValue::Number(n) => {
-            if let Some(i) = n.as_i64() {
-                new_primitive_value(KnownValue::Int(i))
-            } else if let Some(d) = n.as_f64() {
-                new_primitive_value(KnownValue::Double(d))
-            } else {
-                panic!("Couldn't represent number")
-            }
-        },
-        JsonValue::String(s) => new_primitive_value(KnownValue::String(s.clone())),
-        JsonValue::Array(arr) => Value::Array(
-            arr.into_iter().map(json_to_state_value).collect()
-        ),
-        JsonValue::Object(obj) => Value::Object(
-            obj.into_iter().map(|(key, val)| (key.clone(), json_to_state_value(val))).collect()
-        ),
     }
 }
 
@@ -261,17 +141,16 @@ fn apply_entity_update<'a>(entity_state: &'a bs::Value, entity_update: &'a JsonV
                     }
                     bs::KnownValue::Bool(state_bool) => {
                         entity_update.as_bool()
-                            .filter(|v| state_bool == v )
+                            .filter(|v| state_bool == v)
                             .ok_or(ValueDiff::ValueChanged {
                                 before: entity_state,
                                 after: entity_update,
                             })
                             .map(|_| ())
-
                     }
                     bs::KnownValue::Int(state_int) => {
                         entity_update.as_i64()
-                            .filter(|v| state_int == v )
+                            .filter(|v| state_int == v)
                             .ok_or(ValueDiff::ValueChanged {
                                 before: entity_state,
                                 after: entity_update,
@@ -280,7 +159,7 @@ fn apply_entity_update<'a>(entity_state: &'a bs::Value, entity_update: &'a JsonV
                     }
                     bs::KnownValue::Double(state_double) => {
                         entity_update.as_f64()
-                            .filter(|v| state_double == v )
+                            .filter(|v| state_double == v)
                             .ok_or(ValueDiff::ValueChanged {
                                 before: entity_state,
                                 after: entity_update,
@@ -289,7 +168,7 @@ fn apply_entity_update<'a>(entity_state: &'a bs::Value, entity_update: &'a JsonV
                     }
                     bs::KnownValue::String(state_str) => {
                         entity_update.as_str()
-                            .filter(|v| state_str == v )
+                            .filter(|v| state_str == v)
                             .ok_or(ValueDiff::ValueChanged {
                                 before: entity_state,
                                 after: entity_update,
@@ -301,5 +180,153 @@ fn apply_entity_update<'a>(entity_state: &'a bs::Value, entity_update: &'a JsonV
                 bs::PropertyValue::Unknown(_) => todo!()
             }
         }
+    }
+}
+
+fn is_valid_structural_change(endpoint: &'static str, diff: &ValueDiff) -> bool {
+    debug!("Update didn't match current state; trying as structural change");
+    if diff.is_valid_structural_update() {
+        let prompt = format!("Change found in {}: {}\nApply this as a structural change?", endpoint, diff);
+        return Confirm::new().with_prompt(prompt).interact().unwrap();
+    }
+
+    false
+}
+
+fn structural_change(state: Rc<BlaseballState>, endpoint: &'static str, entity_id: bs::Uuid, diff: ValueDiff) -> Rc<BlaseballState> {
+    let new_data = apply_diff(&state, endpoint, entity_id, diff);
+    Rc::new(BlaseballState {
+        predecessor: Some(state),
+        from_event: Rc::new(bs::Event::new_structural_change(endpoint)),
+        data: new_data,
+    })
+}
+
+fn is_valid_implicit_change(endpoint: &'static str, diff: &ValueDiff) -> bool {
+    debug!("Couldn't apply as structural change; trying as implicit change");
+    if IMPLICIT_UPDATE_ALLOWED.contains(&endpoint) {
+        let prompt = format!("Change found in {}: {}\nApply this as an implicit change?", endpoint, diff);
+        return Confirm::new().with_prompt(prompt).interact().unwrap();
+    }
+
+    false
+}
+
+fn implicit_change(state: Rc<BlaseballState>, endpoint: &'static str, entity_id: bs::Uuid, diff: ValueDiff) -> Rc<BlaseballState> {
+    let new_data = apply_diff(&state, endpoint, entity_id, diff);
+    Rc::new(BlaseballState {
+        predecessor: Some(state),
+        from_event: Rc::new(bs::Event::new_implicit_change(endpoint)),
+        data: new_data,
+    })
+}
+
+fn apply_diff(state: &BlaseballState, endpoint: &'static str, entity_id: bs::Uuid, diff: ValueDiff) -> im::HashMap<&'static str, bs::EntitySet> {
+    state.data.alter(|entity_set|
+                         match entity_set {
+                             Some(entity_set) => Some(entity_set.alter(|entity| match entity {
+                                 Some(data) => Some(apply_diff_to_value(&data, diff)),
+                                 None => panic!("Tried to apply structural update to nonexistent object")
+                             }, entity_id)),
+                             None => panic!("Tried to apply structural update to nonexistent endpoint")
+                         }, endpoint)
+}
+
+fn new_primitive_value(val: KnownValue) -> Value {
+    Value::Value(Rc::new(TrackedValue {
+        predecessor: None,
+        value: PropertyValue::Known(val),
+    }))
+}
+
+fn apply_diff_to_value(value: &Value, diff: ValueDiff) -> Value {
+    match diff {
+        ValueDiff::KeysRemoved(keys) => {
+            if let Value::Object(obj) = value {
+                let mut obj = obj.clone();
+                for key in keys {
+                    obj.remove(&*key);
+                }
+                Value::Object(obj)
+            } else {
+                panic!("Can't apply a KeysRemoved diff to a non-object");
+            }
+        }
+        ValueDiff::KeysAdded(children) => {
+            if let Value::Object(obj) = value {
+                let mut obj = obj.clone();
+                for (key, value) in children {
+                    obj.insert(key, json_to_state_value(value));
+                }
+
+                Value::Object(obj)
+            } else {
+                panic!("Can't apply a KeysRemoved diff to a non-object");
+            }
+        }
+        ValueDiff::ArraySizeChanged { after, .. } => {
+            if let Value::Array(_) = value {
+                if after == 0 {
+                    Value::Array(im::Vector::new())
+                } else {
+                    panic!("Can't apply a non-0 ArraySizeChanged diff as a structural update")
+                }
+            } else {
+                panic!("Can't apply an ArraySizeChanged diff to a non-array")
+            }
+        }
+        ValueDiff::ValueChanged { after, .. } => json_to_state_value(after),
+        ValueDiff::ObjectDiff(changes) => {
+            if let Value::Object(obj) = value {
+                let mut obj = obj.clone();
+                for (key, diff) in changes {
+                    match obj.entry(key.clone()) {
+                        Entry::Occupied(mut entry) => {
+                            entry.insert(apply_diff_to_value(entry.get(), diff));
+                        }
+                        Entry::Vacant(_) => panic!("Can't apply diff to nonexistent value {}", key)
+                    }
+                }
+
+                Value::Object(obj)
+            } else {
+                panic!("Can't apply an ObjectDiff to a non-object")
+            }
+        }
+        ValueDiff::ArrayDiff(changes) => {
+            if let Value::Array(arr) = value {
+                let mut arr = arr.clone();
+                for (i, diff) in changes {
+                    arr[i] = apply_diff_to_value(&arr[i], diff);
+                }
+
+                Value::Array(arr)
+            } else {
+                panic!("Can't apply an ArrayDiff to a non-array")
+            }
+        }
+    }
+}
+
+fn json_to_state_value(value: &JsonValue) -> Value {
+    match value {
+        JsonValue::Null => new_primitive_value(KnownValue::Null),
+        JsonValue::Bool(b) => new_primitive_value(KnownValue::Bool(*b)),
+        JsonValue::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                new_primitive_value(KnownValue::Int(i))
+            } else if let Some(d) = n.as_f64() {
+                new_primitive_value(KnownValue::Double(d))
+            } else {
+                panic!("Couldn't represent number")
+            }
+        }
+        JsonValue::String(s) => new_primitive_value(KnownValue::String(s.clone())),
+        JsonValue::Array(arr) => Value::Array(
+            arr.into_iter().map(json_to_state_value).collect()
+        ),
+        JsonValue::Object(obj) => Value::Object(
+            obj.into_iter().map(|(key, val)| (key.clone(), json_to_state_value(val))).collect()
+        ),
     }
 }

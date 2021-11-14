@@ -5,13 +5,13 @@ use log::{debug, warn};
 
 use crate::api::chronicler_schema::{ChroniclerItem, ChroniclerResponse};
 
-pub const ENDPOINT_NAMES: [&str; 43] = [
+pub const ENDPOINT_NAMES: [&str; 40] = [
     "player", "team", "tiebreakers", "sim",
-    "globalevents", "offseasonsetup", "standings", "season", "league", "subleague", "division",
+    "offseasonsetup", "standings", "season", "league", "subleague", "division",
     "bossfight",
     "offseasonrecap", "bonusresult", "decreeresult", "eventresult", "playoffs", "playoffround",
     "playoffmatchup", "tournament", "stadium", "renovationprogress", "teamelectionstats", "item",
-    "communitychestprogress", "giftprogress", "shopsetup", "sunsun", "librarystory", "vault",
+    "communitychestprogress", "shopsetup", "sunsun", "vault",
     "risingstars", "fuelprogress", "nullified", "fanart", "glossarywords", "library", "sponsordata",
     "stadiumprefabs", "feedseasonlist", "thebeat", "thebook", "championcallout",
     "dayssincelastincineration"

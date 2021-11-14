@@ -138,5 +138,5 @@ pub enum EventType {
     ReverbRotationShuffle = 132,
     // At this point I got bored typing them all and only filled in the ones I encountered
     AddedModFromOtherMod = 146,
-
+    RunsScored = 209,
 }

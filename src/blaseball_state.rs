@@ -9,12 +9,32 @@ use serde_json as json;
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct Uuid(String);
 
+/// Describes the event that caused one BlaseballState to change into another BlaseballState
 #[derive(Debug)]
 pub enum Event {
+    /// A special event that should only be associated with the first BlaseballState. Represents
+    /// Blaseball coming into existence.
     Start,
-    StructuralUpdate {
+
+    /// Represents a change to shape, but not the content, of the data structures. Usually involves
+    /// adding new keys with default values. These are detected automatically and sent to the Alerts
+    /// page for verification.
+    StructuralChange {
         endpoint: &'static str,
+        verified: bool,
+        comment: String,
     },
+
+    /// A change that is part of the regular operation of Blaseball but isn't caused by an in-game
+    /// event. For example, the various fields that change when a new season begins. Only some
+    /// endpoints, e.g. "sim", are allowed to emit ImplicitChanges. These are detected automatically
+    /// and sent to the Alerts page for verification.
+    ImplicitChange {
+        endpoint: &'static str,
+        verified: bool,
+        comment: String,
+    },
+
     BigDeal {
         feed_event_id: Uuid,
     },
@@ -152,6 +172,23 @@ impl Uuid {
     }
 }
 
+impl Event {
+    pub fn new_structural_change(endpoint: &'static str) -> Event {
+        return Event::StructuralChange {
+            endpoint,
+            verified: false,
+            comment: String::new()
+        }
+    }
+
+    pub fn new_implicit_change(endpoint: &'static str) -> Event {
+        return Event::ImplicitChange {
+            endpoint,
+            verified: false,
+            comment: String::new()
+        }
+    }
+}
 
 impl BlaseballState {
     pub fn from_chron_at_time(at_time: &'static str) -> BlaseballState {
