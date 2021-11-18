@@ -22,10 +22,10 @@ fn all_sources(start: &'static str) -> impl Iterator<Item=Result<Box<dyn IngestI
 }
 
 pub async fn run(client: BlarserDbConn) -> Result<Arc<BlaseballState>, IngestError> {
-    let log = IngestLog::new(&client).await?;
+    let log = IngestLog::new(client).await?;
 
     let start_state = Arc::new(BlaseballState::from_chron_at_time(BLARSER_START));
-    log.info(&client, "Got initial state".to_string()).await?;
+    log.info("Got initial state".to_string()).await?;
 
     rocket::futures::stream::iter(all_sources(BLARSER_START))
         .try_fold(start_state, |latest_state, ingest_item| async move {
