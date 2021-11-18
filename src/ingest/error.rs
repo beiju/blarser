@@ -11,4 +11,10 @@ pub enum IngestError {
         #[from]
         source: std::io::Error,
     },
+
+    #[error(transparent)]
+    Database {
+        #[from]
+        source: diesel::result::Error,
+    },
 }

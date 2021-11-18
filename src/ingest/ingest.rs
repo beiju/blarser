@@ -1,9 +1,12 @@
 use std::sync::Arc;
+use chrono::Utc;
 use itertools::Itertools;
 use log::{info};
 use rocket::futures::stream::TryStreamExt;
+use diesel::prelude::*;
 
 use crate::blaseball_state::BlaseballState;
+use crate::db::{BlarserDbConn, NewIngest, Ingest};
 use crate::ingest::{chronicler, eventually, IngestItem};
 use crate::ingest::error::IngestError;
 
@@ -20,8 +23,16 @@ fn all_sources(start: &'static str) -> impl Iterator<Item=Result<Box<dyn IngestI
         .map(|k| Ok(k))
 }
 
-pub async fn run() -> Result<Arc<BlaseballState>, IngestError> {
-    info!("Starting ingest");
+pub async fn run(client: BlarserDbConn) -> Result<Arc<BlaseballState>, IngestError> {
+    use crate::schema::ingests::dsl::*;
+    let this_ingest: Ingest = client.run(move |c|
+        diesel::insert_into(ingests).values(NewIngest {
+            started_at: Utc::now().naive_utc()
+        }).get_result(c)
+    ).await?;
+
+    info!("Starting ingest {} at {}", this_ingest.id, this_ingest.started_at);
+
     let start_state = Arc::new(BlaseballState::from_chron_at_time(BLARSER_START));
     info!("Got initial state");
 
