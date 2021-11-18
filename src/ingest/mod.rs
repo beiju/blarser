@@ -3,6 +3,7 @@ mod source;
 mod eventually;
 mod chronicler;
 mod error;
+mod log;
 
 pub use error::IngestError;
 pub use source::IngestItem;

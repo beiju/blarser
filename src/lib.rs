@@ -7,3 +7,4 @@ mod blaseball_state;
 mod api;
 pub mod db;
 pub mod schema;
+pub mod db_types;
