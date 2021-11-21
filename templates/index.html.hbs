@@ -2,6 +2,12 @@
 
     {{#*inline "content-block"}}
         <p>Started {{ ingest_started_at }}</p>
+
+        <ul>
+            {{#each logs}}
+                <li>{{ message }}</li>
+            {{/each}}
+        </ul>
     {{/inline}}
 
 {{/base}}

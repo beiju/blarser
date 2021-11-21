@@ -15,7 +15,7 @@ pub struct NewIngest {
     pub started_at: NaiveDateTime,
 }
 
-#[derive(Queryable, Serialize)]
+#[derive(Identifiable, Queryable, Serialize)]
 pub struct Ingest {
     pub id: i32,
     pub started_at: NaiveDateTime,
@@ -30,7 +30,7 @@ pub struct NewIngestLog<'a> {
     pub message: &'a str,
 }
 
-#[derive(Identifiable, Queryable, Associations, Debug)]
+#[derive(Identifiable, Queryable, Associations, Debug, Serialize)]
 #[belongs_to(Ingest)]
 pub struct IngestLog {
     pub id: i32,
@@ -47,4 +47,11 @@ pub fn get_latest_ingest(conn: &diesel::PgConnection) -> Result<Option<Ingest>, 
         .limit(1)
         .load(conn)?;
     Ok(latest_ingest.into_iter().nth(0))
+}
+
+pub fn get_logs_for(ingest: &Ingest, conn: &diesel::PgConnection) -> Result<Vec<IngestLog>, diesel::result::Error> {
+    use crate::schema::ingests::dsl::*;
+
+    IngestLog::belonging_to(ingest)
+        .load(conn)
 }
