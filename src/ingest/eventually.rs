@@ -1,12 +1,12 @@
 use std::sync::Arc;
 use chrono::{DateTime, Utc};
-use log::debug;
 use rocket::async_trait;
 
 use crate::api::{eventually, EventuallyEvent, EventType};
 use crate::blaseball_state as bs;
 use crate::ingest::IngestItem;
-use crate::ingest::error::IngestError;
+use crate::ingest::error::IngestResult;
+use crate::ingest::log::IngestLogger;
 
 pub fn sources(start: &'static str) -> Vec<Box<dyn Iterator<Item=Box<dyn IngestItem + Send>> + Send>> {
     vec![
@@ -21,21 +21,21 @@ impl IngestItem for EventuallyEvent {
         self.created
     }
 
-    async fn apply(self: Box<Self>, state: Arc<bs::BlaseballState>) -> Result<Arc<bs::BlaseballState>, IngestError> {
-        Ok(apply_feed_event(state, self))
+    async fn apply(self: Box<Self>, log: &IngestLogger, state: Arc<bs::BlaseballState>) -> IngestResult {
+        apply_feed_event(state, log, self).await
     }
 }
 
-pub fn apply_feed_event(state: Arc<bs::BlaseballState>, event: Box<EventuallyEvent>) -> Arc<bs::BlaseballState> {
-    debug!("Applying Feed event: {}", event.description);
+pub async fn apply_feed_event(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: Box<EventuallyEvent>) -> IngestResult {
+    log.debug(format!("Applying Feed event: {}", event.description)).await?;
 
     match event.r#type {
-        EventType::BigDeal => apply_big_deal(state, event),
+        EventType::BigDeal => apply_big_deal(state, log, event).await,
         _ => todo!()
     }
 }
 
-fn apply_big_deal(state: Arc<bs::BlaseballState>, _: Box<EventuallyEvent>) -> Arc<bs::BlaseballState> {
-    debug!("Ignoring BigDeal event");
-    state
+async fn apply_big_deal(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: Box<EventuallyEvent>) -> IngestResult {
+    log.debug("Ignoring BigDeal event".to_string()).await?;
+    Ok(state)
 }

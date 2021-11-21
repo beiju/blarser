@@ -1,4 +1,6 @@
+use std::sync::Arc;
 use thiserror::Error;
+use crate::blaseball_state::BlaseballState;
 
 
 #[derive(Error, Debug)]
@@ -18,3 +20,5 @@ pub enum IngestError {
         source: diesel::result::Error,
     },
 }
+
+pub type IngestResult = Result<Arc<BlaseballState>, IngestError>;

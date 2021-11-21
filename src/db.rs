@@ -50,8 +50,6 @@ pub fn get_latest_ingest(conn: &diesel::PgConnection) -> Result<Option<Ingest>, 
 }
 
 pub fn get_logs_for(ingest: &Ingest, conn: &diesel::PgConnection) -> Result<Vec<IngestLog>, diesel::result::Error> {
-    use crate::schema::ingests::dsl::*;
-
     IngestLog::belonging_to(ingest)
         .load(conn)
 }

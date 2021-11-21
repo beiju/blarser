@@ -13,6 +13,7 @@ use crate::blaseball_state as bs;
 use crate::blaseball_state::{BlaseballState, KnownValue, PropertyValue, TrackedValue, Value, ValueDiff};
 use crate::ingest::IngestItem;
 use crate::ingest::error::IngestError;
+use crate::ingest::log::IngestLogger;
 
 const IMPLICIT_UPDATE_ALLOWED: [&str; 1] = ["sim"];
 
@@ -37,20 +38,20 @@ impl IngestItem for ChronUpdate {
         self.item.valid_from
     }
 
-    async fn apply(self: Box<Self>, state: Arc<bs::BlaseballState>) -> Result<Arc<bs::BlaseballState>, IngestError> {
+    async fn apply(self: Box<Self>, log: &IngestLogger, state: Arc<bs::BlaseballState>) -> Result<Arc<bs::BlaseballState>, IngestError> {
         let endpoint = self.endpoint;
         let entity_id = bs::Uuid::new(self.item.entity_id.clone());
 
-        debug!("Applying update from {}", self.item.valid_from);
-        match apply_update(&state, endpoint, &entity_id, &self.item.data) {
-            Ok(()) => Ok(state),
-            Err(diff) => {
+        log.info(format!("Applying chron update from {}", self.item.valid_from)).await?;
+        match apply_update(&state, log,endpoint, &entity_id, &self.item.data).await? {
+            None => Ok(state),
+            Some(diff) => {
                 if is_valid_structural_change(endpoint, &diff) {
                     let new_state = structural_change(state.clone(), endpoint, entity_id, diff);
-                    self.apply(new_state).await
+                    self.apply(log, new_state).await
                 } else if is_valid_implicit_change(endpoint, &diff) {
                     let new_state = implicit_change(state.clone(), endpoint, entity_id, diff);
-                    self.apply(new_state).await
+                    self.apply(log, new_state).await
                 } else {
                     Err(IngestError::UpdateMismatch { endpoint, diff: format!("{}", diff) })
                 }
@@ -59,10 +60,16 @@ impl IngestItem for ChronUpdate {
     }
 }
 
-pub fn apply_update<'a>(state: &'a Arc<bs::BlaseballState>, endpoint_name: &str, entity_id: &bs::Uuid, data: &'a JsonValue) -> Result<(), ValueDiff<'a>> {
-    debug!("Applying Chron {} update", endpoint_name);
+pub async fn apply_update<'a>(
+    state: &'a Arc<bs::BlaseballState>,
+    log: &IngestLogger,
+    endpoint_name: &str,
+    entity_id: &bs::Uuid,
+    data: &'a JsonValue
+) -> Result<Option<ValueDiff<'a>>, IngestError> {
+    log.debug(format!("Applying Chron {} update", endpoint_name)).await?;
     let entity_state = &state.data[endpoint_name][entity_id];
-    apply_entity_update(entity_state, &data)
+    Ok(apply_entity_update(entity_state, &data).err())
 }
 
 fn apply_entity_update<'a>(entity_state: &'a bs::Value, entity_update: &'a JsonValue) -> Result<(), ValueDiff<'a>> {
