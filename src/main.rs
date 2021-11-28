@@ -2,7 +2,7 @@ use rocket::fairing::AdHoc;
 use rocket_dyn_templates::Template;
 use blarser::ingest::IngestTask;
 use blarser::db::{BlarserDbConn};
-use routes::index;
+use routes::{index, approvals, approve};
 
 mod routes;
 
@@ -10,7 +10,7 @@ mod routes;
 #[rocket::main]
 async fn main() -> Result<(), rocket::Error> {
     rocket::build()
-        .mount("/", rocket::routes![index])
+        .mount("/", rocket::routes![index, approvals, approve])
         .attach(BlarserDbConn::fairing())
         .attach(Template::fairing())
         .manage(IngestTask::new())

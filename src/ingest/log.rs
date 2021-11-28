@@ -49,7 +49,7 @@ impl IngestLogger {
         use crate::schema::ingest_approvals::dsl;
 
         let ingest_id = self.ingest_id.clone();
-        let approval = self.get_approval_from_db(endpoint, entity_id, update_time, ingest_id).await?;
+        let approval = self.get_approval_from_db(endpoint, entity_id, update_time).await?;
 
         if let Some(approval) = approval {
             return Ok(approval)
@@ -71,7 +71,7 @@ impl IngestLogger {
             self.task.register_callback(approval_record.id, sender);
 
             // Check again for soundness
-            match self.get_approval_from_db(endpoint, entity_id, update_time, ingest_id).await? {
+            match self.get_approval_from_db(endpoint, entity_id, update_time).await? {
                 Some(approval) => {
                     self.task.unregister_callback(approval_record.id);
                     return Ok(approval)
@@ -79,17 +79,16 @@ impl IngestLogger {
                 None => {}
             }
 
-            debug!("Waiting on approval for id {}", approval_record.id);
+            info!("Waiting on approval for id {} from ingest {}", approval_record.id, ingest_id);
             receiver.await.unwrap();
         }
     }
 
-    async fn get_approval_from_db(&self, endpoint: &'static str, entity_id: Uuid, update_time: DateTime<Utc>, ingest_id: i32) -> diesel::QueryResult<Option<bool>> {
+    async fn get_approval_from_db(&self, endpoint: &'static str, entity_id: Uuid, update_time: DateTime<Utc>) -> diesel::QueryResult<Option<bool>> {
         use crate::schema::ingest_approvals::dsl;
         let approvals = self.conn.run(move |c|
             dsl::ingest_approvals
                 .select(dsl::approved)
-                .filter(dsl::ingest_id.eq(ingest_id))
                 .filter(dsl::chronicler_entity_type.eq(endpoint))
                 .filter(dsl::chronicler_time.eq(update_time.naive_utc()))
                 .filter(dsl::chronicler_entity_id.eq(entity_id))

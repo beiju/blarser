@@ -51,7 +51,7 @@ pub struct NewIngestApproval<'a> {
     pub message: &'a str,
 }
 
-#[derive(Identifiable, Queryable, Associations, Debug)]
+#[derive(Identifiable, Queryable, Associations, Debug, Serialize)]
 #[belongs_to(Ingest)]
 pub struct IngestApproval {
     pub id: i32,
@@ -77,4 +77,23 @@ pub fn get_latest_ingest(conn: &diesel::PgConnection) -> Result<Option<Ingest>, 
 pub fn get_logs_for(ingest: &Ingest, conn: &diesel::PgConnection) -> Result<Vec<IngestLog>, diesel::result::Error> {
     IngestLog::belonging_to(ingest)
         .load(conn)
+}
+
+pub fn get_pending_approvals_for(ingest: &Ingest, conn: &diesel::PgConnection) -> Result<Vec<IngestApproval>, diesel::result::Error> {
+    use crate::schema::ingest_approvals::dsl::*;
+    ingest_approvals
+        .filter(ingest_id.eq(ingest.id))
+        .filter(approved.is_null())
+        .load(conn)
+}
+
+pub fn set_approval(conn: &diesel::PgConnection, approval_id: i32, message: &str, approved: bool) -> Result<(), diesel::result::Error> {
+    use crate::schema::ingest_approvals::dsl;
+    diesel::update(dsl::ingest_approvals.find(approval_id))
+        .set((
+            dsl::approved.eq(approved),
+            dsl::message.eq(message)
+        ))
+        .execute(conn)?;
+    Ok(())
 }

@@ -21,6 +21,13 @@ impl IngestTask {
     pub fn unregister_callback(&self, approval_id: i32) {
         self.registry.lock().unwrap().remove(&approval_id);
     }
+
+    pub fn notify_callback(&self, approval_id: i32) {
+        let sender = self.registry.lock().unwrap().remove(&approval_id);
+        if let Some(sender) = sender {
+            sender.send(()).unwrap();
+        }
+    }
 }
 
 impl IngestTask {
@@ -31,8 +38,8 @@ impl IngestTask {
     pub fn start(&self, db: BlarserDbConn) {
         let self_clone = self.clone();
         tokio::spawn(async {
-            let log = IngestLogger::new(db, self_clone).await.unwrap();
-            ingest::run(log).await.unwrap();
+                let log = IngestLogger::new(db, self_clone).await.unwrap();
+                ingest::run(log).await.unwrap();
         });
     }
 }

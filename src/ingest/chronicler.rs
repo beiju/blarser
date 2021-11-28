@@ -189,6 +189,7 @@ fn try_implicit_change<'a>(
     async move {
         log.debug("Update didn't match current state; trying as implicit change".to_string()).await?;
         if log.get_approval(endpoint, entity_id, update_time, diff.format()).await? {
+            log.debug("Applying update as implicit change".to_string()).await?;
             return Ok(implicit_change(state, endpoint, entity_id, diff))
         }
 
