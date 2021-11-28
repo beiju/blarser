@@ -4,7 +4,8 @@ mod eventually;
 mod chronicler;
 mod error;
 mod log;
+mod task;
 
 pub use error::IngestError;
 pub use source::IngestItem;
-pub use ingest::run;
+pub use task::IngestTask;

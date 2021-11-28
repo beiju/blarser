@@ -12,7 +12,7 @@ chrono = { version = "0.4.19", features = ["serde"] }
 futures = { version = "0.3.17", features = ["executor"] }
 serde_json = "1.0.68"
 serde_repr = "0.1.7"
-tokio = { version = "1.12.0", features = ["macros"] }
+tokio = { version = "1.12.0", features = ["macros", "sync"] }
 itertools = "0.10.1"
 im = "15.0.0"
 sled = "0.34.7"
@@ -27,8 +27,9 @@ tap = "1.0.1"
 rocket = "0.5.0-rc.1"
 rocket_dyn_templates = { version = "0.1.0-rc.1", features = ["handlebars"] }
 tokio-stream = "0.1.8"
-diesel = { version = "1.4.8", features = ["postgres", "chrono"] }
+diesel = { version = "1.4.8", features = ["postgres", "chrono", "uuidv07"] }
 diesel-derive-enum = { version = "1.1.1", features = ["postgres"] }
+uuid = { version = "0.8.2", features = ["serde"] }
 
 [dependencies.rocket_sync_db_pools]
 version = "0.1.0-rc.1"

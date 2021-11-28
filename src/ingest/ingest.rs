@@ -2,7 +2,6 @@ use std::sync::Arc;
 use itertools::Itertools;
 use rocket::futures::stream::TryStreamExt;
 
-use crate::db::BlarserDbConn;
 use crate::blaseball_state::BlaseballState;
 use crate::ingest::{chronicler, eventually, IngestItem};
 use crate::ingest::error::IngestError;
@@ -21,9 +20,7 @@ fn all_sources(start: &'static str) -> impl Iterator<Item=Result<Box<dyn IngestI
         .map(|k| Ok(k))
 }
 
-pub async fn run(client: BlarserDbConn) -> Result<Arc<BlaseballState>, IngestError> {
-    let log = IngestLogger::new(client).await?;
-
+pub async fn run(log: IngestLogger) -> Result<Arc<BlaseballState>, IngestError> {
     let start_state = Arc::new(BlaseballState::from_chron_at_time(BLARSER_START));
     log.info("Got initial state".to_string()).await?;
 

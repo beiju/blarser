@@ -1,6 +1,6 @@
 use std::sync::Arc;
-use chrono::{DateTime, Utc};
 use rocket::async_trait;
+use chrono::{DateTime, Utc};
 
 use crate::api::{eventually, EventuallyEvent, EventType};
 use crate::blaseball_state as bs;

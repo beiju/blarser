@@ -1,13 +1,10 @@
 use std::collections;
 use im;
-use std::hash::Hash;
+use uuid::Uuid;
 use std::sync::Arc;
 use indenter::indented;
 use std::fmt::Write;
 use serde_json as json;
-
-#[derive(Debug, PartialEq, Eq, Hash, Clone)]
-pub struct Uuid(String);
 
 /// Describes the event that caused one BlaseballState to change into another BlaseballState
 #[derive(Debug)]
@@ -112,19 +109,8 @@ pub enum ValueDiff<'a> {
 }
 
 impl ValueDiff<'_> {
-    pub(crate) fn is_valid_structural_update(&self) -> bool {
-        match self {
-            ValueDiff::KeysRemoved(_) => true,
-            ValueDiff::KeysAdded(_) => true,
-            ValueDiff::ArraySizeChanged { after, .. } => after == &0,
-            ValueDiff::ValueChanged { .. } => false,
-            ValueDiff::ObjectDiff(children) => {
-                children.into_iter().all(|(_, diff)| diff.is_valid_structural_update())
-            }
-            ValueDiff::ArrayDiff(children) => {
-                children.into_iter().all(|(_, diff)| diff.is_valid_structural_update())
-            }
-        }
+    pub fn format(&self) -> String {
+        format!("{}", self)
     }
 }
 
@@ -165,13 +151,6 @@ impl std::fmt::Display for ValueDiff<'_> {
     }
 }
 
-
-impl Uuid {
-    pub fn new(s: String) -> Uuid {
-        Uuid(s)
-    }
-}
-
 impl Event {
     pub fn new_structural_change(endpoint: &'static str) -> Event {
         return Event::StructuralChange {
@@ -208,7 +187,7 @@ impl BlaseballState {
 
 fn records_from_chron_at_time(entity_type: &'static str, at_time: &'static str) -> impl Iterator<Item=(Uuid, Value)> {
     crate::api::chronicler::entities(entity_type, at_time)
-        .map(|item| (Uuid(item.entity_id), node_from_json(item.data)))
+        .map(|item| (item.entity_id, node_from_json(item.data)))
 }
 
 fn node_from_json(value: json::Value) -> Value {

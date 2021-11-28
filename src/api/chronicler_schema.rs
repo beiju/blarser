@@ -1,11 +1,12 @@
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_json::value;
+use uuid::Uuid;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChroniclerItem {
-    pub entity_id: String,
+    pub entity_id: Uuid,
     pub hash: String,
     pub valid_from: DateTime<Utc>,
     pub valid_to: Option<DateTime<Utc>>,

@@ -37,7 +37,32 @@ pub struct IngestLog {
     pub at: NaiveDateTime,
     pub ingest_id: i32,
     pub type_: LogType,
-    pub message: String
+    pub message: String,
+}
+
+#[derive(Insertable)]
+#[table_name = "ingest_approvals"]
+pub struct NewIngestApproval<'a> {
+    pub at: NaiveDateTime,
+    pub ingest_id: i32,
+    pub chronicler_entity_type: &'a str,
+    pub chronicler_time: NaiveDateTime,
+    pub chronicler_entity_id: uuid::Uuid,
+    pub message: &'a str,
+}
+
+#[derive(Identifiable, Queryable, Associations, Debug)]
+#[belongs_to(Ingest)]
+pub struct IngestApproval {
+    pub id: i32,
+    pub at: NaiveDateTime,
+    pub ingest_id: i32,
+    pub chronicler_entity_type: String,
+    pub chronicler_time: NaiveDateTime,
+    pub chronicler_entity_id: uuid::Uuid,
+    pub message: String,
+    pub approved: Option<bool>,
+    pub explanation: Option<String>,
 }
 
 pub fn get_latest_ingest(conn: &diesel::PgConnection) -> Result<Option<Ingest>, diesel::result::Error> {

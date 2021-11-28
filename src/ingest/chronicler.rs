@@ -2,11 +2,10 @@ use std::collections;
 use std::collections::HashSet;
 use std::sync::Arc;
 use chrono::{DateTime, Utc};
-use log::{debug};
 use serde_json::{Value as JsonValue};
-use dialoguer::Confirm;
 use im::hashmap::Entry;
 use rocket::async_trait;
+use uuid::Uuid;
 
 use crate::api::{chronicler, ChroniclerItem};
 use crate::blaseball_state as bs;
@@ -14,8 +13,6 @@ use crate::blaseball_state::{BlaseballState, KnownValue, PropertyValue, TrackedV
 use crate::ingest::IngestItem;
 use crate::ingest::error::IngestError;
 use crate::ingest::log::IngestLogger;
-
-const IMPLICIT_UPDATE_ALLOWED: [&str; 1] = ["sim"];
 
 pub struct ChronUpdate {
     endpoint: &'static str,
@@ -40,22 +37,11 @@ impl IngestItem for ChronUpdate {
 
     async fn apply(self: Box<Self>, log: &IngestLogger, state: Arc<bs::BlaseballState>) -> Result<Arc<bs::BlaseballState>, IngestError> {
         let endpoint = self.endpoint;
-        let entity_id = bs::Uuid::new(self.item.entity_id.clone());
 
         log.info(format!("Applying chron update from {}", self.item.valid_from)).await?;
-        match apply_update(&state, log,endpoint, &entity_id, &self.item.data).await? {
+        match apply_update(&state, log,endpoint, &self.item.entity_id, &self.item.data).await? {
             None => Ok(state),
-            Some(diff) => {
-                if is_valid_structural_change(endpoint, &diff) {
-                    let new_state = structural_change(state.clone(), endpoint, entity_id, diff);
-                    self.apply(log, new_state).await
-                } else if is_valid_implicit_change(endpoint, &diff) {
-                    let new_state = implicit_change(state.clone(), endpoint, entity_id, diff);
-                    self.apply(log, new_state).await
-                } else {
-                    Err(IngestError::UpdateMismatch { endpoint, diff: format!("{}", diff) })
-                }
-            }
+            Some(diff) => try_implicit_change(log, state.clone(), endpoint, self.item.entity_id, self.item.valid_from, diff).await
         }
     }
 }
@@ -64,7 +50,7 @@ pub async fn apply_update<'a>(
     state: &'a Arc<bs::BlaseballState>,
     log: &IngestLogger,
     endpoint_name: &str,
-    entity_id: &bs::Uuid,
+    entity_id: &Uuid,
     data: &'a JsonValue
 ) -> Result<Option<ValueDiff<'a>>, IngestError> {
     log.debug(format!("Applying Chron {} update", endpoint_name)).await?;
@@ -192,36 +178,25 @@ fn apply_entity_update<'a>(entity_state: &'a bs::Value, entity_update: &'a JsonV
     }
 }
 
-fn is_valid_structural_change(endpoint: &'static str, diff: &ValueDiff) -> bool {
-    debug!("Update didn't match current state; trying as structural change");
-    if diff.is_valid_structural_update() {
-        let prompt = format!("Change found in {}: {}\nApply this as a structural change?", endpoint, diff);
-        return Confirm::new().with_prompt(prompt).interact().unwrap();
+fn try_implicit_change<'a>(
+    log: &'a IngestLogger,
+    state: Arc<bs::BlaseballState>,
+    endpoint: &'static str,
+    entity_id: Uuid,
+    update_time: DateTime<Utc>,
+    diff: ValueDiff<'a>
+) -> impl std::future::Future<Output=Result<Arc<bs::BlaseballState>, IngestError>> + 'a {
+    async move {
+        log.debug("Update didn't match current state; trying as implicit change".to_string()).await?;
+        if log.get_approval(endpoint, entity_id, update_time, diff.format()).await? {
+            return Ok(implicit_change(state, endpoint, entity_id, diff))
+        }
+
+        Err(IngestError::UpdateMismatch { endpoint, diff: diff.format() })
     }
-
-    false
 }
 
-fn structural_change(state: Arc<BlaseballState>, endpoint: &'static str, entity_id: bs::Uuid, diff: ValueDiff) -> Arc<BlaseballState> {
-    let new_data = apply_diff(&state, endpoint, entity_id, diff);
-    Arc::new(BlaseballState {
-        predecessor: Some(state),
-        from_event: Arc::new(bs::Event::new_structural_change(endpoint)),
-        data: new_data,
-    })
-}
-
-fn is_valid_implicit_change(endpoint: &'static str, diff: &ValueDiff) -> bool {
-    debug!("Couldn't apply as structural change; trying as implicit change");
-    if IMPLICIT_UPDATE_ALLOWED.contains(&endpoint) {
-        let prompt = format!("Change found in {}: {}\nApply this as an implicit change?", endpoint, diff);
-        return Confirm::new().with_prompt(prompt).interact().unwrap();
-    }
-
-    false
-}
-
-fn implicit_change(state: Arc<BlaseballState>, endpoint: &'static str, entity_id: bs::Uuid, diff: ValueDiff) -> Arc<BlaseballState> {
+fn implicit_change(state: Arc<BlaseballState>, endpoint: &'static str, entity_id: Uuid, diff: ValueDiff) -> Arc<BlaseballState> {
     let new_data = apply_diff(&state, endpoint, entity_id, diff);
     Arc::new(BlaseballState {
         predecessor: Some(state),
@@ -230,7 +205,7 @@ fn implicit_change(state: Arc<BlaseballState>, endpoint: &'static str, entity_id
     })
 }
 
-fn apply_diff(state: &BlaseballState, endpoint: &'static str, entity_id: bs::Uuid, diff: ValueDiff) -> im::HashMap<&'static str, bs::EntitySet> {
+fn apply_diff(state: &BlaseballState, endpoint: &'static str, entity_id: Uuid, diff: ValueDiff) -> im::HashMap<&'static str, bs::EntitySet> {
     state.data.alter(|entity_set|
                          match entity_set {
                              Some(entity_set) => Some(entity_set.alter(|entity| match entity {
