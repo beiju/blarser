@@ -8,14 +8,14 @@ use uuid::Uuid;
 use crate::api::{eventually, EventuallyEvent, EventType, LetsGoMetadata};
 use crate::blaseball_state as bs;
 use crate::blaseball_state::json_path;
-use crate::ingest::{IngestError, IngestItem};
+use crate::ingest::{IngestError, IngestItem, BoxedIngestItem};
 use crate::ingest::error::IngestResult;
 use crate::ingest::log::IngestLogger;
 
-pub fn sources(start: &'static str) -> Vec<Box<dyn Iterator<Item=Box<dyn IngestItem + Send>> + Send>> {
+pub fn sources(start: &'static str) -> Vec<Box<dyn Iterator<Item=BoxedIngestItem> + Send>> {
     vec![
         Box::new(eventually::events(start)
-            .map(|event| Box::new(event) as Box<dyn IngestItem + Send>))
+            .map(|event| Box::new(event) as BoxedIngestItem))
     ]
 }
 
@@ -25,44 +25,40 @@ impl IngestItem for EventuallyEvent {
         self.created
     }
 
-    async fn apply(self: Box<Self>, log: &IngestLogger, state: Arc<bs::BlaseballState>) -> Result<Vec<Arc<bs::BlaseballState>>, IngestError> {
-        apply_feed_event(state, log, self).await
+    async fn apply(&self, log: &IngestLogger, state: Arc<bs::BlaseballState>) -> IngestResult {
+        log.debug(format!("Applying Feed event: {}", self.description)).await?;
+
+        match self.r#type {
+            EventType::BigDeal => apply_big_deal(state, log, self).await,
+            EventType::LetsGo => apply_lets_go(state, log, self).await,
+            EventType::PlayBall => apply_play_ball(state, log, self).await,
+            EventType::HalfInning => apply_half_inning(state, log, self).await,
+            EventType::BatterUp => apply_batter_up(state, log, self).await,
+            EventType::Strike => apply_strike(state, log, self).await,
+            EventType::Ball => apply_ball(state, log, self).await,
+            EventType::FoulBall => apply_foul_ball(state, log, self).await,
+            EventType::GroundOut => apply_ground_out(state, log, self).await,
+            EventType::Hit => apply_hit(state, log, self).await,
+            EventType::Strikeout => apply_strikeout(state, log, self).await,
+            EventType::FlyOut => apply_fly_out(state, log, self).await,
+            EventType::StolenBase => apply_stolen_base(state, log, self).await,
+            EventType::Walk => apply_walk(state, log, self).await,
+            EventType::RunsScored => apply_runs_scored(state, log, self).await,
+            EventType::HomeRun => apply_home_run(state, log, self).await,
+            _ => todo!()
+        }
     }
 }
 
-pub async fn apply_feed_event(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: Box<EventuallyEvent>) -> IngestResult {
-    log.debug(format!("Applying Feed event: {}", event.description)).await?;
-
-    match event.r#type {
-        EventType::BigDeal => apply_big_deal(state, log, event).await,
-        EventType::LetsGo => apply_lets_go(state, log, event).await,
-        EventType::PlayBall => apply_play_ball(state, log, event).await,
-        EventType::HalfInning => apply_half_inning(state, log, event).await,
-        EventType::BatterUp => apply_batter_up(state, log, event).await,
-        EventType::Strike => apply_strike(state, log, event).await,
-        EventType::Ball => apply_ball(state, log, event).await,
-        EventType::FoulBall => apply_foul_ball(state, log, event).await,
-        EventType::GroundOut => apply_ground_out(state, log, event).await,
-        EventType::Hit => apply_hit(state, log, event).await,
-        EventType::Strikeout => apply_strikeout(state, log, event).await,
-        EventType::FlyOut => apply_fly_out(state, log, event).await,
-        EventType::StolenBase => apply_stolen_base(state, log, event).await,
-        EventType::Walk => apply_walk(state, log, event).await,
-        EventType::RunsScored => apply_runs_scored(state, log, event).await,
-        EventType::HomeRun => apply_home_run(state, log, event).await,
-        _ => todo!()
-    }
-}
-
-async fn apply_big_deal(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: Box<EventuallyEvent>) -> IngestResult {
+async fn apply_big_deal(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: &EventuallyEvent) -> IngestResult {
     log.debug("Ignoring BigDeal event".to_string()).await?;
-    Ok(state)
+    Ok(vec![state])
 }
 
 
-async fn apply_lets_go(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: Box<EventuallyEvent>) -> IngestResult {
+async fn apply_lets_go(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &EventuallyEvent) -> IngestResult {
     log.debug("Applying LetsGo event".to_string()).await?;
-    let metadata: LetsGoMetadata = serde_json::from_value(event.metadata)?;
+    let metadata: LetsGoMetadata = serde_json::from_value(event.metadata.clone())?;
 
     let diff = vec![
         bs::ValueChange::SetValue {
@@ -76,102 +72,103 @@ async fn apply_lets_go(state: Arc<bs::BlaseballState>, log: &IngestLogger, event
     ];
 
     state.successor(bs::Event::FeedEvent(event.id), diff)
+        .map(|s| vec![s])
 }
 
 
-async fn apply_play_ball(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: Box<EventuallyEvent>) -> IngestResult {
+async fn apply_play_ball(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: &EventuallyEvent) -> IngestResult {
     log.debug("Applying PlayBall event".to_string()).await?;
     // TODO
-    Ok(state)
+    Ok(vec![state])
 }
 
 
-async fn apply_half_inning(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: Box<EventuallyEvent>) -> IngestResult {
+async fn apply_half_inning(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: &EventuallyEvent) -> IngestResult {
     log.debug("Applying HalfInning event".to_string()).await?;
     // TODO
-    Ok(state)
+    Ok(vec![state])
 }
 
 
-async fn apply_batter_up(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: Box<EventuallyEvent>) -> IngestResult {
+async fn apply_batter_up(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: &EventuallyEvent) -> IngestResult {
     log.debug("Applying BatterUp event".to_string()).await?;
     // TODO
-    Ok(state)
+    Ok(vec![state])
 }
 
 
-async fn apply_strike(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: Box<EventuallyEvent>) -> IngestResult {
+async fn apply_strike(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: &EventuallyEvent) -> IngestResult {
     log.debug("Applying Strike event".to_string()).await?;
     // TODO
-    Ok(state)
+    Ok(vec![state])
 }
 
 
-async fn apply_ball(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: Box<EventuallyEvent>) -> IngestResult {
+async fn apply_ball(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: &EventuallyEvent) -> IngestResult {
     log.debug("Applying Ball event".to_string()).await?;
     // TODO
-    Ok(state)
+    Ok(vec![state])
 }
 
 
-async fn apply_foul_ball(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: Box<EventuallyEvent>) -> IngestResult {
+async fn apply_foul_ball(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: &EventuallyEvent) -> IngestResult {
     log.debug("Applying FoulBall event".to_string()).await?;
     // TODO
-    Ok(state)
+    Ok(vec![state])
 }
 
 
-async fn apply_ground_out(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: Box<EventuallyEvent>) -> IngestResult {
+async fn apply_ground_out(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: &EventuallyEvent) -> IngestResult {
     log.debug("Applying GroundOut event".to_string()).await?;
     // TODO
-    Ok(state)
+    Ok(vec![state])
 }
 
 
-async fn apply_hit(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: Box<EventuallyEvent>) -> IngestResult {
+async fn apply_hit(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: &EventuallyEvent) -> IngestResult {
     log.debug("Applying Hit event".to_string()).await?;
     // TODO
-    Ok(state)
+    Ok(vec![state])
 }
 
 
-async fn apply_strikeout(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: Box<EventuallyEvent>) -> IngestResult {
+async fn apply_strikeout(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: &EventuallyEvent) -> IngestResult {
     log.debug("Applying Strikeout event".to_string()).await?;
     // TODO
-    Ok(state)
+    Ok(vec![state])
 }
 
 
-async fn apply_fly_out(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: Box<EventuallyEvent>) -> IngestResult {
+async fn apply_fly_out(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: &EventuallyEvent) -> IngestResult {
     log.debug("Applying FlyOut event".to_string()).await?;
     // TODO
-    Ok(state)
+    Ok(vec![state])
 }
 
 
-async fn apply_stolen_base(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: Box<EventuallyEvent>) -> IngestResult {
+async fn apply_stolen_base(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: &EventuallyEvent) -> IngestResult {
     log.debug("Applying StolenBase event".to_string()).await?;
     // TODO
-    Ok(state)
+    Ok(vec![state])
 }
 
 
-async fn apply_walk(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: Box<EventuallyEvent>) -> IngestResult {
+async fn apply_walk(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: &EventuallyEvent) -> IngestResult {
     log.debug("Applying Walk event".to_string()).await?;
     // TODO
-    Ok(state)
+    Ok(vec![state])
 }
 
 
-async fn apply_runs_scored(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: Box<EventuallyEvent>) -> IngestResult {
+async fn apply_runs_scored(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: &EventuallyEvent) -> IngestResult {
     log.debug("Applying RunsScored event".to_string()).await?;
     // TODO
-    Ok(state)
+    Ok(vec![state])
 }
 
 
-async fn apply_home_run(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: Box<EventuallyEvent>) -> IngestResult {
+async fn apply_home_run(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: &EventuallyEvent) -> IngestResult {
     log.debug("Applying HomeRun event".to_string()).await?;
     // TODO
-    Ok(state)
+    Ok(vec![state])
 }

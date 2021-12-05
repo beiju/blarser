@@ -7,5 +7,5 @@ mod log;
 mod task;
 
 pub use error::{IngestError, IngestResult};
-pub use source::IngestItem;
+pub use source::{IngestItem, BoxedIngestItem};
 pub use task::IngestTask;

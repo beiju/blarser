@@ -235,7 +235,7 @@ impl BlaseballState {
         }
     }
 
-    pub fn successor(self: Arc<Self>, event: Event, changes: Vec<ValueChange>) -> IngestResult {
+    pub fn successor(self: Arc<Self>, event: Event, changes: Vec<ValueChange>) -> Result<Arc<BlaseballState>, IngestError> {
         let mut new_data = self.data.clone();
 
         let caused_by = Arc::new(event);

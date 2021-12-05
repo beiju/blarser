@@ -10,7 +10,7 @@ use uuid::Uuid;
 use crate::api::{chronicler, ChroniclerItem};
 use crate::blaseball_state as bs;
 use crate::blaseball_state::{Observation, ValueChange};
-use crate::ingest::IngestItem;
+use crate::ingest::{IngestItem, BoxedIngestItem};
 use crate::ingest::error::IngestError;
 use crate::ingest::log::IngestLogger;
 
@@ -19,12 +19,12 @@ pub struct ChronUpdate {
     item: ChroniclerItem,
 }
 
-pub fn sources(start: &'static str) -> Vec<Box<dyn Iterator<Item=Box<dyn IngestItem + Send>> + Send>> {
+pub fn sources(start: &'static str) -> Vec<Box<dyn Iterator<Item=BoxedIngestItem> + Send>> {
     chronicler::ENDPOINT_NAMES.into_iter()
         .map(move |endpoint|
             Box::new(chronicler::versions(endpoint, start)
-                .map(|item| Box::new(ChronUpdate { endpoint, item }) as Box<dyn IngestItem + Send>))
-                as Box<dyn Iterator<Item=Box<dyn IngestItem + Send>> + Send>
+                .map(|item| Box::new(ChronUpdate { endpoint, item }) as BoxedIngestItem))
+                as Box<dyn Iterator<Item=BoxedIngestItem> + Send>
         )
         .collect()
 }
@@ -35,7 +35,7 @@ impl IngestItem for ChronUpdate {
         self.item.valid_from
     }
 
-    async fn apply(self: Box<Self>, log: &IngestLogger, state: Arc<bs::BlaseballState>) -> Result<Vec<Arc<bs::BlaseballState>>, IngestError> {
+    async fn apply(&self, log: &IngestLogger, state: Arc<bs::BlaseballState>) -> Result<Vec<Arc<bs::BlaseballState>>, IngestError> {
         let observation = bs::Observation {
             entity_type: self.endpoint,
             entity_id: self.item.entity_id,

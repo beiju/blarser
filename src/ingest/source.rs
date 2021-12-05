@@ -9,5 +9,7 @@ use crate::ingest::log::IngestLogger;
 #[async_trait]
 pub trait IngestItem {
     fn date(&self) -> DateTime<Utc>;
-    async fn apply(self: Box<Self>, log: &IngestLogger, state: Arc<BlaseballState>) -> Result<Vec<Arc<BlaseballState>>, IngestError>;
+    async fn apply(&self, log: &IngestLogger, state: Arc<BlaseballState>) -> Result<Vec<Arc<BlaseballState>>, IngestError>;
 }
+
+pub type BoxedIngestItem = Box<dyn IngestItem + Send + Sync>;

@@ -33,4 +33,4 @@ pub enum IngestError {
     }
 }
 
-pub type IngestResult = Result<Arc<BlaseballState>, IngestError>;
+pub type IngestResult = Result<Vec<Arc<BlaseballState>>, IngestError>;
