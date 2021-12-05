@@ -25,7 +25,7 @@ impl IngestItem for EventuallyEvent {
         self.created
     }
 
-    async fn apply(self: Box<Self>, log: &IngestLogger, state: Arc<bs::BlaseballState>) -> IngestResult {
+    async fn apply(self: Box<Self>, log: &IngestLogger, state: Arc<bs::BlaseballState>) -> Result<Vec<Arc<bs::BlaseballState>>, IngestError> {
         apply_feed_event(state, log, self).await
     }
 }

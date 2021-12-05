@@ -35,7 +35,7 @@ impl IngestItem for ChronUpdate {
         self.item.valid_from
     }
 
-    async fn apply(self: Box<Self>, log: &IngestLogger, state: Arc<bs::BlaseballState>) -> Result<Arc<bs::BlaseballState>, IngestError> {
+    async fn apply(self: Box<Self>, log: &IngestLogger, state: Arc<bs::BlaseballState>) -> Result<Vec<Arc<bs::BlaseballState>>, IngestError> {
         let observation = bs::Observation {
             entity_type: self.endpoint,
             entity_id: self.item.entity_id,
