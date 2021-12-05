@@ -6,6 +6,6 @@ mod error;
 mod log;
 mod task;
 
-pub use error::IngestError;
+pub use error::{IngestError, IngestResult};
 pub use source::IngestItem;
 pub use task::IngestTask;

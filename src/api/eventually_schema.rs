@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_repr::Deserialize_repr;
+use uuid::Uuid;
 
 #[derive(Deserialize)]
 pub struct EventuallyResponse(pub(crate) Vec<EventuallyEvent>);
@@ -23,11 +24,41 @@ impl IntoIterator for EventuallyResponse {
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct EventuallyEvent {
-    pub id: String,
+    pub id: Uuid,
     pub created: DateTime<Utc>,
     pub r#type: EventType,
     pub category: i32,
+    pub metadata: serde_json::Value,
     pub description: String,
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct LetsGoMetadata {
+    pub home: Uuid,
+    pub away: Uuid,
+    pub stadium: Uuid,
+    pub weather: Weather,
+}
+
+#[derive(Deserialize_repr, PartialEq, Debug)]
+#[repr(i32)]
+pub enum Weather {
+    Void = 0,
+    Sun2 = 1,
+    Overcast = 2,
+    Rainy = 3,
+    Sandstorm = 4,
+    Snowy = 5,
+    Acidic = 6,
+    SolarEclipse = 7,
+    Glitter = 8,
+    Blooddrain = 9,
+    Peanuts = 10,
+    Birds = 11,
+    Feedback = 12,
+    Reverb = 13,
+    // etc.
 }
 
 #[derive(Deserialize_repr, PartialEq, Debug)]
