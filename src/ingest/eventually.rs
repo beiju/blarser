@@ -61,14 +61,14 @@ async fn apply_lets_go(state: Arc<bs::BlaseballState>, log: &IngestLogger, event
     let metadata: LetsGoMetadata = serde_json::from_value(event.metadata.clone())?;
 
     let diff = vec![
-        bs::ValueChange::SetValue {
+        bs::Patch {
             path: json_path!("team", metadata.home, "rotationSlot"),
-            value: json!(1)
+            change: bs::ChangeType::Increment
         },
-        bs::ValueChange::SetValue {
+        bs::Patch {
             path: json_path!("team", metadata.away, "rotationSlot"),
-            value: json!(1)
-        }
+            change: bs::ChangeType::Increment
+        },
     ];
 
     state.successor(bs::Event::FeedEvent(event.id), diff)

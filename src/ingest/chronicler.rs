@@ -1,15 +1,17 @@
 use std::collections;
 use std::collections::HashSet;
+use std::iter::Peekable;
 use std::sync::Arc;
 use chrono::{DateTime, Utc};
-use serde_json::{Value as JsonValue};
+use serde_json::{Value as JsonValue, map::Map as JsonMap, Value};
 use im::hashmap::Entry;
+use itertools::izip;
 use rocket::async_trait;
 use uuid::Uuid;
 
 use crate::api::{chronicler, ChroniclerItem};
 use crate::blaseball_state as bs;
-use crate::blaseball_state::{Observation, ValueChange};
+use crate::blaseball_state::{BlaseballData, ChangeType, Node, NodeValue, Observation, Patch, Path};
 use crate::ingest::{IngestItem, BoxedIngestItem};
 use crate::ingest::error::IngestError;
 use crate::ingest::log::IngestLogger;
@@ -36,295 +38,369 @@ impl IngestItem for ChronUpdate {
     }
 
     async fn apply(&self, log: &IngestLogger, state: Arc<bs::BlaseballState>) -> Result<Vec<Arc<bs::BlaseballState>>, IngestError> {
+        log.info(format!("Applying chron update from {}", self.item.valid_from)).await?;
+
         let observation = bs::Observation {
             entity_type: self.endpoint,
             entity_id: self.item.entity_id,
             observed_at: self.item.valid_from,
         };
 
-        log.info(format!("Applying chron update from {}", self.item.valid_from)).await?;
-        match apply_update(&state, log, &observation, &self.item.data).await? {
-            None => Ok(state),
-            Some(diff) => try_implicit_change(log, state.clone(), observation, diff).await
+        let entity_set = state.data.get(observation.entity_type)
+            .expect("Unexpected entity type");
+        let mismatches = observe_state(entity_set, &self.item.data, observation);
+        todo!()
+    }
+}
+
+fn observe_state(data: &bs::EntitySet, observed: &JsonValue, observation: bs::Observation) -> Vec<bs::Patch> {
+    match data.get(&observation.entity_id) {
+        None => vec![
+            bs::Patch {
+                path: bs::json_path!(observation.entity_type, observation.entity_id),
+                change: ChangeType::Add(bs::Node::new_from_json(
+                    observed,
+                    Arc::new(bs::Event::ImplicitChange(observation.clone())),
+                    Some(observation),
+                )),
+            }
+        ],
+        Some(node) => {
+            let path = bs::Path {
+                entity_type: observation.entity_type,
+                entity_id: Some(observation.entity_id.clone()),
+                components: Vec::new(),
+            };
+
+            observe_node(node, observed, &observation, &path)
         }
     }
 }
 
-pub async fn apply_update<'a>(
-    state: &'a Arc<bs::BlaseballState>,
-    log: &IngestLogger,
-    observation: &bs::Observation,
-    data: &'a JsonValue,
-) -> Result<Vec<bs::ValueChange>, IngestError> {
-    log.debug(format!("Applying Chron {} update", observation.entity_type)).await?;
-    let entity_state = &state.data[observation.entity_type][&observation.entity_id];
-    Ok(apply_entity_update(entity_state, &data, bs::Path {
-        entity_type: observation.entity_type,
-        entity_id: observation.entity_id,
-        components: vec![],
-    }).err().unwrap_or(vec![]))
-}
-
-fn apply_entity_update<'a>(entity_state: &'a bs::Value, entity_update: &'a JsonValue, path: bs::Path) -> Result<(), Vec<ValueChange>> {
-    match entity_state {
-        bs::Value::Object(state_obj) => {
-            let update_obj = entity_update.as_object()
-                .ok_or(vec![
-                    ValueChange::SetValue {
-                        path,
-                        value: Default::default()
-                    }
-                ])?;
-            let state_keys: HashSet<_> = state_obj.keys().into_iter().collect();
-            let update_keys: HashSet<_> = update_obj.keys().into_iter().collect();
-
-            let missing_keys: Vec<String> = (&state_keys - &update_keys).iter().cloned().cloned().collect();
-            if !missing_keys.is_empty() {
-                return Err(bs::ValueDiff::KeysRemoved(missing_keys));
-            }
-
-            let extra_keys: Vec<_> = update_keys.difference(&state_keys).collect();
-            if !extra_keys.is_empty() {
-                return Err(bs::ValueDiff::KeysAdded(
-                    extra_keys.into_iter()
-                        .map(|&key| (key.clone(), &entity_update[key]))
-                        .collect()
-                ));
-            }
-
-            let nested_errs: collections::HashMap<_, _> = update_obj.into_iter().filter_map(|(key, value)|
-                match apply_entity_update(&state_obj[key], value) {
-                    Ok(()) => None,
-                    Err(e) => Some((key.to_string(), e))
-                })
-                .collect();
-
-            if nested_errs.is_empty() {
-                Ok(())
-            } else {
-                Err(bs::ValueDiff::ObjectDiff { 0: nested_errs })
-            }
+fn observe_node(node: &Arc<bs::Node>, observed: &JsonValue, observation: &bs::Observation, path: &bs::Path) -> Vec<bs::Patch> {
+    match observed {
+        JsonValue::Object(map) => {
+            observe_object(node, map, observation, path)
         }
-        bs::Value::Array(state_arr) => {
-            let update_arr = entity_update.as_array()
-                .ok_or(bs::ValueDiff::ValueChanged {
-                    before: entity_state,
-                    after: entity_update,
-                })?;
-
-            if state_arr.len() != update_arr.len() {
-                return Err(bs::ValueDiff::ArraySizeChanged {
-                    before: state_arr.len(),
-                    after: update_arr.len(),
-                });
-            }
-
-            let nested_errs: collections::HashMap<_, _> = itertools::enumerate(itertools::zip(state_arr, update_arr))
-                .filter_map(|(i, (state_item, update_item))|
-                    match apply_entity_update(state_item, update_item) {
-                        Ok(_) => None,
-                        Err(e) => Some((i, e))
-                    })
-                .collect();
-
-            if nested_errs.is_empty() {
-                Ok(())
-            } else {
-                Err(bs::ValueDiff::ArrayDiff { 0: nested_errs })
-            }
+        JsonValue::Array(vec) => {
+            observe_array(node, vec, observation, path)
         }
-        bs::Value::Value(state_val) => {
-            match &state_val.value {
-                bs::PropertyValue::Null => {
-                    entity_update.as_null()
-                        .ok_or(bs::ValueDiff::ValueChanged {
-                            before: entity_state,
-                            after: entity_update,
-                        })
-                }
-                bs::PropertyValue::Bool(state_bool) => {
-                    entity_update.as_bool()
-                        .filter(|v| state_bool == v)
-                        .ok_or(bs::ValueDiff::ValueChanged {
-                            before: entity_state,
-                            after: entity_update,
-                        })
-                        .map(|_| ())
-                }
-                bs::PropertyValue::Int(state_int) => {
-                    entity_update.as_i64()
-                        .filter(|v| state_int == v)
-                        .ok_or(bs::ValueDiff::ValueChanged {
-                            before: entity_state,
-                            after: entity_update,
-                        })
-                        .map(|_| ())
-                }
-                bs::PropertyValue::Double(state_double) => {
-                    entity_update.as_f64()
-                        .filter(|v| state_double == v)
-                        .ok_or(bs::ValueDiff::ValueChanged {
-                            before: entity_state,
-                            after: entity_update,
-                        })
-                        .map(|_| ())
-                }
-                bs::PropertyValue::String(state_str) => {
-                    entity_update.as_str()
-                        .filter(|v| state_str == v)
-                        .ok_or(bs::ValueDiff::ValueChanged {
-                            before: entity_state,
-                            after: entity_update,
-                        })
-                        .map(|_| ())
-                }
-                _ => todo!()
-            }
+        JsonValue::String(s) => {
+            observe_string(node, s, observation, path)
         }
-    }
-}
-
-fn try_implicit_change<'a>(
-    log: &'a IngestLogger,
-    state: Arc<bs::BlaseballState>,
-    observation: bs::Observation,
-    diff: bs::ValueDiff<'a>,
-) -> impl std::future::Future<Output=Result<Arc<bs::BlaseballState>, IngestError>> + 'a {
-    async move {
-        log.debug("Update didn't match current state; trying as implicit change".to_string()).await?;
-        if log.get_approval(observation.entity_type, observation.entity_id, observation.observed_at, diff.format()).await? {
-            log.debug("Applying update as implicit change".to_string()).await?;
-            return Ok(implicit_change(state, observation, diff));
-        }
-
-        Err(IngestError::UpdateMismatch { observation, diff: diff.format() })
-    }
-}
-
-fn implicit_change(state: Arc<bs::BlaseballState>, observation: Observation, diff: bs::ValueDiff) -> Arc<bs::BlaseballState> {
-    let new_data = apply_diff(&state, observation.entity_type, &observation.entity_id, diff);
-    Arc::new(bs::BlaseballState {
-        predecessor: Some(state),
-        from_event: Arc::new(bs::Event::new_implicit_change(observation)),
-        data: new_data,
-    })
-}
-
-fn apply_diff(state: &bs::BlaseballState, endpoint: &'static str, entity_id: &Uuid, diff: bs::ValueDiff) -> im::HashMap<&'static str, bs::EntitySet> {
-    state.data.alter(|entity_set|
-                         match entity_set {
-                             Some(entity_set) => Some(entity_set.alter(|entity| match entity {
-                                 Some(data) => Some(apply_diff_to_value(&data, diff)),
-                                 None => panic!("Tried to apply structural update to nonexistent object")
-                             }, *entity_id)),
-                             None => panic!("Tried to apply structural update to nonexistent endpoint")
-                         }, endpoint)
-}
-
-fn new_primitive_value(value: bs::PropertyValue, caused_by: Arc<bs::Event>) -> bs::Value {
-    // If this was caused_by an implicit change, which has an observation attached, automatically
-    // fill in observed_by.
-    let observed_by = match &*caused_by {
-        bs::Event::ImplicitChange(observation) => Some(observation.clone()),
-        _ => None
-    };
-
-    bs::Value::Value(Arc::new(bs::TrackedValue {
-        predecessor: None,
-        caused_by,
-        observed_by,
-        value,
-    }))
-}
-
-fn apply_diff_to_value(value: &bs::Value, diff: bs::ValueDiff, caused_by: Arc<bs::Event>) -> bs::Value {
-    match diff {
-        bs::ValueDiff::KeysRemoved(keys) => {
-            if let bs::Value::Object(obj) = value {
-                let mut obj = obj.clone();
-                for key in keys {
-                    obj.remove(&*key);
-                }
-                bs::Value::Object(obj)
-            } else {
-                panic!("Can't apply a KeysRemoved diff to a non-object");
-            }
-        }
-        bs::ValueDiff::KeysAdded(children) => {
-            if let bs::Value::Object(obj) = value {
-                let mut obj = obj.clone();
-                for (key, value) in children {
-                    obj.insert(key, json_to_state_value(value, caused_by));
-                }
-
-                bs::Value::Object(obj)
-            } else {
-                panic!("Can't apply a KeysRemoved diff to a non-object");
-            }
-        }
-        bs::ValueDiff::ArraySizeChanged { after, .. } => {
-            if let bs::Value::Array(_) = value {
-                if after == 0 {
-                    bs::Value::Array(im::Vector::new())
-                } else {
-                    panic!("Can't apply a non-0 ArraySizeChanged diff as a structural update")
-                }
-            } else {
-                panic!("Can't apply an ArraySizeChanged diff to a non-array")
-            }
-        }
-        bs::ValueDiff::ValueChanged { after, .. } => json_to_state_value(after),
-        bs::ValueDiff::ObjectDiff(changes) => {
-            if let bs::Value::Object(obj) = value {
-                let mut obj = obj.clone();
-                for (key, diff) in changes {
-                    match obj.entry(key.clone()) {
-                        Entry::Occupied(mut entry) => {
-                            entry.insert(apply_diff_to_value(entry.get(), diff));
-                        }
-                        Entry::Vacant(_) => panic!("Can't apply diff to nonexistent value {}", key)
-                    }
-                }
-
-                bs::Value::Object(obj)
-            } else {
-                panic!("Can't apply an ObjectDiff to a non-object")
-            }
-        }
-        bs::ValueDiff::ArrayDiff(changes) => {
-            if let bs::Value::Array(arr) = value {
-                let mut arr = arr.clone();
-                for (i, diff) in changes {
-                    arr[i] = apply_diff_to_value(&arr[i], diff);
-                }
-
-                bs::Value::Array(arr)
-            } else {
-                panic!("Can't apply an ArrayDiff to a non-array")
-            }
-        }
-    }
-}
-
-fn json_to_state_value(value: &JsonValue, caused_by: Arc<bs::Event>) -> bs::Value {
-    match value {
-        JsonValue::Null => new_primitive_value(bs::PropertyValue::Null, caused_by),
-        JsonValue::Bool(b) => new_primitive_value(bs::PropertyValue::Bool(*b), caused_by),
         JsonValue::Number(n) => {
             if let Some(i) = n.as_i64() {
-                new_primitive_value(bs::PropertyValue::Int(i), caused_by)
-            } else if let Some(d) = n.as_f64() {
-                new_primitive_value(bs::PropertyValue::Double(d), caused_by)
+                observe_int(node, i, observation, path)
             } else {
-                panic!("Couldn't represent number")
+                let f = n.as_f64()
+                    .expect("Number could not be interpreted as int or float");
+                observe_float(node, f, observation, path)
             }
         }
-        JsonValue::String(s) => new_primitive_value(bs::PropertyValue::String(s.clone()), caused_by),
-        JsonValue::Array(arr) => bs::Value::Array(
-            arr.into_iter().map(|val| json_to_state_value(val, caused_by)).collect()
-        ),
-        JsonValue::Object(obj) => bs::Value::Object(
-            obj.into_iter().map(|(key, val)| (key.clone(), json_to_state_value(val, caused_by))).collect()
-        ),
+        JsonValue::Bool(b) => {
+            observe_bool(node, b, observation, path)
+        }
+        JsonValue::Null => {
+            observe_null(node, observation, path)
+        }
+    }
+}
+
+fn observe_object(node: &Arc<bs::Node>, observed: &JsonMap<String, JsonValue>, observation: &bs::Observation, path: &bs::Path) -> Vec<bs::Patch> {
+    if let bs::NodeValue::Object(obj) = &node.value {
+        let deletions = obj.keys()
+            .filter_map(|key| {
+                match observed.get(key) {
+                    // Value is in state, but not observation: Remove it
+                    None => {
+                        Some(bs::Patch {
+                            path: path.extend(key.into()),
+                            change: bs::ChangeType::Remove,
+                        })
+                    }
+                    // Value is in both: it will be processed in the other loop
+                    Some(_) => None
+                }
+            });
+
+        let changes_and_additions = observed.into_iter()
+            .flat_map(|(key, value)| {
+                let path = path.extend(key.into());
+                match obj.get(key) {
+                    // Value is in both objects: Observe it
+                    Some(node) => {
+                        observe_node(node, value, observation, &path)
+                    }
+                    // Value is in observation, but not state: Add it
+                    None => {
+                        vec![
+                            bs::Patch {
+                                path,
+                                change: bs::ChangeType::Add(Node::new_from_json(
+                                    value,
+                                    Arc::new(bs::Event::ImplicitChange(observation.clone())),
+                                    Some(observation.clone()),
+                                )),
+                            }
+                        ]
+                    }
+                }
+            });
+
+        deletions.chain(changes_and_additions).collect()
+    } else {
+        let caused_by = Arc::new(bs::Event::ImplicitChange(observation.clone()));
+        let observation = Some(observation.clone());
+        vec![
+            bs::Patch {
+                path: path.clone(),
+                change: bs::ChangeType::Replace(node.successor(
+                    NodeValue::new_from_json_object(observed, &caused_by, &observation),
+                    caused_by,
+                    observation,
+                )),
+            }
+        ]
+    }
+}
+
+fn observe_array(node: &Arc<bs::Node>, observed: &Vec<JsonValue>, observation: &bs::Observation, path: &bs::Path) -> Vec<bs::Patch> {
+    if let bs::NodeValue::Array(arr) = &node.value {
+        observe_array_subset(arr, 0, &observed, 0, observation, path)
+    } else {
+        let caused_by = Arc::new(bs::Event::ImplicitChange(observation.clone()));
+        let observation = Some(observation.clone());
+        vec![
+            bs::Patch {
+                path: path.clone(),
+                change: bs::ChangeType::Replace(node.successor(
+                    NodeValue::new_from_json_array(observed, &caused_by, &observation),
+                    caused_by,
+                    observation,
+                )),
+            }
+        ]
+    }
+}
+
+fn observe_array_subset(
+    current_values: &im::Vector<Arc<Node>>,
+    current_value_i: usize,
+    observed_values: &Vec<JsonValue>,
+    observed_value_i: usize,
+    observation: &bs::Observation,
+    path: &bs::Path)
+    -> Vec<bs::Patch> {
+    match (current_values.get(current_value_i), observed_values.get(observed_value_i)) {
+        (Some(current_value), Some(observed_value)) => {
+            let item_path = path.extend(current_value_i.into());
+            // This clone() is a sign of bad code organization but whatever
+            let mut replace_changes = observe_node(current_value, observed_value, observation, &item_path);
+            let item_matches = replace_changes.is_empty();
+
+            replace_changes.extend(
+                observe_array_subset(
+                    current_values,
+                    current_value_i + 1,
+                    observed_values,
+                    observed_value_i + 1,
+                    observation,
+                    path)
+                    .into_iter()
+            );
+
+            if item_matches {
+                replace_changes
+            } else {
+                // Get changes that result from deleting the
+                let delete_changes = observe_array_slice_by_deletion(current_values, current_value_i, observed_values, observed_value_i, &observation, &path);
+                let add_changes = observe_array_slice_by_addition(current_values, current_value_i, observed_values, observed_value_i, &observation, &path, observed_value);
+
+
+                vec![
+                    replace_changes,
+                    delete_changes,
+                    add_changes,
+                ].into_iter()
+                    .min_by(|a, b| a.len().cmp(&b.len()))
+                    .unwrap_or(Vec::new())
+            }
+        }
+        (Some(_), None) => {
+            // Item exists in current but not observed. Delete it
+            observe_array_slice_by_deletion(current_values, current_value_i, observed_values, observed_value_i, &observation, &path)
+        }
+        (None, Some(observed_value)) => {
+            // Item exists in observed but not current. Delete it
+            observe_array_slice_by_addition(current_values, current_value_i, observed_values, observed_value_i, &observation, &path, observed_value)
+        }
+        (None, None) => {
+            // Recursion base case. No changes.
+            Vec::new()
+        }
+    }
+}
+
+fn observe_array_slice_by_addition(
+    current_values: &im::Vector<Arc<Node>>,
+    current_value_i: usize,
+    observed_values: &Vec<JsonValue>,
+    observed_value_i: usize,
+    observation: &Observation,
+    path: &Path,
+    observed_value: &Value) -> Vec<Patch> {
+    // Operate on the rest of the vector before this one, because the operation changes indices
+    let mut add_changes = observe_array_subset(
+        current_values,
+        current_value_i,
+        observed_values,
+        observed_value_i + 1,
+        observation,
+        path);
+
+    add_changes.push(bs::Patch {
+        path: path.extend(current_value_i.into()),
+        change: ChangeType::Add(Node::new_from_json(
+            observed_value,
+            Arc::new(bs::Event::ImplicitChange(observation.clone())),
+            Some(observation.clone()),
+        )),
+    });
+
+    add_changes
+}
+
+fn observe_array_slice_by_deletion(
+    current_values: &im::Vector<Arc<Node>>,
+    current_value_i: usize,
+    observed_values: &Vec<JsonValue>,
+    observed_value_i: usize,
+    observation: &Observation,
+    path: &Path) -> Vec<Patch> {
+    // Operate on the rest of the vector before this one, because the operation changes indices
+    let mut delete_changes = observe_array_subset(
+        current_values,
+        current_value_i + 1,
+        observed_values,
+        observed_value_i,
+        observation,
+        path);
+
+    delete_changes.push(bs::Patch {
+        path: path.extend(current_value_i.into()),
+        change: ChangeType::Remove,
+    });
+
+    delete_changes
+}
+
+fn observe_string(node: &Arc<bs::Node>, observed: &String, observation: &bs::Observation, path: &bs::Path) -> Vec<bs::Patch> {
+    match &node.value {
+        bs::NodeValue::String(value) if value == observed => {
+            Vec::new()
+        }
+
+        bs::NodeValue::IntRange(_, _) => todo!(),
+
+        _ => {
+            vec![
+                bs::Patch {
+                    path: path.clone(),
+                    change: ChangeType::Replace(node.successor(
+                        bs::NodeValue::String(observed.clone()),
+                        Arc::new(bs::Event::ImplicitChange(observation.clone())),
+                        Some(observation.clone()),
+                    )),
+                }
+            ]
+        }
+    }
+}
+
+fn observe_int(node: &Arc<bs::Node>, observed: i64, observation: &bs::Observation, path: &bs::Path) -> Vec<bs::Patch> {
+    match node.value {
+        bs::NodeValue::Int(value) if value == observed => {
+            Vec::new()
+        }
+
+        bs::NodeValue::IntRange(_, _) => todo!(),
+
+        _ => {
+            vec![
+                bs::Patch {
+                    path: path.clone(),
+                    change: ChangeType::Replace(node.successor(
+                        bs::NodeValue::Int(observed),
+                        Arc::new(bs::Event::ImplicitChange(observation.clone())),
+                        Some(observation.clone()),
+                    )),
+                }
+            ]
+        }
+    }
+}
+
+fn observe_float(node: &Arc<bs::Node>, observed: f64, observation: &bs::Observation, path: &bs::Path) -> Vec<bs::Patch> {
+    match node.value {
+        bs::NodeValue::Float(value) if value == observed => {
+            Vec::new()
+        }
+
+        bs::NodeValue::FloatRange(_, _) => todo!(),
+
+        _ => {
+            vec![
+                bs::Patch {
+                    path: path.clone(),
+                    change: ChangeType::Replace(node.successor(
+                        bs::NodeValue::Float(observed),
+                        Arc::new(bs::Event::ImplicitChange(observation.clone())),
+                        Some(observation.clone()),
+                    )),
+                }
+            ]
+        }
+    }
+}
+
+fn observe_bool(node: &Arc<bs::Node>, observed: &bool, observation: &bs::Observation, path: &bs::Path) -> Vec<bs::Patch> {
+    match &node.value {
+        bs::NodeValue::Bool(value) if value == observed => {
+            Vec::new()
+        }
+
+        _ => {
+            vec![
+                bs::Patch {
+                    path: path.clone(),
+                    change: ChangeType::Replace(node.successor(
+                        bs::NodeValue::Bool(observed.clone()),
+                        Arc::new(bs::Event::ImplicitChange(observation.clone())),
+                        Some(observation.clone()),
+                    )),
+                }
+            ]
+        }
+    }
+}
+
+fn observe_null(node: &Arc<bs::Node>, observation: &bs::Observation, path: &bs::Path) -> Vec<bs::Patch> {
+    match node.value {
+        bs::NodeValue::Null => {
+            Vec::new()
+        }
+
+        _ => {
+            vec![
+                bs::Patch {
+                    path: path.clone(),
+                    change: ChangeType::Replace(node.successor(
+                        bs::NodeValue::Null,
+                        Arc::new(bs::Event::ImplicitChange(observation.clone())),
+                        Some(observation.clone()),
+                    )),
+                }
+            ]
+        }
     }
 }

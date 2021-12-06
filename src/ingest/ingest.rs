@@ -7,7 +7,7 @@ use crate::ingest::{chronicler, eventually, BoxedIngestItem};
 use crate::ingest::error::IngestError;
 use crate::ingest::log::IngestLogger;
 
-const BLARSER_START: &str = "2021-11-01T00:00:00Z";
+const BLARSER_START: &str = "2021-12-06T00:00:00Z";
 
 fn all_sources(start: &'static str) -> impl Iterator<Item=Result<BoxedIngestItem, IngestError>> + Send {
     [
@@ -31,11 +31,17 @@ pub async fn run(log: IngestLogger) -> Result<(), IngestError> {
     rocket::futures::stream::iter(all_sources(BLARSER_START))
         .try_fold(start_states, |states, ingest_item| async move {
             rocket::futures::stream::iter(states)
+                // apply the item
                 .then(|state| ingest_item.apply(log, state))
+                // collect Stream<_> into Future<Vec<_>>
                 .collect::<Vec<Result<_, IngestError>>>()
+                // await Future<Vec<_>> into Vec<_>
                 .await
+                // vec into iterator
                 .into_iter()
+                // collect Vec<Result<_>> to Result<Vec<_>>
                 .collect::<Result<Vec<_>, IngestError>>()
+                // flatten Result<Vec<Vec<_>>> to Result<Vec<_>>
                 .map(|v| v.into_iter().flatten().collect())
         })
         .await?;

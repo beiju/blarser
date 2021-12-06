@@ -1,23 +1,14 @@
-use std::collections;
 use im;
 use uuid::Uuid;
 use std::sync::Arc;
-use indenter::indented;
-use std::fmt::Write;
 use chrono::{DateTime, Utc};
 use im::HashMap;
-use serde_json as json;
-use crate::ingest::{IngestError, IngestResult};
-
-#[derive(Debug, Clone)]
-pub struct Observation {
-    pub entity_type: &'static str,
-    pub entity_id: Uuid,
-    pub observed_at: DateTime<Utc>,
-}
+use serde_json::{Map, Value as JsonValue, Value};
+use thiserror::Error;
+use crate::ingest::{IngestError};
 
 /// Describes the event that caused one BlaseballState to change into another BlaseballState
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Event {
     /// A special event that should only be associated with the first BlaseballState. Represents
     /// Blaseball coming into existence.
@@ -29,6 +20,14 @@ pub enum Event {
 
     FeedEvent(Uuid),
 }
+
+#[derive(Debug, Clone)]
+pub struct Observation {
+    pub entity_type: &'static str,
+    pub entity_id: Uuid,
+    pub observed_at: DateTime<Utc>,
+}
+
 #[derive(Debug, Clone)]
 pub struct BlaseballState {
     pub predecessor: Option<Arc<BlaseballState>>,
@@ -39,143 +38,137 @@ pub struct BlaseballState {
 // The top levels of the state need to be handled directly, because they're separate objects in
 // Chron.
 pub type BlaseballData = im::HashMap<&'static str, EntitySet>;
-pub type EntitySet = im::HashMap<Uuid, Value>;
-
-
-#[derive(Debug, Clone)]
-pub enum Value {
-    Object(im::HashMap<String, Value>),
-    Array(im::Vector<Value>),
-    Value(Arc<TrackedValue>),
-}
+pub type EntitySet = im::HashMap<Uuid, Arc<Node>>;
 
 #[derive(Debug)]
-pub struct TrackedValue {
-    pub predecessor: Option<Arc<TrackedValue>>,
+pub struct Node {
+    pub predecessor: Option<Arc<Node>>,
     pub caused_by: Arc<Event>,
     pub observed_by: Option<Observation>,
-    pub value: PropertyValue,
+    pub value: NodeValue,
 }
 
 #[derive(Debug)]
-pub enum PropertyValue {
-    // Known values
+pub enum NodeValue {
+    // Deleted flag
+    Deleted,
+
+    // Collections
+    Object(im::HashMap<String, Arc<Node>>),
+    Array(im::Vector<Arc<Node>>),
+
+    // Simple primitives
     Null,
     Bool(bool),
     Int(i64),
-    Double(f64),
+    Float(f64),
     String(String),
-    Deleted,
 
-    // Partially-known values
+    // Primitive placeholders
     IntRange(i64, i64),
-    DoubleRange(f64, f64),
-
-    // Unknown values (TODO)
+    FloatRange(f64, f64),
 }
 
-impl Value {
-    pub fn set_value(&mut self, path: &[PathComponent], value: serde_json::Value) -> Result<(), IngestError> {
-        match path {
-            [PathComponent::Key(key)] => {
-                match self {
-                    Value::Object(_) => {
-                        Err(IngestError::UnexpectedType { path: key.to_string(), expected_type: "value", actual_type: "object" })
-                    }
-                    Value::Array(_) => {
-                        Err(IngestError::UnexpectedType { path: key.to_string(), expected_type: "value", actual_type: "array" })
-                    }
-                    Value::Value(value) => {
-                        Err(IngestError::UnexpectedType { path: key.to_string(), expected_type: "value", actual_type: "value" })
+#[derive(Error, Debug)]
+pub enum ApplyPatchError {
+    #[error("Chron {observation:?} update didn't match the expected value: {diff}")]
+    UpdateMismatch { observation: Observation, diff: String },
+
+    #[error("Expected {path} to have type {expected_type}, but it had type {actual_type}")]
+    UnexpectedType { path: String, expected_type: &'static str, actual_type: &'static str },
+
+    #[error("State was missing key {0}")]
+    MissingKey(String),
+
+}
+
+impl Node {
+    pub fn new(value: NodeValue, caused_by: Arc<Event>, observed_by: Option<Observation>) -> Arc<Node> {
+        return Arc::new(Node {
+            predecessor: None,
+            caused_by,
+            observed_by,
+            value
+        })
+    }
+
+    pub fn successor(self: &Arc<Self>, value: NodeValue, caused_by: Arc<Event>, observed_by: Option<Observation>) -> Arc<Node> {
+        return Arc::new(Node {
+            predecessor: Some(self.clone()),
+            caused_by,
+            observed_by,
+            value
+        })
+    }
+
+    pub fn new_from_json(value: &JsonValue, caused_by: Arc<Event>, observed_by: Option<Observation>) -> Arc<Node> {
+        match value {
+            JsonValue::Null => {
+                Node::new(NodeValue::Null, caused_by, observed_by)
+            }
+            JsonValue::Bool(b) => {
+                Node::new(NodeValue::Bool(*b), caused_by, observed_by)
+            }
+            JsonValue::Number(n) => {
+                match n.as_i64() {
+                    Some(i) => Node::new(NodeValue::Int(i), caused_by, observed_by),
+                    None => {
+                        let f = n.as_f64().expect("Number was neither i64 nor f64");
+                        Node::new(NodeValue::Float(f), caused_by, observed_by)
                     }
                 }
             }
-            [PathComponent::Index(i)] => {
-                match self {
-                    Value::Object(_) => {
-                        Err(IngestError::UnexpectedType { path: i.to_string(), expected_type: "value", actual_type: "object" })
-                    }
-                    Value::Array(arr) => {
-                        Err(IngestError::UnexpectedType { path: i.to_string(), expected_type: "value", actual_type: "array" })
-                    }
-                    Value::Value(_) => {
-                        Err(IngestError::UnexpectedType { path: i.to_string(), expected_type: "value", actual_type: "value" })
-                    }
-                }
+            JsonValue::String(s) => {
+                Node::new(NodeValue::String(s.clone()), caused_by, observed_by)
             }
-            [PathComponent::Key(key), rest @ ..] => {
-                match self {
-                    Value::Object(obj) => {
-                        match obj[*key].set_value(rest, value) {
-                            Err(IngestError::UnexpectedType { path: nested_path, expected_type, actual_type }) => {
-                                Err(IngestError::UnexpectedType {
-                                    path: format!("{}/{}", key, nested_path),
-                                    expected_type,
-                                    actual_type,
-                                })
-                            }
-                            x => x
-                        }
-                    }
-                    Value::Array(_) => {
-                        Err(IngestError::UnexpectedType { path: key.to_string(), expected_type: "object", actual_type: "array" })
-                    }
-                    Value::Value(_) => {
-                        Err(IngestError::UnexpectedType { path: key.to_string(), expected_type: "object", actual_type: "value" })
-                    }
-                }
+            JsonValue::Array(arr) => {
+                Node::new(NodeValue::new_from_json_array(arr, &caused_by, &observed_by),
+                          caused_by, observed_by)
             }
-            [PathComponent::Index(i), rest @ ..] => {
-                match self {
-                    Value::Object(_) => {
-                        Err(IngestError::UnexpectedType { path: i.to_string(), expected_type: "array", actual_type: "object" })
-                    }
-                    Value::Array(arr) => {
-                        match arr[*i].set_value(rest, value) {
-                            Err(IngestError::UnexpectedType { path: nested_path, expected_type, actual_type }) => {
-                                Err(IngestError::UnexpectedType {
-                                    path: format!("{}/{}", i, nested_path),
-                                    expected_type,
-                                    actual_type,
-                                })
-                            }
-                            x => x
-                        }
-                    }
-                    Value::Value(_) => {
-                        Err(IngestError::UnexpectedType { path: i.to_string(), expected_type: "array", actual_type: "value" })
-                    }
-                }
+            JsonValue::Object(obj) => {
+                Node::new(NodeValue::new_from_json_object(obj, &caused_by, &observed_by),
+                          caused_by, observed_by)
             }
         }
     }
 }
 
-impl PropertyValue {
-    fn from_json(val: serde_json::Value) -> PropertyValue {
-        match val {
-            serde_json::Value::Null => PropertyValue::Null,
-            serde_json::Value::Bool(b) => PropertyValue::Bool(b),
-            serde_json::Value::Number(n) => {
-                n.as_i64().map(|i| PropertyValue::Int(i))
-                    .or(n.as_f64().map(|f| PropertyValue::Double(f)))
-                    .expect("Invalid number")
-            }
-            serde_json::Value::String(s) => PropertyValue::String(s),
-            _ => panic!("Tried to store composite value in PropertyValue")
-        }
+impl NodeValue {
+    pub fn new_from_json_object(obj: &Map<String, Value>, caused_by: &Arc<Event>, observed_by: &Option<Observation>) -> NodeValue {
+        NodeValue::Object(
+            obj.into_iter()
+                .map(|(key, val)|
+                    (key.clone(), Node::new_from_json(val, caused_by.clone(), observed_by.clone())))
+                .collect()
+        )
+    }
+
+    pub fn new_from_json_array(arr: &Vec<Value>, caused_by: &Arc<Event>, observed_by: &Option<Observation>) -> NodeValue {
+        NodeValue::Array(
+            arr.into_iter()
+                .map(|val| Node::new_from_json(val, caused_by.clone(), observed_by.clone()))
+                .collect()
+        )
     }
 }
 
-pub enum ValueChange {
-    SetValue {
-        path: Path,
-        value: serde_json::Value,
-    }
+#[derive(Clone)]
+pub struct Patch {
+    pub path: Path,
+    pub change: ChangeType,
 }
 
+#[derive(Clone)]
+pub enum ChangeType {
+    Add(Arc<Node>),
+    Remove,
+    Replace(Arc<Node>),
+    Increment,
+}
+
+#[derive(Clone)]
 pub enum PathComponent {
-    Key(&'static str),
+    Key(String),
     Index(usize),
 }
 
@@ -187,17 +180,51 @@ impl From<usize> for PathComponent {
 
 impl From<&'static str> for PathComponent {
     fn from(value: &'static str) -> PathComponent {
+        PathComponent::Key(value.to_string())
+    }
+}
+
+impl From<&String> for PathComponent {
+    fn from(value: &String) -> PathComponent {
+        PathComponent::Key(value.clone())
+    }
+}
+
+impl From<String> for PathComponent {
+    fn from(value: String) -> PathComponent {
         PathComponent::Key(value)
     }
 }
 
+#[derive(Clone)]
 pub struct Path {
     pub entity_type: &'static str,
-    pub entity_id: Uuid,
+    // None means apply to all entities
+    pub entity_id: Option<Uuid>,
     pub components: Vec<PathComponent>,
 }
 
+impl Path {
+    pub fn extend(&self, end: PathComponent) -> Self {
+        let mut components = self.components.clone();
+        components.push(end);
+
+        Self {
+            entity_type: self.entity_type,
+            entity_id: self.entity_id,
+            components
+        }
+    }
+}
+
 macro_rules! json_path {
+    ($entity_type_expr:expr, $entity_id_expr:expr) => {{
+        crate::blaseball_state::Path {
+            entity_type: $entity_type_expr,
+            entity_id: Some($entity_id_expr),
+            components: vec![],
+        }
+    }};
     ($entity_type_expr:expr, $entity_id_expr:expr, $($x:expr),*) => {{
         let mut components: Vec<crate::blaseball_state::PathComponent> = Vec::new();
         $(
@@ -206,19 +233,13 @@ macro_rules! json_path {
 
         crate::blaseball_state::Path {
             entity_type: $entity_type_expr,
-            entity_id: $entity_id_expr,
+            entity_id: Some($entity_id_expr),
             components
         }
-    }}
+    }};
 }
 
 pub(crate) use json_path;
-
-impl Event {
-    pub fn new_implicit_change(observation: Observation) -> Event {
-        return Event::ImplicitChange(observation);
-    }
-}
 
 impl BlaseballState {
     pub fn from_chron_at_time(at_time: &'static str) -> BlaseballState {
@@ -235,13 +256,13 @@ impl BlaseballState {
         }
     }
 
-    pub fn successor(self: Arc<Self>, event: Event, changes: Vec<ValueChange>) -> Result<Arc<BlaseballState>, IngestError> {
+    pub fn successor(self: Arc<Self>, event: Event, patches: Vec<Patch>) -> Result<Arc<BlaseballState>, IngestError> {
         let mut new_data = self.data.clone();
 
         let caused_by = Arc::new(event);
 
-        for change in changes {
-            apply_change(&mut new_data, change, caused_by.clone())?;
+        for patch in patches {
+            apply_change(&mut new_data, &patch, caused_by.clone())?;
         }
 
         Ok(Arc::new(BlaseballState {
@@ -252,110 +273,118 @@ impl BlaseballState {
     }
 }
 
-fn apply_change(data: &mut HashMap<&str, EntitySet>, change: ValueChange, caused_by: Arc<Event>) -> Result<BlaseballData, IngestError> {
-    match change {
-        ValueChange::SetValue { path, value: new_value } => {
-            let mut path_str = format!("{}", path.entity_type);
-            let data_for_type = data.get_mut(path.entity_type)
-                .ok_or(IngestError::MissingKey(path_str))?;
-
-            path_str = format!("{}/{}", path_str, path.entity_type);
-            let mut value = data_for_type.get_mut(&path.entity_id)
-                .ok_or(IngestError::MissingKey(path_str))?;
-
-            for component in path.components {
-                value = match component {
-                    PathComponent::Key(key) => {
-                        path_str = format!("{}/{}", path_str, key);
-                        match value {
-                            Value::Object(obj) => {
-                                obj.get_mut(key).ok_or(IngestError::MissingKey(path_str))
-                            }
-                            Value::Array(_) => {
-                                Err(IngestError::UnexpectedType { path: path_str, expected_type: "object", actual_type: "array"})
-                            }
-                            Value::Value(_) => {
-                                Err(IngestError::UnexpectedType { path: path_str, expected_type: "object", actual_type: "value"})
-                            }
-                        }
-                    }
-                    PathComponent::Index(i) => {
-                        path_str = format!("{}/{}", path_str, i);
-                        match value {
-                            Value::Object(_) => {
-                                Err(IngestError::UnexpectedType { path: path_str, expected_type: "array", actual_type: "object"})
-                            }
-                            Value::Array(arr) => {
-                                arr.get_mut(i).ok_or(IngestError::MissingKey(path_str))
-                            }
-                            Value::Value(_) => {
-                                Err(IngestError::UnexpectedType { path: path_str, expected_type: "array", actual_type: "value"})
-                            }
-                        }
-
-                    }
-                }?;
-            }
-
-            // This block ensures that the structure doesn't change
-            *value = match value {
-                Value::Object(_) => {
-                    Err(IngestError::UnexpectedType { path: path_str, expected_type: "value", actual_type: "object"})
-                }
-                Value::Array(_) => {
-                    Err(IngestError::UnexpectedType { path: path_str, expected_type: "value", actual_type: "array"})
-                }
-                Value::Value(prev_val) => {
-                    Ok(Value::Value(Arc::new(TrackedValue {
-                        predecessor: Some(prev_val.clone()),
-                        caused_by,
-                        observed_by: None,
-                        value: PropertyValue::from_json(new_value)
-                    })))
-                }
-            }?;
-        }
-    }
-
+fn apply_change(data: &mut HashMap<&str, EntitySet>, change: &Patch, caused_by: Arc<Event>) -> Result<(), ApplyPatchError> {
     todo!()
 }
 
-fn records_from_chron_at_time(entity_type: &'static str, at_time: &'static str) -> impl Iterator<Item=(Uuid, Value)> {
+fn get_value_ref(value: &mut Node, path: &[PathComponent], change: &ChangeType, caused_by: Arc<Event>, path_str: String) -> Result<(), ApplyPatchError> {
+    todo!()
+
+/*    return match (value, path.first()) {
+        (_, None) => {
+            *value = change.
+        }
+        (Node::Object(obj), Some(PathComponent::Key(key))) => {
+            let value = obj.get_mut(*key)
+                .ok_or(ApplyChangeError::MissingKey(format!("{}/{}", path_str, key)))?;
+            get_value_ref(value, &path[1..], change, caused_by, format!("{}/{}", path_str, key))
+        }
+        (Node::Array(arr), Some(PathComponent::Index(i))) => {
+            let value = arr.get_mut(*i)
+                .ok_or(ApplyChangeError::MissingKey(format!("{}/{}", path_str, i)))?;
+            get_value_ref(value, &path[1..], change, caused_by, format!("{}/{}", path_str, i))
+        }
+
+    }
+
+
+
+    match path.split_first() {
+        None => Err(ApplyChangeError::MissingKey(path_str)),
+        Some((first, rest)) => {
+            match value {
+                Node::Object(obj) => {
+                    match first {
+                        PathComponent::Key(k) => {
+                            let path_str = format!("{}/{}", path_str, k);
+                            match obj.get_mut(*k) {
+                                None => Err(ApplyChangeError::MissingKey(path_str)),
+                                Some(value) => get_value_ref(value, rest, change, caused_by, path_str)
+                            }
+                        }
+                        PathComponent::Index(i) => {
+                            Err(ApplyChangeError::UnexpectedType {
+                                path: format!("{}/{}", path_str, i),
+                                expected_type: "object",
+                                actual_type: "array",
+                            })
+                        }
+                    }
+                }
+                Node::Array(arr) => {
+                    match first {
+                        PathComponent::Key(k) => {
+                            Err(ApplyChangeError::UnexpectedType {
+                                path: format!("{}/{}", path_str, k),
+                                expected_type: "array",
+                                actual_type: "object",
+                            })
+                        }
+                        PathComponent::Index(i) => {
+                            let path_str = format!("{}/{}", path_str, i);
+                            match arr.get_mut(*i) {
+                                None => Err(ApplyChangeError::MissingKey(path_str)),
+                                Some(value) => {
+                                    if rest.is_empty() {
+                                        *value = Node::Primitive(Arc::new(TrackedValue {
+                                            predecessor: value,
+                                            caused_by,
+                                            observed_by: None,
+                                            value: PrimitiveValue::Null
+                                        }))
+                                    } else {
+                                        get_value_ref(value, rest, change, caused_by, path_str)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Node::Primitive(_) => {
+                    match first {
+                        PathComponent::Key(k) => {
+                            Err(ApplyChangeError::UnexpectedType {
+                                path: format!("{}/{}", path_str, k),
+                                expected_type: "array",
+                                actual_type: "primitive",
+                            })
+                        }
+                        PathComponent::Index(i) => {
+                            Err(ApplyChangeError::UnexpectedType {
+                                path: format!("{}/{}", path_str, i),
+                                expected_type: "object",
+                                actual_type: "primitive",
+                            })
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+ */
+}
+
+fn records_from_chron_at_time(entity_type: &'static str, at_time: &'static str) -> impl Iterator<Item=(Uuid, Arc<Node>)> {
+    let event = Arc::new(Event::Start);
     crate::api::chronicler::entities(entity_type, at_time)
         .map(move |item| {
             let obs = Observation {
                 entity_type,
                 entity_id: item.entity_id,
-                observed_at: item.valid_from
+                observed_at: item.valid_from,
             };
 
-            (obs.entity_id.clone(), node_from_json(item.data, obs))
+            (obs.entity_id.clone(), Node::new_from_json(&item.data, event.clone(), Some(obs)))
         })
-}
-
-fn node_from_json(value: json::Value, obs: Observation) -> Value {
-    match value {
-        json::Value::Null => root_property(PropertyValue::Null, obs),
-        json::Value::Bool(b) => root_property(PropertyValue::Bool(b), obs),
-        json::Value::Number(n) => match n.as_i64() {
-            Some(i) => root_property(PropertyValue::Int(i), obs),
-            None => root_property(PropertyValue::Double(n.as_f64().unwrap()), obs)
-        },
-        json::Value::String(s) => root_property(PropertyValue::String(s), obs),
-        json::Value::Array(arr) => Value::Array(
-            arr.into_iter().map(|item| node_from_json(item, obs)).collect()
-        ),
-        json::Value::Object(obj) => Value::Object(
-            obj.into_iter().map(|(key, item)| (key, node_from_json(item, obs))).collect()
-        ),
-    }
-}
-
-fn root_property(value: PropertyValue, observation: Observation) -> Value {
-    Value::Value(Arc::new(TrackedValue {
-        predecessor: None,
-        caused_by: Arc::new(Event::Start),
-        observed_by: Some(observation),
-        value,
-    }))
 }
