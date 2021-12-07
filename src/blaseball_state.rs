@@ -470,10 +470,8 @@ impl BlaseballState {
         }
     }
 
-    pub async fn successor(self: Arc<Self>, event: Event, patches: Vec<Patch>) -> Result<Arc<BlaseballState>, IngestError> {
+    pub async fn successor(self: Arc<Self>, caused_by: Arc<Event>, patches: Vec<Patch>) -> Result<Arc<BlaseballState>, IngestError> {
         let mut new_data = self.data.clone();
-
-        let caused_by = Arc::new(event);
 
         for patch in patches {
             apply_change(&mut new_data, patch, caused_by.clone()).await?;

@@ -1,11 +1,13 @@
+use std::future::Future;
 use std::sync::Arc;
 use rocket::async_trait;
 use chrono::{DateTime, Utc};
+use uuid::Uuid;
 
 use crate::api::{eventually, EventuallyEvent, EventType, LetsGoMetadata};
 use crate::blaseball_state as bs;
-use crate::blaseball_state::json_path;
-use crate::ingest::{IngestItem, BoxedIngestItem, IngestError};
+use crate::blaseball_state::{Event, json_path, Patch};
+use crate::ingest::{IngestItem, BoxedIngestItem, IngestError, IngestResult};
 use crate::ingest::error::IngestApplyResult;
 use crate::ingest::log::IngestLogger;
 
@@ -61,6 +63,7 @@ async fn apply_lets_go(state: Arc<bs::BlaseballState>, log: &IngestLogger, event
     log.debug("Applying LetsGo event".to_string()).await?;
     let metadata: LetsGoMetadata = serde_json::from_value(event.metadata.clone())?;
 
+    let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
     let diff = vec![
         bs::Patch {
             path: json_path!("team", metadata.home, "rotationSlot"),
@@ -72,7 +75,7 @@ async fn apply_lets_go(state: Arc<bs::BlaseballState>, log: &IngestLogger, event
         },
     ];
 
-    state.successor(bs::Event::FeedEvent(event.id), diff).await
+    state.successor(caused_by, diff).await
         .map(|s| vec![s])
 }
 
@@ -119,25 +122,25 @@ async fn apply_foul_ball(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: 
 }
 
 
-async fn apply_ground_out(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: &EventuallyEvent) -> IngestApplyResult {
+async fn apply_ground_out(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &EventuallyEvent) -> IngestApplyResult {
     log.debug("Applying GroundOut event".to_string()).await?;
-    // TODO
-    Ok(vec![state])
+
+    let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
+    let player_id = todo!(); // It's not in the object. Fuck
+    let diff = apply_out("ground out", log, player_id, &caused_by).await?;
+
+    state.successor(caused_by, diff).await
+        .map(|s| vec![s])
 }
 
 
 async fn apply_hit(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &EventuallyEvent) -> IngestApplyResult {
     log.debug("Applying Hit event".to_string()).await?;
 
-    if event.player_tags.len() != 1 {
-        return Err(IngestError::BadEvent(
-            format!("Expected exactly one element in playerTags but found {}", event.player_tags.len())
-            ));
-    }
-    let player_id = event.player_tags.get(0)
-        .ok_or_else(|| IngestError::BadEvent("Expected exactly one element in playerTags but found none".to_string()))?;
+    let player_id = get_one_player_id(event)?;
 
     log.info(format!("Observed hit by {}. Changing consecutiveHits", player_id)).await?;
+    let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
     let diff = vec![
         bs::Patch {
             path: json_path!("player", player_id.clone(), "consecutiveHits"),
@@ -145,15 +148,49 @@ async fn apply_hit(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &E
         },
     ];
 
-    state.successor(bs::Event::FeedEvent(event.id), diff).await
+    state.successor(caused_by, diff).await
         .map(|s| vec![s])
 }
 
 
-async fn apply_strikeout(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: &EventuallyEvent) -> IngestApplyResult {
+async fn apply_strikeout(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &EventuallyEvent) -> IngestApplyResult {
     log.debug("Applying Strikeout event".to_string()).await?;
-    // TODO
-    Ok(vec![state])
+
+    let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
+    let player_id = get_one_player_id(event)?;
+    let diff = apply_out("strikeout", log, player_id, &caused_by).await?;
+
+    state.successor(caused_by, diff).await
+        .map(|s| vec![s])
+}
+
+fn apply_out<'a>(out_type: &'static str, log: &'a IngestLogger, player_id: &'a Uuid, caused_by: &'a Arc<Event>) -> impl Future<Output=IngestResult<Vec<Patch>>> + 'a {
+    async move {
+        log.info(format!("Observed {} by {}. Zeroing consecutiveHits", out_type, player_id)).await?;
+        let diff = vec![
+            bs::Patch {
+                path: json_path!("player", player_id.clone(), "consecutiveHits"),
+                change: bs::ChangeType::Replace(bs::Node::new_primitive(
+                    0.into(),
+                    caused_by.clone(),
+                    None,
+                )),
+            },
+        ];
+
+        Ok(diff)
+    }
+}
+
+fn get_one_player_id(event: &EventuallyEvent) -> IngestResult<&Uuid> {
+    if event.player_tags.len() != 1 {
+        return Err(IngestError::BadEvent(
+            format!("Expected exactly one element in playerTags but found {}", event.player_tags.len())
+        ));
+    }
+
+    event.player_tags.get(0)
+        .ok_or_else(|| IngestError::BadEvent("Expected exactly one element in playerTags but found none".to_string()))
 }
 
 

@@ -81,7 +81,7 @@ impl IngestItem for ChronUpdate {
         if !approved {
             Err(IngestError::UnexpectedObservation(approval_msg))
         } else {
-            let event = bs::Event::ImplicitChange(observation);
+            let event = Arc::new(bs::Event::ImplicitChange(observation));
             Ok(vec![state.successor(event, mismatches).await?])
         }
     }
