@@ -7,7 +7,9 @@ use crate::ingest::{chronicler, eventually, BoxedIngestItem};
 use crate::ingest::error::IngestError;
 use crate::ingest::log::IngestLogger;
 
-const BLARSER_START: &str = "2021-12-06T00:00:00Z";
+// Current start: middle of day 15, a no-game day. This is so I can get parsing working for the
+// middle of a season first, which is where the bulk of the events come in.
+const BLARSER_START: &str = "2021-12-07T06:30:00Z";
 
 fn all_sources(start: &'static str) -> impl Iterator<Item=Result<BoxedIngestItem, IngestError>> + Send {
     [

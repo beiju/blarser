@@ -8,6 +8,9 @@ pub enum IngestError {
     #[error("Unexpected observation: \n{0}")]
     UnexpectedObservation(String),
 
+    #[error("Bad event: {0}")]
+    BadEvent(String),
+
     #[error(transparent)]
     PathError {
         #[from]
@@ -39,4 +42,5 @@ pub enum IngestError {
     }
 }
 
-pub type IngestResult = Result<Vec<Arc<BlaseballState>>, IngestError>;
+pub type IngestResult<T> = Result<T, IngestError>;
+pub type IngestApplyResult = IngestResult<Vec<Arc<BlaseballState>>>;

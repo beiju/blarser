@@ -21,8 +21,10 @@ async fn main() {
 
 fn test_fn(outer_obj: TestObj) -> impl Stream<Item=bool> {
     stream::iter(vec![0, 1, 3, 2, 4, 6])
-        .filter_map(move |val| async {
+        .filter_map(move |val| {
             let cloned = outer_obj.clone();
-            Some(val == cloned.x)
+            async move {
+                Some(val == cloned.x)
+            }
         })
 }

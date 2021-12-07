@@ -30,6 +30,9 @@ pub struct EventuallyEvent {
     pub category: i32,
     pub metadata: serde_json::Value,
     pub description: String,
+    pub player_tags: Vec<Uuid>,
+    pub game_tags: Vec<Uuid>,
+    pub team_tags: Vec<Uuid>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -58,8 +61,21 @@ pub enum Weather {
     Birds = 11,
     Feedback = 12,
     Reverb = 13,
-    // Filled in as-needed from here
-    Flooding = 18
+    BlackHole = 14,
+    Coffee = 15,
+    Coffee2 = 16,
+    Coffee3s = 17,
+    Flooding = 18,
+    Salmon = 19,
+    PolarityPlus = 20,
+    PolarityMinus = 21,
+    Sun90 = 23,
+    SunPoint1 = 24,
+    SumSun = 25,
+    SupernovaEclipse = 26,
+    BlackHoleBlackHole = 27,
+    Jazz = 28,
+    Night = 29,
 }
 
 #[derive(Deserialize_repr, PartialEq, Debug)]
