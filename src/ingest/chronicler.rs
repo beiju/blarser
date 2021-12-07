@@ -1,9 +1,11 @@
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use serde_json::{Value as JsonValue, map::Map as JsonMap};
 use rocket::async_trait;
-use rocket::futures::stream::{self, StreamExt};
-use async_recursion::async_recursion;
+use rocket::futures::stream::{self, Stream, StreamExt};
+use rocket::futures::FutureExt;
 
 use crate::api::{chronicler, ChroniclerItem};
 use crate::blaseball_state as bs;
@@ -40,11 +42,13 @@ impl IngestItem for ChronUpdate {
             entity_id: self.item.entity_id,
             observed_at: self.item.valid_from,
         };
-        let event = bs::Event::ImplicitChange(observation.clone());
 
         let entity_set = state.data.get(observation.entity_type)
             .expect("Unexpected entity type");
-        let mismatches = observe_state(entity_set, &self.item.data, observation).await;
+        let mismatches: Vec<_> =
+            observe_state(entity_set, &self.item.data, &observation)
+                .collect::<Vec<_>>()
+                .await;
 
         // If no mismatches, all is well. Return the existing state object, as (conceptually) no
         // changes needed to be made. Filling in placeholders mutates in place and is not considered
@@ -61,11 +65,11 @@ impl IngestItem for ChronUpdate {
             .collect::<Result<Vec<_>, _>>()?
             .join("\n");
 
-        let approval_msg= format!("From {}/{} at {}: \n{}",
-                                  self.endpoint,
-                                  self.item.entity_id,
-                                  self.item.valid_from,
-                                  approval_msg);
+        let approval_msg = format!("From {}/{} at {}: \n{}",
+                                   self.endpoint,
+                                   self.item.entity_id,
+                                   self.item.valid_from,
+                                   approval_msg);
 
         // Otherwise, get approval
         let approved = log.get_approval(
@@ -78,23 +82,26 @@ impl IngestItem for ChronUpdate {
         if !approved {
             Err(IngestError::UnexpectedObservation(approval_msg))
         } else {
+            let event = bs::Event::ImplicitChange(observation);
             Ok(vec![state.successor(event, mismatches)?])
         }
     }
 }
 
-async fn observe_state(data: &bs::EntitySet, observed: &JsonValue, observation: bs::Observation) -> Vec<bs::Patch> {
+type BoxedPatchStream<'a> = Pin<Box<dyn Stream<Item=bs::Patch> + Send + 'a>>;
+
+fn observe_state<'a>(data: &'a bs::EntitySet, observed: &'a JsonValue, observation: &'a bs::Observation) -> BoxedPatchStream<'a> {
     match data.get(&observation.entity_id) {
-        None => vec![
+        None => Box::pin(stream::once(async {
             bs::Patch {
                 path: bs::json_path!(observation.entity_type, observation.entity_id),
                 change: bs::ChangeType::Add(bs::Node::new_from_json(
                     observed,
                     Arc::new(bs::Event::ImplicitChange(observation.clone())),
-                    Some(observation),
+                    Some(observation.clone()),
                 )),
             }
-        ],
+        })),
         Some(node) => {
             let path = bs::Path {
                 entity_type: observation.entity_type,
@@ -102,50 +109,56 @@ async fn observe_state(data: &bs::EntitySet, observed: &JsonValue, observation: 
                 components: Vec::new(),
             };
 
-            observe_node(node, observed, &observation, &path).await
+            observe_node(node, observed, &observation, path)
         }
     }
 }
 
-#[async_recursion]
-async fn observe_node(node: &bs::Node, observed: &JsonValue, observation: &bs::Observation, path: &bs::Path) -> Vec<bs::Patch> {
+fn optional_stream<'a>(val: impl Future<Output=Option<bs::Patch>> + 'a) -> Box<dyn Stream<Item=bs::Patch> + 'a> {
+    Box::new(stream::once(val)
+        .filter_map(|v| async { v }))
+}
+
+fn observe_node<'a>(node: &'a bs::Node, observed: &'a JsonValue, observation: &'a bs::Observation, path: bs::Path) -> BoxedPatchStream<'a> {
     match observed {
         JsonValue::Object(map) => {
-            observe_object(node, map, observation, path).await
+            observe_object(node, map, observation, path)
         }
         JsonValue::Array(vec) => {
-            observe_array(node, vec, observation, path).await
+            observe_array(node, vec, observation, path)
         }
         JsonValue::String(s) => {
-            observe_string(node, s, observation, path).await
+            observe_string(node, s, observation, path)
         }
-        JsonValue::Number(n) => {
+        _ => { todo!() }
+        /*JsonValue::Number(n) => {
             if let Some(i) = n.as_i64() {
-                observe_int(node, i, observation, path)
+                optional_stream(observe_int(node, i, observation, path))
             } else {
                 let f = n.as_f64()
                     .expect("Number could not be interpreted as int or float");
-                observe_float(node, f, observation, path)
+                optional_stream(observe_float(node, f, observation, path))
             }
         }
         JsonValue::Bool(b) => {
-            observe_bool(node, b, observation, path)
+            optional_stream(observe_bool(node, b, observation, path))
         }
         JsonValue::Null => {
-            observe_null(node, observation, path)
-        }
+            optional_stream(observe_null(node, observation, path))
+        }*/
     }
 }
 
-async fn observe_object(node: &bs::Node, observed: &JsonMap<String, JsonValue>, observation: &bs::Observation, path: &bs::Path) -> Vec<bs::Patch> {
+fn observe_object<'a>(node: &'a bs::Node, observed: &'a JsonMap<String, JsonValue>, observation: &'a bs::Observation, path: bs::Path) -> BoxedPatchStream<'a> {
     if let bs::Node::Object(obj) = node {
+        let base_path = path.clone();
         let deletions = obj.keys()
-            .filter_map(|key| {
+            .filter_map(move |key| {
                 match observed.get(key) {
                     // Value is in state, but not observation: Remove it
                     None => {
                         Some(bs::Patch {
-                            path: path.extend(key.into()),
+                            path: base_path.extend(key.into()),
                             change: bs::ChangeType::Remove,
                         })
                     }
@@ -154,17 +167,17 @@ async fn observe_object(node: &bs::Node, observed: &JsonMap<String, JsonValue>, 
                 }
             });
 
-        let changes_and_additions = stream::iter(observed.into_iter())
-            .then(|(key, value): (&String, &JsonValue)| async move {
+        let changes_and_additions = stream::iter(observed)
+            .map(move |(key, value)| {
                 let path = path.extend(key.into());
                 match obj.get(key) {
                     // Value is in both objects: Observe it
                     Some(node) => {
-                        observe_node(node, value, observation, &path).await
+                        observe_node(node, value, observation, path)
                     }
                     // Value is in observation, but not state: Add it
                     None => {
-                        vec![
+                        Box::pin(stream::once(async {
                             bs::Patch {
                                 path,
                                 change: bs::ChangeType::Add(bs::Node::new_from_json(
@@ -173,205 +186,228 @@ async fn observe_object(node: &bs::Node, observed: &JsonMap<String, JsonValue>, 
                                     Some(observation.clone()),
                                 )),
                             }
-                        ]
+                        }))
                     }
                 }
             })
-            .map(|v| stream::iter(v))
             .flatten();
 
-        stream::iter(deletions)
-            .chain(changes_and_additions)
-            .collect()
-            .await
+        Box::pin(stream::iter(deletions).chain(changes_and_additions))
     } else {
         let caused_by = Arc::new(bs::Event::ImplicitChange(observation.clone()));
         let observation = Some(observation.clone());
-        vec![
+        Box::pin(stream::once(async move {
             bs::Patch {
-                path: path.clone(),
+                path,
                 change: bs::ChangeType::Replace(bs::Node::new_from_json_object(observed, &caused_by, &observation)),
             }
-        ]
+        }))
     }
 }
 
-async fn observe_array(node: &bs::Node, observed: &Vec<JsonValue>, observation: &bs::Observation, path: &bs::Path) -> Vec<bs::Patch> {
+fn observe_array<'a>(node: &'a bs::Node, observed: &'a Vec<JsonValue>, observation: &'a bs::Observation, path: bs::Path) -> BoxedPatchStream<'a> {
     if let bs::Node::Array(arr) = node {
-        observe_array_subset(arr, 0, &observed, 0, observation, path).await
+        observe_array_subset(arr, 0, &observed, 0, observation, path)
     } else {
         let caused_by = Arc::new(bs::Event::ImplicitChange(observation.clone()));
         let observation = Some(observation.clone());
-        vec![
+        Box::pin(stream::once(async move {
             bs::Patch {
                 path: path.clone(),
                 change: bs::ChangeType::Replace(bs::Node::new_from_json_array(observed, &caused_by, &observation)),
             }
-        ]
+        })) as BoxedPatchStream
     }
 }
 
-#[async_recursion]
-async fn observe_array_subset(
-    current_values: &im::Vector<bs::Node>,
+fn observe_array_subset<'a>(
+    current_values: &'a im::Vector<bs::Node>,
     current_value_i: usize,
-    observed_values: &Vec<JsonValue>,
+    observed_values: &'a Vec<JsonValue>,
     observed_value_i: usize,
-    observation: &bs::Observation,
-    path: &bs::Path)
-    -> Vec<bs::Patch> {
+    observation: &'a bs::Observation,
+    path: bs::Path)
+    -> BoxedPatchStream<'a> {
     match (current_values.get(current_value_i), observed_values.get(observed_value_i)) {
         (Some(current_value), Some(observed_value)) => {
-            let item_path = path.extend(current_value_i.into());
-            // This clone() is a sign of bad code organization but whatever
-            let mut replace_changes = observe_node(current_value, observed_value, observation, &item_path).await;
-            let item_matches = replace_changes.is_empty();
+            let replace_changes = observe_array_slice_by_replacement(current_values, current_value_i, observed_values, observed_value_i, &observation, path.clone(), current_value, observed_value);
+            let delete_changes = observe_array_slice_by_deletion(current_values, current_value_i, observed_values, observed_value_i, &observation, path.clone());
+            let add_changes = observe_array_slice_by_addition(current_values, current_value_i, observed_values, observed_value_i, &observation, path, observed_value);
 
-            replace_changes.extend(
-                observe_array_subset(
-                    current_values,
-                    current_value_i + 1,
-                    observed_values,
-                    observed_value_i + 1,
-                    observation,
-                    path)
-                    .await
-                    .into_iter()
-            );
+            // I'm so, so sorry
+            Box::pin(
+                stream::once(async {
+                    let possible_changes = stream::iter(vec![
+                        replace_changes,
+                        delete_changes,
+                        add_changes,
+                    ])
+                        .then(|stream| StreamExt::collect::<Vec<_>>(stream))
+                        .collect::<Vec<_>>()
+                        .await;
+                    let best_change = possible_changes.into_iter()
+                        .min_by(|a, b| a.len().cmp(&b.len()))
+                        .unwrap_or(Vec::new());
 
-            if item_matches {
-                replace_changes
-            } else {
-                // Get changes that result from deleting the
-                let delete_changes = observe_array_slice_by_deletion(current_values, current_value_i, observed_values, observed_value_i, &observation, &path).await;
-                let add_changes = observe_array_slice_by_addition(current_values, current_value_i, observed_values, observed_value_i, &observation, &path, observed_value).await;
-
-                vec![
-                    replace_changes,
-                    delete_changes,
-                    add_changes,
-                ].into_iter()
-                    .min_by(|a, b| a.len().cmp(&b.len()))
-                    .unwrap_or(Vec::new())
-            }
+                    stream::iter(best_change)
+                })
+                    .flatten()
+            )
         }
         (Some(_), None) => {
             // Item exists in current but not observed. Delete it
-            observe_array_slice_by_deletion(current_values, current_value_i, observed_values, observed_value_i, &observation, &path).await
+            observe_array_slice_by_deletion(current_values, current_value_i, observed_values, observed_value_i, &observation, path)
         }
         (None, Some(observed_value)) => {
             // Item exists in observed but not current. Delete it
-            observe_array_slice_by_addition(current_values, current_value_i, observed_values, observed_value_i, &observation, &path, observed_value).await
+            observe_array_slice_by_addition(current_values, current_value_i, observed_values, observed_value_i, &observation, path, observed_value)
         }
         (None, None) => {
             // Recursion base case. No changes.
-            Vec::new()
+            Box::pin(stream::empty())
         }
     }
 }
 
-async fn observe_array_slice_by_addition(
-    current_values: &im::Vector<bs::Node>,
+fn observe_array_slice_by_replacement<'a>(
+    current_values: &'a im::Vector<bs::Node>,
     current_value_i: usize,
-    observed_values: &Vec<JsonValue>,
+    observed_values: &'a Vec<JsonValue>,
     observed_value_i: usize,
-    observation: &bs::Observation,
-    path: &bs::Path,
-    observed_value: &JsonValue) -> Vec<bs::Patch> {
+    observation: &'a bs::Observation,
+    path: bs::Path,
+    current_value: &'a bs::Node,
+    observed_value: &'a JsonValue) -> BoxedPatchStream<'a> {
     // Operate on the rest of the vector before this one, because the operation changes indices
-    let mut add_changes = observe_array_subset(
+    let item_path = path.extend(current_value_i.into());
+    let stream = observe_array_subset(
+        current_values,
+        current_value_i + 1,
+        observed_values,
+        observed_value_i + 1,
+        observation,
+        path)
+        .chain(observe_node(current_value, observed_value, observation, item_path));
+
+    Box::pin(stream)
+}
+
+
+fn observe_array_slice_by_addition<'a>(
+    current_values: &'a im::Vector<bs::Node>,
+    current_value_i: usize,
+    observed_values: &'a Vec<JsonValue>,
+    observed_value_i: usize,
+    observation: &'a bs::Observation,
+    path: bs::Path,
+    observed_value: &'a JsonValue) -> BoxedPatchStream<'a> {
+    // Operate on the rest of the vector before this one, because the operation changes indices
+    let stream = observe_array_subset(
         current_values,
         current_value_i,
         observed_values,
         observed_value_i + 1,
         observation,
-        path).await;
+        path.clone())
+        .chain(stream::once(async move {
+            bs::Patch {
+                path: path.extend(current_value_i.into()),
+                change: bs::ChangeType::Add(bs::Node::new_from_json(
+                    observed_value,
+                    Arc::new(bs::Event::ImplicitChange(observation.clone())),
+                    Some(observation.clone()),
+                )),
+            }
+        }));
 
-    add_changes.push(bs::Patch {
-        path: path.extend(current_value_i.into()),
-        change: bs::ChangeType::Add(bs::Node::new_from_json(
-            observed_value,
-            Arc::new(bs::Event::ImplicitChange(observation.clone())),
-            Some(observation.clone()),
-        )),
-    });
-
-    add_changes
+    Box::pin(stream)
 }
 
-async fn observe_array_slice_by_deletion(
-    current_values: &im::Vector<bs::Node>,
+fn observe_array_slice_by_deletion<'a>(
+    current_values: &'a im::Vector<bs::Node>,
     current_value_i: usize,
-    observed_values: &Vec<JsonValue>,
+    observed_values: &'a Vec<JsonValue>,
     observed_value_i: usize,
-    observation: &bs::Observation,
-    path: &bs::Path) -> Vec<bs::Patch> {
+    observation: &'a bs::Observation,
+    path: bs::Path) -> BoxedPatchStream<'a> {
     // Operate on the rest of the vector before this one, because the operation changes indices
-    let mut delete_changes = observe_array_subset(
+    let stream = observe_array_subset(
         current_values,
         current_value_i + 1,
         observed_values,
         observed_value_i,
         observation,
-        path).await;
+        path.clone())
+        .chain(stream::once(async move {
+            bs::Patch {
+                path: path.extend(current_value_i.into()),
+                change: bs::ChangeType::Remove,
+            }
+        }));
 
-    delete_changes.push(bs::Patch {
-        path: path.extend(current_value_i.into()),
-        change: bs::ChangeType::Remove,
-    });
-
-    delete_changes
+    Box::pin(stream)
 }
 
-async fn observe_string(node: &bs::Node, observed: &String, observation: &bs::Observation, path: &bs::Path) -> Vec<bs::Patch> {
-    if let bs::Node::Primitive(primitive) = node {
-        {
-            let primitive = primitive.read().await;
+fn observe_string<'a>(node: &'a bs::Node, observed: &'a String, observation: &'a bs::Observation, path: bs::Path) -> BoxedPatchStream<'a> {
+    if let bs::Node::Primitive(primitive_node) = node {
+        let s = stream::once(async move {
+            let primitive = primitive_node.read().await;
             if let bs::PrimitiveValue::String(value) = &primitive.value {
                 if value == observed {
-                    return Vec::new();
+                    None
+                } else {
+                    Some(bs::Patch {
+                        path,
+                        change: bs::ChangeType::Replace(bs::Node::successor(
+                            primitive_node.clone(),
+                            bs::PrimitiveValue::String(observed.clone()),
+                            Arc::new(bs::Event::ImplicitChange(observation.clone())),
+                            Some(observation.clone()),
+                        )),
+                    })
                 }
+            } else {
+                Some(bs::Patch {
+                    path,
+                    change: bs::ChangeType::Replace(bs::Node::successor(
+                        primitive_node.clone(),
+                        bs::PrimitiveValue::String(observed.clone()),
+                        Arc::new(bs::Event::ImplicitChange(observation.clone())),
+                        Some(observation.clone()),
+                    )),
+                })
             }
-        }
+        });
 
-        vec![
-            bs::Patch {
-                path: path.clone(),
-                change: bs::ChangeType::Replace(bs::Node::successor(
-                    primitive.clone(),
-                    bs::PrimitiveValue::String(observed.clone()),
-                    Arc::new(bs::Event::ImplicitChange(observation.clone())),
-                    Some(observation.clone()),
-                ))
-            }
-        ]
+        Box::pin(s.filter_map(|patch| async move { patch }))
     } else {
-        vec![
+        let s = stream::once(async {
             bs::Patch {
-                path: path.clone(),
+                path,
                 change: bs::ChangeType::Replace(bs::Node::new_primitive(
                     bs::PrimitiveValue::String(observed.clone()),
                     Arc::new(bs::Event::ImplicitChange(observation.clone())),
                     Some(observation.clone()),
                 )),
             }
-        ]
+        });
 
+        Box::pin(s)
     }
 }
 
-fn observe_int(node: &bs::Node, observed: i64, observation: &bs::Observation, path: &bs::Path) -> Vec<bs::Patch> {
+async fn observe_int(node: &bs::Node, observed: i64, observation: &bs::Observation, path: &bs::Path) -> Option<bs::Patch> {
     todo!()
 }
 
-fn observe_float(node: &bs::Node, observed: f64, observation: &bs::Observation, path: &bs::Path) -> Vec<bs::Patch> {
+async fn observe_float(node: &bs::Node, observed: f64, observation: &bs::Observation, path: &bs::Path) -> Option<bs::Patch> {
     todo!()
 }
 
-fn observe_bool(node: &bs::Node, observed: &bool, observation: &bs::Observation, path: &bs::Path) -> Vec<bs::Patch> {
+async fn observe_bool(node: &bs::Node, observed: &bool, observation: &bs::Observation, path: &bs::Path) -> Option<bs::Patch> {
     todo!()
 }
 
-fn observe_null(node: &bs::Node, observation: &bs::Observation, path: &bs::Path) -> Vec<bs::Patch> {
+async fn observe_null(node: &bs::Node, observation: &bs::Observation, path: &bs::Path) -> Option<bs::Patch> {
     todo!()
 }
