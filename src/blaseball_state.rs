@@ -408,7 +408,7 @@ impl BlaseballState {
         }))
     }
 
-    pub fn node_at<'a>(&'a self, path: &Path) -> Result<&'a Node, PathError> {
+    pub fn node_at(&self, path: &Path) -> Result<&Node, PathError> {
         let entity_set = self.data.get(path.entity_type)
             .ok_or_else(|| PathError::EntityTypeDoesNotExist(path.entity_type))?;
         let entity_id = path.entity_id

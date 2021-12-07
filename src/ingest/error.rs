@@ -5,6 +5,9 @@ use crate::blaseball_state::{BlaseballState, PathError};
 
 #[derive(Error, Debug)]
 pub enum IngestError {
+    #[error("Unexpected observation: \n{0}")]
+    UnexpectedObservation(String),
+    
     #[error(transparent)]
     PathError {
         #[from]

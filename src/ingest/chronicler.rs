@@ -45,6 +45,7 @@ impl IngestItem for ChronUpdate {
             entity_id: self.item.entity_id,
             observed_at: self.item.valid_from,
         };
+        let event = bs::Event::ImplicitChange(observation.clone());
 
         let entity_set = state.data.get(observation.entity_type)
             .expect("Unexpected entity type");
@@ -62,15 +63,25 @@ impl IngestItem for ChronUpdate {
             .collect::<Result<Vec<_>, _>>()?
             .join("\n");
 
+        let approval_msg= format!("From {}/{} at {}: \n{}",
+                                  self.endpoint,
+                                  self.item.entity_id,
+                                  self.item.valid_from,
+                                  approval_msg);
+
         // Otherwise, get approval
         let approved = log.get_approval(
             self.endpoint,
             self.item.entity_id,
             self.item.valid_from,
-            approval_msg,
+            approval_msg.clone(),
         ).await?;
 
-        todo!()
+        if !approved {
+            Err(IngestError::UnexpectedObservation(approval_msg))
+        } else {
+            Ok(vec![state.successor(event, mismatches)?])
+        }
     }
 }
 
