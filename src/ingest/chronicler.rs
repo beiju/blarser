@@ -82,7 +82,7 @@ impl IngestItem for ChronUpdate {
             Err(IngestError::UnexpectedObservation(approval_msg))
         } else {
             let event = bs::Event::ImplicitChange(observation);
-            Ok(vec![state.successor(event, mismatches)?])
+            Ok(vec![state.successor(event, mismatches).await?])
         }
     }
 }

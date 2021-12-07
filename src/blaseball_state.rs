@@ -9,6 +9,7 @@ use serde_json::{Map, Value as JsonValue};
 use thiserror::Error;
 use crate::ingest::{IngestError};
 use async_recursion::async_recursion;
+use im::{HashMap, Vector};
 
 /// Describes the event that caused one BlaseballState to change into another BlaseballState
 #[derive(Debug, Clone)]
@@ -174,40 +175,68 @@ pub enum PathError {
 
 }
 
+#[derive(Error, Debug)]
+pub enum ApplyChangeError {
+    #[error("Expected nothing at {0} but found {1}")]
+    UnexpectedValue(Path, String),
+
+    #[error("Expected value at {0} but found nothing")]
+    MissingValue(Path),
+
+    #[error(transparent)]
+    PathError {
+        #[from]
+        from: PathError
+    },
+
+}
+
 impl Node {
     #[async_recursion]
     pub async fn to_string(&self) -> String {
         match self {
             Node::Object(obj) => {
-                if obj.is_empty() {
-                    // Shortcut for two braces without spaces
-                    return "{}".to_string();
-                }
-
-                let inner = stream::iter(obj)
-                    .then(|(key, node)| async move {
-                        format!("\"{}\": {}", key, node.to_string().await)
-                    })
-                    .collect::<Vec<_>>()
-                    .await
-                    .join(", ");
-
-                format!("{{ {} }}", inner)
+                Self::object_to_string(obj).await
             }
             Node::Array(arr) => {
-                let inner = stream::iter(arr)
-                    .then(|node| node.to_string())
-                    .collect::<Vec<_>>()
-                    .await
-                    .join(", ");
-
-                format!("[{}]", inner)
+                Self::array_to_string(arr).await
             }
             Node::Primitive(primitive) => {
-                let lock = primitive.read().await;
-                format!("{}", lock.value)
+                Self::primitive_to_string(primitive).await
             }
         }
+    }
+
+    pub async fn primitive_to_string(primitive: &SharedPrimitiveNode) -> String {
+        let lock = primitive.read().await;
+        format!("{}", lock.value)
+    }
+
+    pub async fn array_to_string(arr: &Vector<Node>) -> String {
+        let inner = stream::iter(arr)
+            .then(|node| node.to_string())
+            .collect::<Vec<_>>()
+            .await
+            .join(", ");
+
+        format!("[{}]", inner)
+    }
+
+    pub async fn object_to_string(obj: &HashMap<String, Node>) -> String {
+        if obj.is_empty() {
+            // Shortcut for two braces without spaces
+            return "{}".to_string();
+        }
+
+        let inner = stream::iter(obj)
+            .then(|(key, node)| async move {
+                format!("\"{}\": {}", key, node.to_string().await)
+            })
+            .collect::<Vec<_>>()
+            .await
+            .join(", ");
+
+        format!("{{ {} }}", inner)
     }
 
     pub fn new_primitive(value: PrimitiveValue, caused_by: Arc<Event>, observed_by: Option<Observation>) -> Node {
@@ -438,13 +467,13 @@ impl BlaseballState {
         }
     }
 
-    pub fn successor(self: Arc<Self>, event: Event, patches: Vec<Patch>) -> Result<Arc<BlaseballState>, IngestError> {
+    pub async fn successor(self: Arc<Self>, event: Event, patches: Vec<Patch>) -> Result<Arc<BlaseballState>, IngestError> {
         let mut new_data = self.data.clone();
 
         let caused_by = Arc::new(event);
 
         for patch in patches {
-            apply_change(&mut new_data, &patch, caused_by.clone())?;
+            apply_change(&mut new_data, patch, caused_by.clone()).await?;
         }
 
         Ok(Arc::new(BlaseballState {
@@ -514,8 +543,157 @@ impl BlaseballState {
     }
 }
 
-fn apply_change(data: &mut BlaseballData, change: &Patch, caused_by: Arc<Event>) -> Result<(), PathError> {
-    todo!()
+async fn apply_change(data: &mut BlaseballData, change: Patch, caused_by: Arc<Event>) -> Result<(), ApplyChangeError> {
+    let entity_set = data.get_mut(change.path.entity_type)
+        .ok_or_else(|| PathError::EntityTypeDoesNotExist(change.path.entity_type))?;
+    let entity_id = change.path.entity_id
+        .ok_or_else(|| PathError::UnexpectedWildcard(change.path.entity_type))?;
+
+    // Treat the last path component specially because that's how we modify or delete the value
+    match change.path.components.clone().split_last() {
+        None => {
+            // Then we are acting on the entire entity
+            apply_change_to_hashmap(entity_set, &entity_id, change).await
+        }
+        Some((last, rest)) => {
+            let mut node = entity_set.get_mut(&entity_id)
+                .ok_or_else(|| PathError::EntityDoesNotExist(change.path.entity_type, entity_id))?;
+
+            for (i, component) in rest.iter().enumerate() {
+                node = match (node, component) {
+                    (Node::Object(obj), PathComponent::Index(_)) => {
+                        Err(PathError::UnexpectedType {
+                            path: change.path.slice(i),
+                            expected_type: "array",
+                            value: Node::object_to_string(obj).await,
+                        })
+                    }
+                    (Node::Object(obj), PathComponent::Key(key)) => {
+                        obj.get_mut(key)
+                            .ok_or_else(|| PathError::MissingKey(change.path.slice(i)))
+                    }
+                    (Node::Array(arr), PathComponent::Index(idx)) => {
+                        arr.get_mut(*idx)
+                            .ok_or_else(|| PathError::MissingKey(change.path.slice(i)))
+                    }
+                    (Node::Array(arr), PathComponent::Key(_)) => {
+                        Err(PathError::UnexpectedType {
+                            path: change.path.slice(i),
+                            expected_type: "object",
+                            value: Node::array_to_string(arr).await,
+                        })
+                    }
+                    (Node::Primitive(prim), component) => {
+                        let expected_type = match component {
+                            PathComponent::Index(_) => "array",
+                            PathComponent::Key(_) => "object",
+                        };
+
+                        Err(PathError::UnexpectedType {
+                            path: change.path.slice(i),
+                            expected_type,
+                            value: Node::primitive_to_string(prim).await,
+                        })
+                    }
+                }?;
+            }
+
+            match node {
+                Node::Object(obj) => {
+                    match last {
+                        PathComponent::Index(_) => {
+                            Err(PathError::UnexpectedType {
+                                path: change.path,
+                                expected_type: "object",
+                                value: node.to_string().await,
+                            }.into())
+                        }
+                        PathComponent::Key(key) => {
+                            apply_change_to_hashmap(obj, key, change).await
+                        }
+                    }
+                }
+                Node::Array(arr) => {
+                    match last {
+                        PathComponent::Index(idx) => {
+                            apply_change_to_vector(arr, *idx, change).await
+                        }
+                        PathComponent::Key(_) => {
+                            Err(PathError::UnexpectedType {
+                                path: change.path,
+                                expected_type: "array",
+                                value: node.to_string().await,
+                            }.into())
+                        }
+                    }
+                }
+                _ => {
+                    let expected_type = match last {
+                        PathComponent::Index(_) => "array",
+                        PathComponent::Key(_) => "object",
+                    };
+
+                    Err(PathError::UnexpectedType {
+                        path: change.path,
+                        expected_type,
+                        value: node.to_string().await,
+                    }.into())
+                }
+            }
+        }
+    }
+}
+
+async fn apply_change_to_hashmap<T: Clone + std::hash::Hash + std::cmp::Eq>(container: &mut im::HashMap<T, Node>, key: &T, change: Patch) -> Result<(), ApplyChangeError> {
+    match change.change {
+        ChangeType::Add(node) => {
+            if let Some(value) = container.get(key) {
+                return Err(ApplyChangeError::UnexpectedValue(change.path, value.to_string().await));
+            }
+            container.insert(key.clone(), node);
+        }
+        ChangeType::Remove => {
+            let removed = container.remove(key);
+            if let None = removed {
+                return Err(ApplyChangeError::MissingValue(change.path));
+            }
+        }
+        ChangeType::Replace(node) => {
+            if let None = container.get_key_value(key) {
+                return Err(ApplyChangeError::MissingValue(change.path));
+            }
+            container.insert(key.clone(), node);
+        }
+        _ => { todo!() }
+    }
+
+    Ok(())
+}
+
+async fn apply_change_to_vector(container: &mut im::Vector<Node>, idx: usize, change: Patch) -> Result<(), ApplyChangeError> {
+    match change.change {
+        ChangeType::Add(node) => {
+            if let Some(value) = container.get(idx) {
+                return Err(ApplyChangeError::UnexpectedValue(change.path, value.to_string().await));
+            }
+            container.insert(idx, node);
+        }
+        ChangeType::Remove => {
+            if let None = container.get(idx) {
+                return Err(ApplyChangeError::MissingValue(change.path));
+            }
+            container.remove(idx);
+        }
+        ChangeType::Replace(node) => {
+            if let None = container.get(idx) {
+                return Err(ApplyChangeError::MissingValue(change.path));
+            }
+            container.set(idx, node);
+        }
+        _ => { todo!() }
+    }
+
+    Ok(())
 }
 
 fn records_from_chron_at_time(entity_type: &'static str, at_time: &'static str) -> impl Iterator<Item=(Uuid, Node)> {

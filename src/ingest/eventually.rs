@@ -68,7 +68,7 @@ async fn apply_lets_go(state: Arc<bs::BlaseballState>, log: &IngestLogger, event
         },
     ];
 
-    state.successor(bs::Event::FeedEvent(event.id), diff)
+    state.successor(bs::Event::FeedEvent(event.id), diff).await
         .map(|s| vec![s])
 }
 
