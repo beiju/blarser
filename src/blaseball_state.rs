@@ -1,13 +1,14 @@
-use std::fmt::{Debug, Display, Formatter, Write};
+use std::fmt::{Debug, Display, Formatter};
 use im;
 use uuid::Uuid;
 use std::sync::Arc;
+use tokio::sync::{RwLock};
+use rocket::futures::stream::{self, StreamExt};
 use chrono::{DateTime, Utc};
-use im::HashMap;
-use itertools::Itertools;
-use serde_json::{Map, Value as JsonValue, Value};
+use serde_json::{Map, Value as JsonValue};
 use thiserror::Error;
 use crate::ingest::{IngestError};
+use async_recursion::async_recursion;
 
 /// Describes the event that caused one BlaseballState to change into another BlaseballState
 #[derive(Debug, Clone)]
@@ -40,22 +41,27 @@ pub struct BlaseballState {
 // The top levels of the state need to be handled directly, because they're separate objects in
 // Chron.
 pub type BlaseballData = im::HashMap<&'static str, EntitySet>;
-pub type EntitySet = im::HashMap<Uuid, Arc<Node>>;
+pub type EntitySet = im::HashMap<Uuid, Node>;
 
-#[derive(Debug)]
-pub struct Node {
-    pub predecessor: Option<Arc<Node>>,
-    pub caused_by: Arc<Event>,
-    pub observed_by: Option<Observation>,
-    pub value: NodeValue,
+pub type SharedPrimitiveNode = Arc<RwLock<PrimitiveNode>>;
+
+#[derive(Debug, Clone)]
+pub enum Node {
+    Object(im::HashMap<String, Node>),
+    Array(im::Vector<Node>),
+    Primitive(SharedPrimitiveNode),
 }
 
 #[derive(Debug)]
-pub enum NodeValue {
-    // Collections
-    Object(im::HashMap<String, Arc<Node>>),
-    Array(im::Vector<Arc<Node>>),
+pub struct PrimitiveNode {
+    pub predecessor: Option<SharedPrimitiveNode>,
+    pub caused_by: Arc<Event>,
+    pub observed_by: Option<Observation>,
+    pub value: PrimitiveValue,
+}
 
+#[derive(Debug)]
+pub enum PrimitiveValue {
     // Simple primitives
     Null,
     Bool(bool),
@@ -68,72 +74,32 @@ pub enum NodeValue {
     FloatRange(f64, f64),
 }
 
-impl Display for NodeValue {
+impl Display for PrimitiveValue {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            NodeValue::Object(obj) => {
-                if obj.is_empty() {
-                    // Shortcut for two braces without spaces
-                    return f.write_str("{}");
-                }
-
-                f.write_str("{ ")?;
-
-                let mut first = true;
-                for (key, node) in obj {
-                    if !first {
-                        first = false;
-                        f.write_str(", ")?;
-                    }
-
-                    write!(f, "\"{}\": {}", key, node.value)?;
-                }
-
-                f.write_str(" }")
-            }
-            NodeValue::Array(arr) => {
-                if arr.is_empty() {
-                    // Shortcut for two brackets without spackets
-                    return f.write_str("[]");
-                }
-
-                f.write_str("[ ")?;
-
-                let mut first = true;
-                for node in arr {
-                    if !first {
-                        first = false;
-                        f.write_str(", ")?;
-                    }
-
-                    write!(f, "{}", node.value)?;
-                }
-
-                f.write_str(" ]")
-            }
-            NodeValue::Null => {
+            PrimitiveValue::Null => {
                 write!(f, "null")
             }
-            NodeValue::Bool(b) => {
+            PrimitiveValue::Bool(b) => {
                 if *b {
                     f.write_str("true")
                 } else {
                     f.write_str("false")
                 }
             }
-            NodeValue::Int(i) => {
+            PrimitiveValue::Int(i) => {
                 write!(f, "{}", i)
             }
-            NodeValue::Float(d) => {
+            PrimitiveValue::Float(d) => {
                 write!(f, "{}", d)
             }
-            NodeValue::String(s) => {
+            PrimitiveValue::String(s) => {
                 f.write_str(s)
             }
-            NodeValue::IntRange(lower, upper) => {
+            PrimitiveValue::IntRange(lower, upper) => {
                 write!(f, "<int between {} and {}>", lower, upper)
             }
-            NodeValue::FloatRange(lower, upper) => {
+            PrimitiveValue::FloatRange(lower, upper) => {
                 write!(f, "<float between {} and {}>", lower, upper)
             }
         }
@@ -160,59 +126,90 @@ pub enum PathError {
 }
 
 impl Node {
-    pub fn new(value: NodeValue, caused_by: Arc<Event>, observed_by: Option<Observation>) -> Arc<Node> {
-        return Arc::new(Node {
+    #[async_recursion]
+    pub async fn to_string(&self) -> String {
+        match self {
+            Node::Object(obj) => {
+                if obj.is_empty() {
+                    // Shortcut for two braces without spaces
+                    return "{}".to_string();
+                }
+
+                let inner = stream::iter(obj)
+                    .then(|(key, node)| async move {
+                        format!("\"{}\": {}", key, node.to_string().await)
+                    })
+                    .collect::<Vec<_>>()
+                    .await
+                    .join(", ");
+
+                format!("{{ {} }}", inner)
+            }
+            Node::Array(arr) => {
+                let inner = stream::iter(arr)
+                    .then(|node| node.to_string())
+                    .collect::<Vec<_>>()
+                    .await
+                    .join(", ");
+
+                format!("[{}]", inner)
+            }
+            Node::Primitive(primitive) => {
+                let lock = primitive.read().await;
+                format!("{}", lock.value)
+            }
+        }
+    }
+
+    pub fn new_primitive(value: PrimitiveValue, caused_by: Arc<Event>, observed_by: Option<Observation>) -> Node {
+        return Node::Primitive(Arc::new(RwLock::new(PrimitiveNode {
             predecessor: None,
             caused_by,
             observed_by,
-            value
-        })
+            value,
+        })));
     }
 
-    pub fn successor(self: &Arc<Self>, value: NodeValue, caused_by: Arc<Event>, observed_by: Option<Observation>) -> Arc<Node> {
-        return Arc::new(Node {
-            predecessor: Some(self.clone()),
+    pub fn successor(predecessor: Arc<RwLock<PrimitiveNode>>, value: PrimitiveValue, caused_by: Arc<Event>, observed_by: Option<Observation>) -> Node {
+        Node::Primitive(Arc::new(RwLock::new(PrimitiveNode {
+            predecessor: Some(predecessor),
             caused_by,
             observed_by,
-            value
-        })
+            value,
+        })))
     }
 
-    pub fn new_from_json(value: &JsonValue, caused_by: Arc<Event>, observed_by: Option<Observation>) -> Arc<Node> {
+    pub fn new_from_json(value: &JsonValue, caused_by: Arc<Event>, observed_by: Option<Observation>) -> Node {
         match value {
             JsonValue::Null => {
-                Node::new(NodeValue::Null, caused_by, observed_by)
+                Node::new_primitive(PrimitiveValue::Null, caused_by, observed_by)
             }
             JsonValue::Bool(b) => {
-                Node::new(NodeValue::Bool(*b), caused_by, observed_by)
+                Node::new_primitive(PrimitiveValue::Bool(*b), caused_by, observed_by)
             }
             JsonValue::Number(n) => {
                 match n.as_i64() {
-                    Some(i) => Node::new(NodeValue::Int(i), caused_by, observed_by),
+                    Some(i) => Node::new_primitive(PrimitiveValue::Int(i), caused_by, observed_by),
                     None => {
                         let f = n.as_f64().expect("Number was neither i64 nor f64");
-                        Node::new(NodeValue::Float(f), caused_by, observed_by)
+                        Node::new_primitive(PrimitiveValue::Float(f), caused_by, observed_by)
                     }
                 }
             }
             JsonValue::String(s) => {
-                Node::new(NodeValue::String(s.clone()), caused_by, observed_by)
+                Node::new_primitive(PrimitiveValue::String(s.clone()), caused_by, observed_by)
             }
             JsonValue::Array(arr) => {
-                Node::new(NodeValue::new_from_json_array(arr, &caused_by, &observed_by),
-                          caused_by, observed_by)
+                Node::new_from_json_array(arr, &caused_by, &observed_by)
             }
             JsonValue::Object(obj) => {
-                Node::new(NodeValue::new_from_json_object(obj, &caused_by, &observed_by),
-                          caused_by, observed_by)
+                Node::new_from_json_object(obj, &caused_by, &observed_by)
             }
         }
     }
-}
 
-impl NodeValue {
-    pub fn new_from_json_object(obj: &Map<String, Value>, caused_by: &Arc<Event>, observed_by: &Option<Observation>) -> NodeValue {
-        NodeValue::Object(
+    pub fn new_from_json_object(obj: &Map<String, JsonValue>, caused_by: &Arc<Event>, observed_by: &Option<Observation>) -> Node {
+        Node::Object(
             obj.into_iter()
                 .map(|(key, val)|
                     (key.clone(), Node::new_from_json(val, caused_by.clone(), observed_by.clone())))
@@ -220,8 +217,8 @@ impl NodeValue {
         )
     }
 
-    pub fn new_from_json_array(arr: &Vec<Value>, caused_by: &Arc<Event>, observed_by: &Option<Observation>) -> NodeValue {
-        NodeValue::Array(
+    pub fn new_from_json_array(arr: &Vec<JsonValue>, caused_by: &Arc<Event>, observed_by: &Option<Observation>) -> Node {
+        Node::Array(
             arr.into_iter()
                 .map(|val| Node::new_from_json(val, caused_by.clone(), observed_by.clone()))
                 .collect()
@@ -236,20 +233,20 @@ pub struct Patch {
 }
 
 impl Patch {
-    pub fn description(&self, state: &BlaseballState) -> Result<String, PathError> {
+    pub async fn description(&self, state: &BlaseballState) -> Result<String, PathError> {
         let str = match &self.change {
             ChangeType::Add(node) => {
-                format!("{}: Add value {}", self.path, node.value)
+                format!("{}: Add value {}", self.path, node.to_string().await)
             }
             ChangeType::Remove => {
-                format!("{}: Remove value {}", self.path, state.node_at(&self.path)?.value)
-            },
+                format!("{}: Remove value {}", self.path, state.node_at(&self.path).await?.to_string().await)
+            }
             ChangeType::Replace(node) => {
-                format!("{}: Replace {} with {}", self.path, state.node_at(&self.path)?.value, node.value)
-            },
+                format!("{}: Replace {} with {}", self.path, state.node_at(&self.path).await?.to_string().await, node.to_string().await)
+            }
             ChangeType::Increment => {
-                format!("{}: Increment {}", self.path, state.node_at(&self.path)?.value)
-            },
+                format!("{}: Increment {}", self.path, state.node_at(&self.path).await?.to_string().await)
+            }
         };
 
         Ok(str)
@@ -258,9 +255,9 @@ impl Patch {
 
 #[derive(Clone)]
 pub enum ChangeType {
-    Add(Arc<Node>),
+    Add(Node),
     Remove,
-    Replace(Arc<Node>),
+    Replace(Node),
     Increment,
 }
 
@@ -318,7 +315,7 @@ impl Path {
         Path {
             entity_type: self.entity_type,
             entity_id: self.entity_id,
-            components: self.components[0..(index+1)].to_vec(),
+            components: self.components[0..(index + 1)].to_vec(),
         }
     }
 }
@@ -331,7 +328,7 @@ impl Path {
         Self {
             entity_type: self.entity_type,
             entity_id: self.entity_id,
-            components
+            components,
         }
     }
 }
@@ -408,7 +405,7 @@ impl BlaseballState {
         }))
     }
 
-    pub fn node_at(&self, path: &Path) -> Result<&Node, PathError> {
+    pub async fn node_at(&self, path: &Path) -> Result<&Node, PathError> {
         let entity_set = self.data.get(path.entity_type)
             .ok_or_else(|| PathError::EntityTypeDoesNotExist(path.entity_type))?;
         let entity_id = path.entity_id
@@ -418,14 +415,14 @@ impl BlaseballState {
 
         let mut node = entity;
         for (i, component) in path.components.iter().enumerate() {
-            node = match &node.value {
-                NodeValue::Object(obj) => {
+            node = match node {
+                Node::Object(obj) => {
                     match component {
                         PathComponent::Index(_) => {
                             Err(PathError::UnexpectedType {
                                 path: path.slice(i),
                                 expected_type: "object",
-                                value: format!("{}", node.value)
+                                value: node.to_string().await,
                             })
                         }
                         PathComponent::Key(key) => {
@@ -434,18 +431,17 @@ impl BlaseballState {
                         }
                     }
                 }
-                NodeValue::Array(arr) => {
+                Node::Array(arr) => {
                     match component {
                         PathComponent::Index(idx) => {
                             arr.get(*idx)
                                 .ok_or_else(|| PathError::MissingKey(path.slice(i)))
-
                         }
                         PathComponent::Key(_) => {
                             Err(PathError::UnexpectedType {
                                 path: path.slice(i),
                                 expected_type: "array",
-                                value: format!("{}", node.value)
+                                value: node.to_string().await,
                             })
                         }
                     }
@@ -459,9 +455,8 @@ impl BlaseballState {
                     Err(PathError::UnexpectedType {
                         path: path.slice(i),
                         expected_type,
-                        value: format!("{}", node.value)
+                        value: node.to_string().await,
                     })
-
                 }
             }?;
         }
@@ -470,11 +465,11 @@ impl BlaseballState {
     }
 }
 
-fn apply_change(data: &mut HashMap<&str, EntitySet>, change: &Patch, caused_by: Arc<Event>) -> Result<(), PathError> {
+fn apply_change(data: &mut BlaseballData, change: &Patch, caused_by: Arc<Event>) -> Result<(), PathError> {
     todo!()
 }
 
-fn records_from_chron_at_time(entity_type: &'static str, at_time: &'static str) -> impl Iterator<Item=(Uuid, Arc<Node>)> {
+fn records_from_chron_at_time(entity_type: &'static str, at_time: &'static str) -> impl Iterator<Item=(Uuid, Node)> {
     let event = Arc::new(Event::Start);
     crate::api::chronicler::entities(entity_type, at_time)
         .map(move |item| {

@@ -1,14 +1,11 @@
 use std::sync::Arc;
 use rocket::async_trait;
 use chrono::{DateTime, Utc};
-use std::collections::HashMap;
-use serde_json::json;
-use uuid::Uuid;
 
 use crate::api::{eventually, EventuallyEvent, EventType, LetsGoMetadata};
 use crate::blaseball_state as bs;
 use crate::blaseball_state::json_path;
-use crate::ingest::{IngestError, IngestItem, BoxedIngestItem};
+use crate::ingest::{IngestItem, BoxedIngestItem};
 use crate::ingest::error::IngestResult;
 use crate::ingest::log::IngestLogger;
 
