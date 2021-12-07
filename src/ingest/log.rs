@@ -61,7 +61,7 @@ impl IngestLogger {
                 ingest_id,
                 chronicler_entity_type: endpoint,
                 chronicler_time: update_time.naive_utc(),
-                chronicler_entity_id: entity_id,
+                chronicler_entity_id: entity_id.clone(),
                 message: &message,
             }).get_result(c)
         ).await?;

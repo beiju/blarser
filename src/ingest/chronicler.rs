@@ -5,7 +5,7 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use serde_json::{Value as JsonValue, map::Map as JsonMap, Value};
 use im::hashmap::Entry;
-use itertools::izip;
+use itertools::{Itertools, izip};
 use rocket::async_trait;
 use uuid::Uuid;
 
@@ -49,6 +49,27 @@ impl IngestItem for ChronUpdate {
         let entity_set = state.data.get(observation.entity_type)
             .expect("Unexpected entity type");
         let mismatches = observe_state(entity_set, &self.item.data, observation);
+
+        // If no mismatches, all is well. Return the existing state object, as (conceptually) no
+        // changes needed to be made. Filling in placeholders mutates in place and is not considered
+        // a change for this purpose.
+        if mismatches.is_empty() {
+            return Ok(vec![state]);
+        }
+
+        let approval_msg = mismatches.iter()
+            .map(|mismatch| mismatch.description(&state))
+            .collect::<Result<Vec<_>, _>>()?
+            .join("\n");
+
+        // Otherwise, get approval
+        let approved = log.get_approval(
+            self.endpoint,
+            self.item.entity_id,
+            self.item.valid_from,
+            approval_msg,
+        ).await?;
+
         todo!()
     }
 }

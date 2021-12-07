@@ -1,8 +1,10 @@
+use std::fmt::{Debug, Display, Formatter, Write};
 use im;
 use uuid::Uuid;
 use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use im::HashMap;
+use itertools::Itertools;
 use serde_json::{Map, Value as JsonValue, Value};
 use thiserror::Error;
 use crate::ingest::{IngestError};
@@ -50,9 +52,6 @@ pub struct Node {
 
 #[derive(Debug)]
 pub enum NodeValue {
-    // Deleted flag
-    Deleted,
-
     // Collections
     Object(im::HashMap<String, Arc<Node>>),
     Array(im::Vector<Arc<Node>>),
@@ -69,16 +68,94 @@ pub enum NodeValue {
     FloatRange(f64, f64),
 }
 
+impl Display for NodeValue {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            NodeValue::Object(obj) => {
+                if obj.is_empty() {
+                    // Shortcut for two braces without spaces
+                    return f.write_str("{}");
+                }
+
+                f.write_str("{ ")?;
+
+                let mut first = true;
+                for (key, node) in obj {
+                    if !first {
+                        first = false;
+                        f.write_str(", ")?;
+                    }
+
+                    write!(f, "\"{}\": {}", key, node.value)?;
+                }
+
+                f.write_str(" }")
+            }
+            NodeValue::Array(arr) => {
+                if arr.is_empty() {
+                    // Shortcut for two brackets without spackets
+                    return f.write_str("[]");
+                }
+
+                f.write_str("[ ")?;
+
+                let mut first = true;
+                for node in arr {
+                    if !first {
+                        first = false;
+                        f.write_str(", ")?;
+                    }
+
+                    write!(f, "{}", node.value)?;
+                }
+
+                f.write_str(" ]")
+            }
+            NodeValue::Null => {
+                write!(f, "null")
+            }
+            NodeValue::Bool(b) => {
+                if *b {
+                    f.write_str("true")
+                } else {
+                    f.write_str("false")
+                }
+            }
+            NodeValue::Int(i) => {
+                write!(f, "{}", i)
+            }
+            NodeValue::Float(d) => {
+                write!(f, "{}", d)
+            }
+            NodeValue::String(s) => {
+                f.write_str(s)
+            }
+            NodeValue::IntRange(lower, upper) => {
+                write!(f, "<int between {} and {}>", lower, upper)
+            }
+            NodeValue::FloatRange(lower, upper) => {
+                write!(f, "<float between {} and {}>", lower, upper)
+            }
+        }
+    }
+}
+
 #[derive(Error, Debug)]
-pub enum ApplyPatchError {
-    #[error("Chron {observation:?} update didn't match the expected value: {diff}")]
-    UpdateMismatch { observation: Observation, diff: String },
+pub enum PathError {
+    #[error("Path error at {0}: Entity type does not exist")]
+    EntityTypeDoesNotExist(&'static str),
 
-    #[error("Expected {path} to have type {expected_type}, but it had type {actual_type}")]
-    UnexpectedType { path: String, expected_type: &'static str, actual_type: &'static str },
+    #[error("Path error at {0}/*: Tried to use a wildcard expression in a context that does not support it")]
+    UnexpectedWildcard(&'static str),
 
-    #[error("State was missing key {0}")]
-    MissingKey(String),
+    #[error("Path error at {0}/{1}: Entity does not exist")]
+    EntityDoesNotExist(&'static str, Uuid),
+
+    #[error("Path error at {path}: Expected {expected_type} but found {value}")]
+    UnexpectedType { path: Path, expected_type: &'static str, value: String },
+
+    #[error("Path error at {0}: Path does not exist")]
+    MissingKey(Path),
 
 }
 
@@ -158,6 +235,27 @@ pub struct Patch {
     pub change: ChangeType,
 }
 
+impl Patch {
+    pub fn description(&self, state: &BlaseballState) -> Result<String, PathError> {
+        let str = match &self.change {
+            ChangeType::Add(node) => {
+                format!("{}: Add value {}", self.path, node.value)
+            }
+            ChangeType::Remove => {
+                format!("{}: Remove value {}", self.path, state.node_at(&self.path)?.value)
+            },
+            ChangeType::Replace(node) => {
+                format!("{}: Replace {} with {}", self.path, state.node_at(&self.path)?.value, node.value)
+            },
+            ChangeType::Increment => {
+                format!("{}: Increment {}", self.path, state.node_at(&self.path)?.value)
+            },
+        };
+
+        Ok(str)
+    }
+}
+
 #[derive(Clone)]
 pub enum ChangeType {
     Add(Arc<Node>),
@@ -166,10 +264,21 @@ pub enum ChangeType {
     Increment,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum PathComponent {
     Key(String),
     Index(usize),
+}
+
+impl Display for PathComponent {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PathComponent::Key(k) => { write!(f, "{}", k)?; }
+            PathComponent::Index(i) => { write!(f, "{}", i)?; }
+        }
+
+        Ok(())
+    }
 }
 
 impl From<usize> for PathComponent {
@@ -196,12 +305,22 @@ impl From<String> for PathComponent {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Path {
     pub entity_type: &'static str,
     // None means apply to all entities
     pub entity_id: Option<Uuid>,
     pub components: Vec<PathComponent>,
+}
+
+impl Path {
+    pub fn slice(&self, index: usize) -> Path {
+        Path {
+            entity_type: self.entity_type,
+            entity_id: self.entity_id,
+            components: self.components[0..(index+1)].to_vec(),
+        }
+    }
 }
 
 impl Path {
@@ -216,6 +335,23 @@ impl Path {
         }
     }
 }
+
+impl Display for Path {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        if let Some(entity_id) = self.entity_id {
+            write!(f, "{}/{}", self.entity_type, entity_id)?;
+        } else {
+            write!(f, "{}/*", self.entity_type)?;
+        }
+
+        for component in &self.components {
+            write!(f, "/{}", component)?;
+        }
+
+        Ok(())
+    }
+}
+
 
 macro_rules! json_path {
     ($entity_type_expr:expr, $entity_id_expr:expr) => {{
@@ -271,108 +407,71 @@ impl BlaseballState {
             data: new_data,
         }))
     }
+
+    pub fn node_at<'a>(&'a self, path: &Path) -> Result<&'a Node, PathError> {
+        let entity_set = self.data.get(path.entity_type)
+            .ok_or_else(|| PathError::EntityTypeDoesNotExist(path.entity_type))?;
+        let entity_id = path.entity_id
+            .ok_or_else(|| PathError::UnexpectedWildcard(path.entity_type))?;
+        let entity = entity_set.get(&entity_id)
+            .ok_or_else(|| PathError::EntityDoesNotExist(path.entity_type, entity_id))?;
+
+        let mut node = entity;
+        for (i, component) in path.components.iter().enumerate() {
+            node = match &node.value {
+                NodeValue::Object(obj) => {
+                    match component {
+                        PathComponent::Index(_) => {
+                            Err(PathError::UnexpectedType {
+                                path: path.slice(i),
+                                expected_type: "object",
+                                value: format!("{}", node.value)
+                            })
+                        }
+                        PathComponent::Key(key) => {
+                            obj.get(key)
+                                .ok_or_else(|| PathError::MissingKey(path.slice(i)))
+                        }
+                    }
+                }
+                NodeValue::Array(arr) => {
+                    match component {
+                        PathComponent::Index(idx) => {
+                            arr.get(*idx)
+                                .ok_or_else(|| PathError::MissingKey(path.slice(i)))
+
+                        }
+                        PathComponent::Key(_) => {
+                            Err(PathError::UnexpectedType {
+                                path: path.slice(i),
+                                expected_type: "array",
+                                value: format!("{}", node.value)
+                            })
+                        }
+                    }
+                }
+                _ => {
+                    let expected_type = match component {
+                        PathComponent::Index(_) => "array",
+                        PathComponent::Key(_) => "object",
+                    };
+
+                    Err(PathError::UnexpectedType {
+                        path: path.slice(i),
+                        expected_type,
+                        value: format!("{}", node.value)
+                    })
+
+                }
+            }?;
+        }
+
+        Ok(node)
+    }
 }
 
-fn apply_change(data: &mut HashMap<&str, EntitySet>, change: &Patch, caused_by: Arc<Event>) -> Result<(), ApplyPatchError> {
+fn apply_change(data: &mut HashMap<&str, EntitySet>, change: &Patch, caused_by: Arc<Event>) -> Result<(), PathError> {
     todo!()
-}
-
-fn get_value_ref(value: &mut Node, path: &[PathComponent], change: &ChangeType, caused_by: Arc<Event>, path_str: String) -> Result<(), ApplyPatchError> {
-    todo!()
-
-/*    return match (value, path.first()) {
-        (_, None) => {
-            *value = change.
-        }
-        (Node::Object(obj), Some(PathComponent::Key(key))) => {
-            let value = obj.get_mut(*key)
-                .ok_or(ApplyChangeError::MissingKey(format!("{}/{}", path_str, key)))?;
-            get_value_ref(value, &path[1..], change, caused_by, format!("{}/{}", path_str, key))
-        }
-        (Node::Array(arr), Some(PathComponent::Index(i))) => {
-            let value = arr.get_mut(*i)
-                .ok_or(ApplyChangeError::MissingKey(format!("{}/{}", path_str, i)))?;
-            get_value_ref(value, &path[1..], change, caused_by, format!("{}/{}", path_str, i))
-        }
-
-    }
-
-
-
-    match path.split_first() {
-        None => Err(ApplyChangeError::MissingKey(path_str)),
-        Some((first, rest)) => {
-            match value {
-                Node::Object(obj) => {
-                    match first {
-                        PathComponent::Key(k) => {
-                            let path_str = format!("{}/{}", path_str, k);
-                            match obj.get_mut(*k) {
-                                None => Err(ApplyChangeError::MissingKey(path_str)),
-                                Some(value) => get_value_ref(value, rest, change, caused_by, path_str)
-                            }
-                        }
-                        PathComponent::Index(i) => {
-                            Err(ApplyChangeError::UnexpectedType {
-                                path: format!("{}/{}", path_str, i),
-                                expected_type: "object",
-                                actual_type: "array",
-                            })
-                        }
-                    }
-                }
-                Node::Array(arr) => {
-                    match first {
-                        PathComponent::Key(k) => {
-                            Err(ApplyChangeError::UnexpectedType {
-                                path: format!("{}/{}", path_str, k),
-                                expected_type: "array",
-                                actual_type: "object",
-                            })
-                        }
-                        PathComponent::Index(i) => {
-                            let path_str = format!("{}/{}", path_str, i);
-                            match arr.get_mut(*i) {
-                                None => Err(ApplyChangeError::MissingKey(path_str)),
-                                Some(value) => {
-                                    if rest.is_empty() {
-                                        *value = Node::Primitive(Arc::new(TrackedValue {
-                                            predecessor: value,
-                                            caused_by,
-                                            observed_by: None,
-                                            value: PrimitiveValue::Null
-                                        }))
-                                    } else {
-                                        get_value_ref(value, rest, change, caused_by, path_str)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                Node::Primitive(_) => {
-                    match first {
-                        PathComponent::Key(k) => {
-                            Err(ApplyChangeError::UnexpectedType {
-                                path: format!("{}/{}", path_str, k),
-                                expected_type: "array",
-                                actual_type: "primitive",
-                            })
-                        }
-                        PathComponent::Index(i) => {
-                            Err(ApplyChangeError::UnexpectedType {
-                                path: format!("{}/{}", path_str, i),
-                                expected_type: "object",
-                                actual_type: "primitive",
-                            })
-                        }
-                    }
-                }
-            }
-        }
-    }
-
- */
 }
 
 fn records_from_chron_at_time(entity_type: &'static str, at_time: &'static str) -> impl Iterator<Item=(Uuid, Arc<Node>)> {

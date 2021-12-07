@@ -1,14 +1,14 @@
 use std::sync::Arc;
 use thiserror::Error;
-use crate::blaseball_state::{BlaseballState, ApplyPatchError};
+use crate::blaseball_state::{BlaseballState, PathError};
 
 
 #[derive(Error, Debug)]
 pub enum IngestError {
     #[error(transparent)]
-    ApplyChange {
+    PathError {
         #[from]
-        source: ApplyPatchError,
+        source: PathError,
     },
 
     #[error(transparent)]
