@@ -1,11 +1,9 @@
-use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use serde_json::{Value as JsonValue, map::Map as JsonMap};
 use rocket::async_trait;
 use rocket::futures::stream::{self, Stream, StreamExt};
-use rocket::futures::FutureExt;
 
 use crate::api::{chronicler, ChroniclerItem};
 use crate::blaseball_state as bs;
@@ -377,20 +375,4 @@ fn observe_primitive<'a, PrimitiveT: Send + Sync + 'a>(node: &'a bs::Node, obser
         .filter_map(|v| async { v });
 
     Box::pin(s)
-}
-
-async fn observe_int(node: &bs::Node, observed: i64, observation: &bs::Observation, path: &bs::Path) -> Option<bs::Patch> {
-    todo!()
-}
-
-async fn observe_float(node: &bs::Node, observed: f64, observation: &bs::Observation, path: &bs::Path) -> Option<bs::Patch> {
-    todo!()
-}
-
-async fn observe_bool(node: &bs::Node, observed: &bool, observation: &bs::Observation, path: &bs::Path) -> Option<bs::Patch> {
-    todo!()
-}
-
-async fn observe_null(node: &bs::Node, observation: &bs::Observation, path: &bs::Path) -> Option<bs::Patch> {
-    todo!()
 }
