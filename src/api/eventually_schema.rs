@@ -37,7 +37,7 @@ pub struct EventuallyEvent {
 pub struct LetsGoMetadata {
     pub home: Uuid,
     pub away: Uuid,
-    pub stadium: Uuid,
+    pub stadium: Option<Uuid>,
     pub weather: Weather,
 }
 
@@ -58,7 +58,8 @@ pub enum Weather {
     Birds = 11,
     Feedback = 12,
     Reverb = 13,
-    // etc.
+    // Filled in as-needed from here
+    Flooding = 18
 }
 
 #[derive(Deserialize_repr, PartialEq, Debug)]

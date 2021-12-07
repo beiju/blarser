@@ -183,6 +183,9 @@ pub enum ApplyChangeError {
     #[error("Expected value at {0} but found nothing")]
     MissingValue(Path),
 
+    #[error("Cannot increment value {1} at {0}")]
+    CannotIncrement(Path, String),
+
     #[error(transparent)]
     PathError {
         #[from]
@@ -553,7 +556,7 @@ async fn apply_change(data: &mut BlaseballData, change: Patch, caused_by: Arc<Ev
     match change.path.components.clone().split_last() {
         None => {
             // Then we are acting on the entire entity
-            apply_change_to_hashmap(entity_set, &entity_id, change).await
+            apply_change_to_hashmap(entity_set, &entity_id, change, caused_by).await
         }
         Some((last, rest)) => {
             let mut node = entity_set.get_mut(&entity_id)
@@ -609,7 +612,7 @@ async fn apply_change(data: &mut BlaseballData, change: Patch, caused_by: Arc<Ev
                             }.into())
                         }
                         PathComponent::Key(key) => {
-                            apply_change_to_hashmap(obj, key, change).await
+                            apply_change_to_hashmap(obj, key, change, caused_by).await
                         }
                     }
                 }
@@ -644,7 +647,7 @@ async fn apply_change(data: &mut BlaseballData, change: Patch, caused_by: Arc<Ev
     }
 }
 
-async fn apply_change_to_hashmap<T: Clone + std::hash::Hash + std::cmp::Eq>(container: &mut im::HashMap<T, Node>, key: &T, change: Patch) -> Result<(), ApplyChangeError> {
+async fn apply_change_to_hashmap<T: Clone + std::hash::Hash + std::cmp::Eq>(container: &mut im::HashMap<T, Node>, key: &T, change: Patch, caused_by: Arc<Event>) -> Result<(), ApplyChangeError> {
     match change.change {
         ChangeType::Add(node) => {
             if let Some(value) = container.get(key) {
@@ -664,7 +667,36 @@ async fn apply_change_to_hashmap<T: Clone + std::hash::Hash + std::cmp::Eq>(cont
             }
             container.insert(key.clone(), node);
         }
-        _ => { todo!() }
+        ChangeType::Increment => {
+            let new_node = match container.get(key) {
+                None => { Err(ApplyChangeError::MissingValue(change.path)) }
+                Some(Node::Primitive(primitive)) => {
+                    let node = primitive.read().await;
+                    let new_node = match &node.value {
+                        PrimitiveValue::Int(i) => Node::successor(
+                            primitive.clone(),
+                            PrimitiveValue::Int(i + 1),
+                            caused_by,
+                            None
+                        ),
+                        PrimitiveValue::IntRange(upper, lower) => Node::successor(
+                            primitive.clone(),
+                            PrimitiveValue::IntRange(upper + 1, lower + 1),
+                            caused_by,
+                            None
+                        ),
+                        value => {
+                            return Err(ApplyChangeError::CannotIncrement(change.path, value.to_string()))
+                        }
+                    };
+                    Ok(new_node)
+                }
+                Some(node) => {
+                    Err(ApplyChangeError::CannotIncrement(change.path, node.to_string().await))
+                }
+            }?;
+            container.insert(key.clone(), new_node);
+        }
     }
 
     Ok(())

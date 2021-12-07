@@ -42,6 +42,10 @@ impl IngestItem for EventuallyEvent {
             EventType::Walk => apply_walk(state, log, self).await,
             EventType::RunsScored => apply_runs_scored(state, log, self).await,
             EventType::HomeRun => apply_home_run(state, log, self).await,
+            EventType::StormWarning => apply_storm_warning(state, log, self).await,
+            EventType::PlayerStatReroll => apply_player_stat_reroll(state, log, self).await,
+            EventType::Snowflakes => apply_snowflakes(state, log, self).await,
+            EventType::AddedMod => apply_added_mod(state, log, self).await,
             _ => todo!()
         }
     }
@@ -60,11 +64,11 @@ async fn apply_lets_go(state: Arc<bs::BlaseballState>, log: &IngestLogger, event
     let diff = vec![
         bs::Patch {
             path: json_path!("team", metadata.home, "rotationSlot"),
-            change: bs::ChangeType::Increment
+            change: bs::ChangeType::Increment,
         },
         bs::Patch {
             path: json_path!("team", metadata.away, "rotationSlot"),
-            change: bs::ChangeType::Increment
+            change: bs::ChangeType::Increment,
         },
     ];
 
@@ -166,6 +170,34 @@ async fn apply_runs_scored(state: Arc<bs::BlaseballState>, log: &IngestLogger, _
 
 async fn apply_home_run(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: &EventuallyEvent) -> IngestResult {
     log.debug("Applying HomeRun event".to_string()).await?;
+    // TODO
+    Ok(vec![state])
+}
+
+
+async fn apply_storm_warning(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: &EventuallyEvent) -> IngestResult {
+    log.debug("Applying StormWarning event".to_string()).await?;
+    // TODO
+    Ok(vec![state])
+}
+
+
+async fn apply_player_stat_reroll(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: &EventuallyEvent) -> IngestResult {
+    log.debug("Applying PlayerStatReroll event".to_string()).await?;
+    // TODO
+    Ok(vec![state])
+}
+
+
+async fn apply_snowflakes(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: &EventuallyEvent) -> IngestResult {
+    log.debug("Applying Snowflakes event".to_string()).await?;
+    // TODO
+    Ok(vec![state])
+}
+
+
+async fn apply_added_mod(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: &EventuallyEvent) -> IngestResult {
+    log.debug("Applying AddedMod event".to_string()).await?;
     // TODO
     Ok(vec![state])
 }
