@@ -9,6 +9,7 @@ use rocket::futures::FutureExt;
 
 use crate::api::{chronicler, ChroniclerItem};
 use crate::blaseball_state as bs;
+use crate::blaseball_state::PrimitiveValue;
 use crate::ingest::{IngestItem, BoxedIngestItem};
 use crate::ingest::error::IngestError;
 use crate::ingest::log::IngestLogger;
@@ -114,11 +115,6 @@ fn observe_state<'a>(data: &'a bs::EntitySet, observed: &'a JsonValue, observati
     }
 }
 
-fn optional_stream<'a>(val: impl Future<Output=Option<bs::Patch>> + 'a) -> Box<dyn Stream<Item=bs::Patch> + 'a> {
-    Box::new(stream::once(val)
-        .filter_map(|v| async { v }))
-}
-
 fn observe_node<'a>(node: &'a bs::Node, observed: &'a JsonValue, observation: &'a bs::Observation, path: bs::Path) -> BoxedPatchStream<'a> {
     match observed {
         JsonValue::Object(map) => {
@@ -128,24 +124,23 @@ fn observe_node<'a>(node: &'a bs::Node, observed: &'a JsonValue, observation: &'
             observe_array(node, vec, observation, path)
         }
         JsonValue::String(s) => {
-            observe_string(node, s, observation, path)
+            observe_primitive(node, s, observation, path)
         }
-        _ => { todo!() }
-        /*JsonValue::Number(n) => {
+        JsonValue::Number(n) => {
             if let Some(i) = n.as_i64() {
-                optional_stream(observe_int(node, i, observation, path))
+                observe_primitive(node, i, observation, path)
             } else {
                 let f = n.as_f64()
                     .expect("Number could not be interpreted as int or float");
-                optional_stream(observe_float(node, f, observation, path))
+                observe_primitive(node, f, observation, path)
             }
         }
         JsonValue::Bool(b) => {
-            optional_stream(observe_bool(node, b, observation, path))
+            observe_primitive(node, b, observation, path)
         }
         JsonValue::Null => {
-            optional_stream(observe_null(node, observation, path))
-        }*/
+            observe_primitive(node, (), observation, path)
+        }
     }
 }
 
@@ -348,52 +343,40 @@ fn observe_array_slice_by_deletion<'a>(
     Box::pin(stream)
 }
 
-fn observe_string<'a>(node: &'a bs::Node, observed: &'a String, observation: &'a bs::Observation, path: bs::Path) -> BoxedPatchStream<'a> {
-    if let bs::Node::Primitive(primitive_node) = node {
-        let s = stream::once(async move {
+fn observe_primitive<'a, PrimitiveT: Send + Sync + 'a>(node: &'a bs::Node, observed: PrimitiveT, observation: &'a bs::Observation, path: bs::Path)
+                                         -> BoxedPatchStream<'a>
+    where PrimitiveValue: From<PrimitiveT> {
+    let s =stream::once(async move {
+        let observed_primitive: PrimitiveValue = observed.into();
+        if let bs::Node::Primitive(primitive_node) = node {
             let primitive = primitive_node.read().await;
-            if let bs::PrimitiveValue::String(value) = &primitive.value {
-                if value == observed {
-                    None
-                } else {
-                    Some(bs::Patch {
-                        path,
-                        change: bs::ChangeType::Replace(bs::Node::successor(
-                            primitive_node.clone(),
-                            bs::PrimitiveValue::String(observed.clone()),
-                            Arc::new(bs::Event::ImplicitChange(observation.clone())),
-                            Some(observation.clone()),
-                        )),
-                    })
-                }
+            if observed_primitive == primitive.value {
+                None
             } else {
                 Some(bs::Patch {
                     path,
                     change: bs::ChangeType::Replace(bs::Node::successor(
                         primitive_node.clone(),
-                        bs::PrimitiveValue::String(observed.clone()),
+                        observed_primitive,
                         Arc::new(bs::Event::ImplicitChange(observation.clone())),
                         Some(observation.clone()),
                     )),
                 })
             }
-        });
-
-        Box::pin(s.filter_map(|patch| async move { patch }))
-    } else {
-        let s = stream::once(async {
-            bs::Patch {
+        } else {
+            Some(bs::Patch {
                 path,
                 change: bs::ChangeType::Replace(bs::Node::new_primitive(
-                    bs::PrimitiveValue::String(observed.clone()),
+                    observed_primitive,
                     Arc::new(bs::Event::ImplicitChange(observation.clone())),
                     Some(observation.clone()),
                 )),
-            }
-        });
+            })
+        }
+    })
+        .filter_map(|v| async { v });
 
-        Box::pin(s)
-    }
+    Box::pin(s)
 }
 
 async fn observe_int(node: &bs::Node, observed: i64, observation: &bs::Observation, path: &bs::Path) -> Option<bs::Patch> {

@@ -106,6 +106,55 @@ impl Display for PrimitiveValue {
     }
 }
 
+impl From<&String> for PrimitiveValue {
+    fn from(str: &String) -> Self {
+        Self::String(str.clone())
+    }
+}
+
+impl From<i64> for PrimitiveValue {
+    fn from(i: i64) -> Self {
+        Self::Int(i)
+    }
+}
+
+impl From<f64> for PrimitiveValue {
+    fn from(f: f64) -> Self {
+        Self::Float(f)
+    }
+}
+
+impl From<&bool> for PrimitiveValue {
+    fn from(b: &bool) -> Self {
+        Self::Bool(*b)
+    }
+}
+
+impl From<()> for PrimitiveValue {
+    fn from(_: ()) -> Self {
+        Self::Null
+    }
+}
+
+impl PartialEq for PrimitiveValue {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Null, Self::Null) => true,
+            (Self::Bool(a), Self::Bool(b)) => a == b,
+            (Self::Int(a), Self::Int(b)) => a == b,
+            (Self::Float(a), Self::Float(b)) => a == b,
+            (Self::String(a), Self::String(b)) => a == b,
+            _ => false
+        }
+    }
+}
+
+impl PrimitiveValue {
+    pub fn equals<T: Into<Self>>(&self, other: T) -> bool {
+        &other.into() == self
+    }
+}
+
 #[derive(Error, Debug)]
 pub enum PathError {
     #[error("Path error at {0}: Entity type does not exist")]
