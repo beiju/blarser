@@ -5,7 +5,6 @@ table! {
     ingest_approvals (id) {
         id -> Int4,
         at -> Timestamp,
-        ingest_id -> Int4,
         chronicler_entity_type -> Varchar,
         chronicler_time -> Timestamp,
         chronicler_entity_id -> Uuid,
@@ -26,6 +25,7 @@ table! {
         #[sql_name = "type"]
         type_ -> Log_type,
         message -> Text,
+        approval_id -> Nullable<Int4>,
     }
 }
 
@@ -38,6 +38,9 @@ table! {
         started_at -> Timestamp,
     }
 }
+
+joinable!(ingest_logs -> ingest_approvals (approval_id));
+joinable!(ingest_logs -> ingests (ingest_id));
 
 allow_tables_to_appear_in_same_query!(
     ingest_approvals,

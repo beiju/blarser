@@ -1,18 +1,10 @@
 {{#> base title="Pending Approvals" }}
 
     {{#*inline "content-block"}}
-        <p>Started ingest {{ ingest_id}} at {{ ingest_started_at }}</p>
-
         <ul>
             {{#each approvals}}
                 <li>
-                    <pre>{{ message }}</pre>
-                    <form action="/approve" method="post">
-                        <input type="hidden" name="approval_id" value="{{ id }}">
-                        <textarea name="message" placeholder="Message (optional)"></textarea>
-                        <button name="approved" value="false" type="submit">Reject</button>
-                        <button name="approved" value="true" type="submit">Accept</button>
-                    </form>
+                    {{> approvals-partial from_route="approvals" }}
                 </li>
             {{/each}}
         </ul>

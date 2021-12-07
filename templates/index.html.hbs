@@ -5,7 +5,12 @@
 
         <ul>
             {{#each logs}}
-                <li>{{ message }}</li>
+                <li>
+                    <p>{{ log.message }}</p>
+                    {{#if approval}}
+                        <p>{{> approvals-partial approval from_route="index" }}</p>
+                    {{/if}}
+                </li>
             {{/each}}
         </ul>
     {{/inline}}

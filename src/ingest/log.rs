@@ -31,12 +31,12 @@ impl IngestLogger {
 
     pub async fn info(&self, msg: String) -> diesel::QueryResult<()> {
         info!("{}", msg);
-        self.save_log(msg, db_types::LogType::Info).await
+        self.save_log(msg, None,db_types::LogType::Info).await
     }
 
     pub async fn debug(&self, msg: String) -> diesel::QueryResult<()> {
         debug!("{}", msg);
-        self.save_log(msg, db_types::LogType::Debug).await
+        self.save_log(msg, None,db_types::LogType::Debug).await
     }
 
     pub async fn get_approval(
@@ -48,23 +48,28 @@ impl IngestLogger {
     ) -> diesel::QueryResult<bool> {
         use crate::schema::ingest_approvals::dsl;
 
-        let ingest_id = self.ingest_id.clone();
-        let approval = self.get_approval_from_db(endpoint, entity_id, update_time).await?;
+        let approval_record: IngestApproval = self.conn.run(move |c| {
+            let existing = dsl::ingest_approvals
+                .filter(dsl::chronicler_entity_type.eq(endpoint))
+                .filter(dsl::chronicler_time.eq(update_time.naive_utc()))
+                .filter(dsl::chronicler_entity_id.eq(entity_id))
+                .load::<IngestApproval>(c)?;
 
-        if let Some(approval) = approval {
-            return Ok(approval)
-        }
+            assert!(existing.len() <= 1, "Found more than one record for this approval");
 
-        let approval_record: IngestApproval = self.conn.run(move |c|
+            // into_iter().next() acts like first() but it moves the item out (and consumes the vec)
+            if let Some(record) = existing.into_iter().next() {
+                return Ok(record)
+            }
+
             diesel::insert_into(dsl::ingest_approvals).values(NewIngestApproval {
                 at: Utc::now().naive_utc(),
-                ingest_id,
                 chronicler_entity_type: endpoint,
                 chronicler_time: update_time.naive_utc(),
                 chronicler_entity_id: entity_id.clone(),
                 message: &message,
             }).get_result(c)
-        ).await?;
+        }).await?;
 
         loop {
             let (sender, receiver) = oneshot::channel();
@@ -79,7 +84,9 @@ impl IngestLogger {
                 None => {}
             }
 
-            info!("Waiting on approval for id {} from ingest {}", approval_record.id, ingest_id);
+            let msg = format!("Waiting on approval for id {} from ingest {}", approval_record.id, self.ingest_id);
+            info!("{}", msg);
+            self.save_log(msg, Some(approval_record.id),db_types::LogType::Info).await?;
             receiver.await.unwrap();
         }
     }
@@ -102,7 +109,7 @@ impl IngestLogger {
         Ok(approvals.into_iter().nth(0).flatten())
     }
 
-    async fn save_log(&self, msg: String, type_: db_types::LogType) -> diesel::QueryResult<()> {
+    async fn save_log(&self, msg: String, approval_id: Option<i32>, type_: db_types::LogType) -> diesel::QueryResult<()> {
         use crate::schema::ingest_logs::dsl::ingest_logs;
 
         let ingest_id = self.ingest_id.clone();
@@ -111,7 +118,8 @@ impl IngestLogger {
                 at: Utc::now().naive_utc(),
                 ingest_id,
                 type_,
-                message: &*msg
+                message: &*msg,
+                approval_id,
             }).execute(c)
         ).await?;
 

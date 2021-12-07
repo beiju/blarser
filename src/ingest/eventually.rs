@@ -137,6 +137,7 @@ async fn apply_hit(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &E
     let player_id = event.player_tags.get(0)
         .ok_or_else(|| IngestError::BadEvent("Expected exactly one element in playerTags but found none".to_string()))?;
 
+    log.info(format!("Observed hit by {}. Changing consecutiveHits", player_id)).await?;
     let diff = vec![
         bs::Patch {
             path: json_path!("player", player_id.clone(), "consecutiveHits"),
