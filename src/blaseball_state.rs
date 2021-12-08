@@ -1,4 +1,5 @@
 use std::fmt::{Debug, Display, Formatter};
+use std::iter;
 use im;
 use uuid::Uuid;
 use std::sync::Arc;
@@ -458,7 +459,7 @@ pub(crate) use json_path;
 impl BlaseballState {
     pub fn from_chron_at_time(at_time: &'static str) -> BlaseballState {
         // Start all the endpoints first
-        let endpoints: Vec<_> = crate::api::chronicler::ENDPOINT_NAMES.into_iter().map(|endpoint_name|
+        let endpoints: Vec<_> = crate::api::chronicler::ENDPOINT_NAMES.into_iter().chain(iter::once("stream")).map(|endpoint_name|
             (endpoint_name, records_from_chron_at_time(endpoint_name, at_time))).collect();
 
         BlaseballState {

@@ -21,3 +21,19 @@ pub struct ChroniclerResponse {
     pub next_page: Option<String>,
     pub items: ChroniclerItems,
 }
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChroniclerV1Game {
+    pub game_id: Uuid,
+    pub hash: String,
+    pub timestamp: DateTime<Utc>,
+    pub data: value::Value,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChroniclerV1Response {
+    pub next_page: Option<String>,
+    pub data: Vec<ChroniclerV1Game>,
+}

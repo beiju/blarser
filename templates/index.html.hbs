@@ -3,12 +3,12 @@
     {{#*inline "content-block"}}
         <p>Started {{ ingest_started_at }}</p>
 
-        <ul>
+        <ul class="logs">
             {{#each logs}}
-                <li>
+                <li class="log-message">
                     <p>{{ log.message }}</p>
                     {{#if approval}}
-                        <p>{{> approvals-partial approval from_route="index" }}</p>
+                        {{> approvals-partial approval from_route="index" }}
                     {{/if}}
                 </li>
             {{/each}}

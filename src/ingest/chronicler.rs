@@ -1,3 +1,4 @@
+use std::iter;
 use std::pin::Pin;
 use std::sync::Arc;
 use chrono::{DateTime, Utc};
@@ -24,6 +25,11 @@ pub fn sources(start: &'static str) -> Vec<Box<dyn Iterator<Item=BoxedIngestItem
                 .map(|item| Box::new(ChronUpdate { endpoint, item }) as BoxedIngestItem))
                 as Box<dyn Iterator<Item=BoxedIngestItem> + Send>
         )
+        .chain(iter::once(
+            Box::new(chronicler::games(start)
+                .map(|item| Box::new(ChronUpdate { endpoint: "game", item }) as BoxedIngestItem))
+                as Box<dyn Iterator<Item=BoxedIngestItem> + Send>
+        ))
         .collect()
 }
 
@@ -146,6 +152,8 @@ fn observe_node<'a>(log: &'a IngestLogger, node: &'a bs::Node, observed: &'a Jso
 
 fn observe_object<'a>(log: &'a IngestLogger, node: &'a bs::Node, observed: &'a JsonMap<String, JsonValue>, observation: &'a bs::Observation, path: bs::Path) -> BoxedPatchStream<'a> {
     if let bs::Node::Object(obj) = node {
+        // Short-circuit for empty source
+
         let deletions_path = path.clone();
         let deletions = stream::iter(obj.into_iter())
             .filter_map(move |(key, node)| {
@@ -157,7 +165,7 @@ fn observe_object<'a>(log: &'a IngestLogger, node: &'a bs::Node, observed: &'a J
                             let log_result = log.info(format!("Observed unexpected removal of value {} at {}", node.to_string().await, path)).await;
                             // There's probably a better way to do this
                             if let Err(e) = log_result {
-                                return Some(Err(e.into()))
+                                return Some(Err(e.into()));
                             }
                             Some(Ok(bs::Patch {
                                 path: path.extend(key.into()),
@@ -384,7 +392,7 @@ fn observe_primitive<'a, PrimitiveT: Send + Sync + 'a>(log: &'a IngestLogger, no
                     primitive.observed_by = Some(observation.clone());
                     let log_result = log.info(format!("Observed expected value at {}", path)).await;
                     if let Err(e) = log_result {
-                        return Some(Err(e.into()))
+                        return Some(Err(e.into()));
                     }
                 }
                 None
@@ -397,7 +405,7 @@ fn observe_primitive<'a, PrimitiveT: Send + Sync + 'a>(log: &'a IngestLogger, no
                 );
                 let log_result = log.info(format!("Observed changed value at {} from {} to {}", path, primitive.value, new_node.to_string().await)).await;
                 if let Err(e) = log_result {
-                    return Some(Err(e.into()))
+                    return Some(Err(e.into()));
                 }
                 Some(Ok(bs::Patch {
                     path,
@@ -412,7 +420,7 @@ fn observe_primitive<'a, PrimitiveT: Send + Sync + 'a>(log: &'a IngestLogger, no
             );
             let log_result = log.info(format!("Observed changed value at {} from {} to {}", path, node.to_string().await, new_node.to_string().await)).await;
             if let Err(e) = log_result {
-                return Some(Err(e.into()))
+                return Some(Err(e.into()));
             }
             Some(Ok(bs::Patch {
                 path,
