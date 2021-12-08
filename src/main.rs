@@ -1,4 +1,5 @@
 use rocket::fairing::AdHoc;
+use rocket::fs::{FileServer, relative};
 use rocket_dyn_templates::Template;
 use blarser::ingest::IngestTask;
 use blarser::db::{BlarserDbConn};
@@ -10,6 +11,7 @@ mod routes;
 #[rocket::main]
 async fn main() -> Result<(), rocket::Error> {
     rocket::build()
+        .mount("/public", FileServer::from(relative!("static")))
         .mount("/", rocket::routes![index, approvals, approve])
         .attach(BlarserDbConn::fairing())
         .attach(Template::fairing())
