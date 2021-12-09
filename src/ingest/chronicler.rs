@@ -26,7 +26,7 @@ pub fn sources(start: &'static str) -> Vec<Box<dyn Iterator<Item=BoxedIngestItem
                 as Box<dyn Iterator<Item=BoxedIngestItem> + Send>
         )
         .chain(iter::once(
-            Box::new(chronicler::games(start)
+            Box::new(chronicler::game_updates(start)
                 .map(|item| Box::new(ChronUpdate { endpoint: "game", item }) as BoxedIngestItem))
                 as Box<dyn Iterator<Item=BoxedIngestItem> + Send>
         ))

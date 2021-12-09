@@ -1,6 +1,6 @@
 use std::sync::mpsc;
 use std::thread;
-use log::{debug, warn};
+use log::{info, warn};
 
 pub use crate::api::eventually_schema::{EventuallyEvent, EventuallyResponse};
 
@@ -36,7 +36,7 @@ fn events_thread(sender: mpsc::SyncSender<Vec<EventuallyEvent>>, start: &str) ->
         let response = match cache.get(&cache_key).unwrap() {
             Some(text) => bincode::deserialize(&text).unwrap(),
             None => {
-                debug!("Fetching page of feed events from network");
+                info!("Fetching page of feed events from network");
 
                 let text = client
                     .execute(request).expect("Eventually API call failed")

@@ -455,19 +455,31 @@ macro_rules! json_path {
 }
 
 pub(crate) use json_path;
+use crate::api::ChroniclerItem;
 
 impl BlaseballState {
     pub fn from_chron_at_time(at_time: &'static str) -> BlaseballState {
+        let event = Arc::new(Event::Start);
         // Start all the endpoints first
-        let endpoints: Vec<_> = crate::api::chronicler::ENDPOINT_NAMES.into_iter().chain(iter::once("stream")).map(|endpoint_name|
-            (endpoint_name, records_from_chron_at_time(endpoint_name, at_time))).collect();
+        let endpoints: Vec<_> = (Box::new(crate::api::chronicler::ENDPOINT_NAMES.into_iter()
+            .map(|endpoint_name|
+                (endpoint_name, records_from_chron_at_time(endpoint_name, at_time, event.clone()))
+            )) as Box<dyn Iterator<Item=(&'static str, Box<dyn Iterator<Item=(Uuid, Node)>>)>>)
+            .chain(Box::new(iter::once(
+                ("game", schedule_from_chron_at_time(at_time, event.clone()))
+            )) as Box<dyn Iterator<Item=(&'static str, Box<dyn Iterator<Item=(Uuid, Node)>>)>>)
+            .collect();
+
+        let data = endpoints.into_iter()
+            .map(|(endpoint_name, endpoint_iter)|
+                (endpoint_name, endpoint_iter.collect())
+            )
+            .collect();
 
         BlaseballState {
             predecessor: None,
             from_event: Arc::new(Event::Start),
-            data: endpoints.into_iter().map(|(endpoint_name, endpoint_iter)|
-                (endpoint_name, endpoint_iter.collect())
-            ).collect(),
+            data,
         }
     }
 
@@ -676,16 +688,16 @@ async fn apply_change_to_hashmap<T: Clone + std::hash::Hash + std::cmp::Eq>(cont
                             primitive.clone(),
                             PrimitiveValue::Int(i + 1),
                             caused_by,
-                            None
+                            None,
                         ),
                         PrimitiveValue::IntRange(upper, lower) => Node::successor(
                             primitive.clone(),
                             PrimitiveValue::IntRange(upper + 1, lower + 1),
                             caused_by,
-                            None
+                            None,
                         ),
                         value => {
-                            return Err(ApplyChangeError::CannotIncrement(change.path, value.to_string()))
+                            return Err(ApplyChangeError::CannotIncrement(change.path, value.to_string()));
                         }
                     };
                     Ok(new_node)
@@ -727,16 +739,27 @@ async fn apply_change_to_vector(container: &mut im::Vector<Node>, idx: usize, ch
     Ok(())
 }
 
-fn records_from_chron_at_time(entity_type: &'static str, at_time: &'static str) -> impl Iterator<Item=(Uuid, Node)> {
-    let event = Arc::new(Event::Start);
-    crate::api::chronicler::entities(entity_type, at_time)
-        .map(move |item| {
-            let obs = Observation {
-                entity_type,
-                entity_id: item.entity_id,
-                observed_at: item.valid_from,
-            };
+fn entity_to_hashmap_entry(entity_type: &'static str, item: ChroniclerItem, caused_by: Arc<Event>) -> (Uuid, Node) {
+    let obs = Observation {
+        entity_type,
+        entity_id: item.entity_id,
+        observed_at: item.valid_from,
+    };
 
-            (obs.entity_id.clone(), Node::new_from_json(&item.data, event.clone(), Some(obs)))
-        })
+    (obs.entity_id.clone(), Node::new_from_json(&item.data, caused_by, Some(obs)))
+}
+
+fn records_from_chron_at_time(entity_type: &'static str, at_time: &'static str, caused_by: Arc<Event>) -> Box<dyn Iterator<Item=(Uuid, Node)>> {
+    let iter = crate::api::chronicler::entities(entity_type, at_time)
+        .map(move |item| entity_to_hashmap_entry(entity_type, item, caused_by.clone()));
+
+    Box::new(iter)
+}
+
+
+fn schedule_from_chron_at_time(at_time: &'static str, caused_by: Arc<Event>) -> Box<dyn Iterator<Item=(Uuid, Node)>> {
+    let iter = crate::api::chronicler::schedule(at_time)
+        .map(move |item| entity_to_hashmap_entry("game", item, caused_by.clone()));
+
+    Box::new(iter)
 }

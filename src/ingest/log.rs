@@ -24,9 +24,10 @@ impl IngestLogger {
             }).get_result(c)
         ).await?;
 
-        info!("Starting ingest {} at {}", this_ingest.id, this_ingest.started_at);
+        let logger = IngestLogger { ingest_id: this_ingest.id, conn, task };
+        logger.info(format!("Starting ingest {} at {}", this_ingest.id, this_ingest.started_at)).await?;
 
-        Ok(IngestLogger { ingest_id: this_ingest.id, conn, task })
+        Ok(logger)
     }
 
     pub async fn info(&self, msg: String) -> diesel::QueryResult<()> {

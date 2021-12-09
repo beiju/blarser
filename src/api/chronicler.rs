@@ -1,21 +1,76 @@
 use std::sync::mpsc;
 use std::thread;
 use bincode;
-use itertools::Itertools;
-use log::{debug, warn};
+use log::{info, warn};
 
 use crate::api::chronicler_schema::{ChroniclerItem, ChroniclerResponse, ChroniclerV1Game, ChroniclerV1Response};
 
-pub const ENDPOINT_NAMES: [&str; 40] = [
-    "player", "team", "tiebreakers", "sim",
-    "offseasonsetup", "standings", "season", "league", "subleague", "division",
+// This list comes directly from
+// https://github.com/xSke/Chronicler/blob/main/SIBR.Storage.Data/Models/UpdateType.cs
+pub const ENDPOINT_NAMES: [&str; 45] = [
+    "player",
+    "team",
+    // Completely covered by "league", "temporal", "sim", and games (handled separately). See
+    // https://discord.com/channels/738107179294523402/759177439745671169/918236757189873705
+    // "stream",
+    // Not offered in chron v2, handled separately
+    // "game",
+    "idols",
+    // Peanut tributes to hall of flame players, not related to anything that happens in the sim
+    // "tributes",
+    "temporal",
+    "tiebreakers",
+    "sim",
+    // This is the ticker, not connected to the sim at all
+    // "globalevents",
+    "offseasonsetup",
+    "standings",
+    "season",
+    "league",
+    "subleague",
+    "division",
+    // These 3 endpoints have too much data, and I don't expect them to be useful for seasons
+    // where the feed exists. I may turn them back on if I ever get to parsing Discipline.
+    // "gamestatsheet",
+    // "teamstatsheet",
+    // "playerstatsheet",
+    "seasonstatsheet",
     "bossfight",
-    "offseasonrecap", "bonusresult", "decreeresult", "eventresult", "playoffs", "playoffround",
-    "playoffmatchup", "tournament", "stadium", "renovationprogress", "teamelectionstats", "item",
-    "communitychestprogress", "shopsetup", "sunsun", "vault",
-    "risingstars", "fuelprogress", "nullified", "fanart", "glossarywords", "library", "sponsordata",
-    "stadiumprefabs", "feedseasonlist", "thebeat", "thebook", "championcallout",
-    "dayssincelastincineration"
+    "offseasonrecap",
+    "bonusresult",
+    "decreeresult",
+    "eventresult",
+    "playoffs",
+    "playoffround",
+    "playoffmatchup",
+    "tournament",
+    "stadium",
+    "renovationprogress",
+    "teamelectionstats",
+    "item",
+    "communitychestprogress",
+    "giftprogress",
+    "shopsetup",
+    "sunsun",
+    // This is (a) way too much data and (b) not at all useful for parsing
+    // "librarystory",
+    "vault",
+    "risingstars",
+    "fuelprogress",
+    "nullified",
+    "attributes",
+    "fanart",
+    "glossarywords",
+    "library",
+    "sponsordata",
+    "stadiumprefabs",
+    "feedseasonlist",
+    "thebeat",
+    "thebook",
+    "championcallout",
+    "dayssincelastincineration",
+    // Payouts for champion bets. This is probably related to the sim but we don't know how
+    // "availablechampionbets",
 ];
 
 pub fn versions(entity_type: &'static str, start: &'static str) -> impl Iterator<Item=ChroniclerItem> {
@@ -32,9 +87,9 @@ pub fn entities(entity_type: &'static str, start: &'static str) -> impl Iterator
     receiver.into_iter().flatten()
 }
 
-pub fn games(start: &'static str) -> impl Iterator<Item=ChroniclerItem> {
+pub fn game_updates_or_schedule(schedule: bool, start: &'static str) -> impl Iterator<Item=ChroniclerItem> {
     let (sender, receiver) = mpsc::sync_channel(32);
-    thread::spawn(move || chron_v1_thread(sender, "games/updates", start));
+    thread::spawn(move || game_updates_thread(sender, schedule, start));
     receiver
         .into_iter()
         .flatten()
@@ -43,10 +98,19 @@ pub fn games(start: &'static str) -> impl Iterator<Item=ChroniclerItem> {
                 entity_id: game.game_id,
                 hash: game.hash,
                 valid_from: game.timestamp,
-                valid_to: Some(game.timestamp),
-                data: game.data
+                valid_to: None,
+                data: game.data,
             }
         })
+
+}
+
+pub fn game_updates(start: &'static str) -> impl Iterator<Item=ChroniclerItem> {
+    game_updates_or_schedule(false, start)
+}
+
+pub fn schedule(start: &'static str) -> impl Iterator<Item=ChroniclerItem> {
+    game_updates_or_schedule(true, start)
 }
 
 fn chron_thread(sender: mpsc::SyncSender<Vec<ChroniclerItem>>,
@@ -81,7 +145,7 @@ fn chron_thread(sender: mpsc::SyncSender<Vec<ChroniclerItem>>,
         let response = match cache.get(&cache_key).unwrap() {
             Some(text) => bincode::deserialize(&text).unwrap(),
             None => {
-                debug!("Fetching chron {} page of type {} from network", endpoint, entity_type);
+                info!("Fetching chron {} page of type {} from network", endpoint, entity_type);
 
                 let text = client
                     .execute(request).expect("Chronicler API call failed")
@@ -110,19 +174,27 @@ fn chron_thread(sender: mpsc::SyncSender<Vec<ChroniclerItem>>,
     }
 }
 
-fn chron_v1_thread(sender: mpsc::SyncSender<Vec<ChroniclerV1Game>>,
-                   endpoint: &'static str,
-                   start: &'static str) -> () {
+fn game_updates_thread(sender: mpsc::SyncSender<Vec<ChroniclerV1Game>>,
+                       schedule: bool,
+                       start: &'static str) -> () {
     let client = reqwest::blocking::Client::new();
 
     let mut page: Option<String> = None;
 
-    let cache: sled::Db = sled::open("http_cache/chron_v1/".to_owned() + endpoint).unwrap();
+    let request_type = if schedule { "schedule" } else { "updates" };
+
+    let cache: sled::Db = sled::open("http_cache/game/".to_string() + request_type).unwrap();
 
     loop {
         let request = client
-            .get("https://api.sibr.dev/chronicler/v1/".to_owned() + endpoint)
+            .get("https://api.sibr.dev/chronicler/v1/games/updates")
             .query(&[("after", &start)]);
+
+        let request = if schedule {
+            request.query(&[("started", false)])
+        } else {
+            request
+        };
 
         let request = match page {
             Some(page) => request.query(&[("page", &page)]),
@@ -135,7 +207,7 @@ fn chron_v1_thread(sender: mpsc::SyncSender<Vec<ChroniclerV1Game>>,
         let response = match cache.get(&cache_key).unwrap() {
             Some(text) => bincode::deserialize(&text).unwrap(),
             None => {
-                debug!("Fetching chron v1 {} page of type from network", endpoint);
+                info!("Fetching game {} page from network", request_type);
 
                 let text = client
                     .execute(request).expect("Chronicler API call failed")
@@ -152,7 +224,7 @@ fn chron_v1_thread(sender: mpsc::SyncSender<Vec<ChroniclerV1Game>>,
         match sender.send(response.data) {
             Ok(_) => {}
             Err(err) => {
-                warn!("Exiting chron v1 {} thread due to {:?}", endpoint, err);
+                warn!("Exiting game {} thread due to {:?}", request_type, err);
                 return;
             }
         }
