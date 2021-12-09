@@ -6,7 +6,7 @@ use std::sync::Arc;
 use tokio::sync::{RwLock};
 use rocket::futures::stream::{self, StreamExt};
 use chrono::{DateTime, Utc};
-use serde_json::{Map, Value as JsonValue};
+use serde_json::{Map, Value as JsonValue, Value};
 use thiserror::Error;
 use crate::ingest::{IngestError};
 use async_recursion::async_recursion;
@@ -62,6 +62,20 @@ pub struct PrimitiveNode {
     pub value: PrimitiveValue,
 }
 
+impl PrimitiveNode {
+    pub fn match_observation(&self, value: &JsonValue) -> bool {
+        match &self.value {
+            PrimitiveValue::Null => { value.is_null() }
+            PrimitiveValue::Bool(b) => { value.as_bool().map(|value_b| b == &value_b).unwrap_or(false) }
+            PrimitiveValue::Int(i) => { value.as_i64().map(|value_i| i == &value_i).unwrap_or(false) }
+            PrimitiveValue::Float(f) => { value.as_f64().map(|value_f| f == &value_f).unwrap_or(false) }
+            PrimitiveValue::String(s) => { value.as_str().map(|value_s| s == value_s).unwrap_or(false) }
+            PrimitiveValue::IntRange(_, _) => { todo!() }
+            PrimitiveValue::FloatRange(_, _) => { todo!() }
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum PrimitiveValue {
     // Simple primitives
@@ -105,36 +119,6 @@ impl Display for PrimitiveValue {
                 write!(f, "<float between {} and {}>", lower, upper)
             }
         }
-    }
-}
-
-impl From<&String> for PrimitiveValue {
-    fn from(str: &String) -> Self {
-        Self::String(str.clone())
-    }
-}
-
-impl From<i64> for PrimitiveValue {
-    fn from(i: i64) -> Self {
-        Self::Int(i)
-    }
-}
-
-impl From<f64> for PrimitiveValue {
-    fn from(f: f64) -> Self {
-        Self::Float(f)
-    }
-}
-
-impl From<&bool> for PrimitiveValue {
-    fn from(b: &bool) -> Self {
-        Self::Bool(*b)
-    }
-}
-
-impl From<()> for PrimitiveValue {
-    fn from(_: ()) -> Self {
-        Self::Null
     }
 }
 
@@ -186,6 +170,12 @@ pub enum ApplyChangeError {
 
     #[error("Cannot increment value {1} at {0}")]
     CannotIncrement(Path, String),
+
+    #[error("Tried to replace object with object at path {0}")]
+    CannotReplaceObjectWithObject(Path),
+
+    #[error("Tried to replace array with array at path {0}")]
+    CannotReplaceArrayWithArray(Path),
 
     #[error(transparent)]
     PathError {
@@ -243,7 +233,12 @@ impl Node {
         format!("{{ {} }}", inner)
     }
 
-    pub fn new_primitive(value: PrimitiveValue, caused_by: Arc<Event>, observed_by: Option<Observation>) -> Node {
+    pub fn new_primitive(value: PrimitiveValue, caused_by: Arc<Event>) -> Node {
+        let observed_by = match &*caused_by {
+            Event::ImplicitChange(observation) => Some(observation.clone()),
+            _ => None
+        };
+
         return Node::Primitive(Arc::new(RwLock::new(PrimitiveNode {
             predecessor: None,
             caused_by,
@@ -252,7 +247,12 @@ impl Node {
         })));
     }
 
-    pub fn successor(predecessor: Arc<RwLock<PrimitiveNode>>, value: PrimitiveValue, caused_by: Arc<Event>, observed_by: Option<Observation>) -> Node {
+    pub fn primitive_successor(predecessor: Arc<RwLock<PrimitiveNode>>, value: PrimitiveValue, caused_by: Arc<Event>) -> Node {
+        let observed_by = match &*caused_by {
+            Event::ImplicitChange(observation) => Some(observation.clone()),
+            _ => None
+        };
+
         Node::Primitive(Arc::new(RwLock::new(PrimitiveNode {
             predecessor: Some(predecessor),
             caused_by,
@@ -261,48 +261,99 @@ impl Node {
         })))
     }
 
-    pub fn new_from_json(value: &JsonValue, caused_by: Arc<Event>, observed_by: Option<Observation>) -> Node {
+    pub fn successor_from_primitive(predecessor: Arc<RwLock<PrimitiveNode>>, value: JsonValue, caused_by: Arc<Event>) -> Node {
         match value {
-            JsonValue::Null => {
-                Node::new_primitive(PrimitiveValue::Null, caused_by, observed_by)
+            Value::Null => {
+                Node::primitive_successor(predecessor, PrimitiveValue::Null, caused_by)
             }
-            JsonValue::Bool(b) => {
-                Node::new_primitive(PrimitiveValue::Bool(*b), caused_by, observed_by)
+            Value::Bool(b) => {
+                Node::primitive_successor(predecessor, PrimitiveValue::Bool(b), caused_by)
             }
-            JsonValue::Number(n) => {
+            Value::Number(n) => {
                 match n.as_i64() {
-                    Some(i) => Node::new_primitive(PrimitiveValue::Int(i), caused_by, observed_by),
+                    Some(i) => Node::primitive_successor(predecessor, PrimitiveValue::Int(i), caused_by),
                     None => {
                         let f = n.as_f64().expect("Number was neither i64 nor f64");
-                        Node::new_primitive(PrimitiveValue::Float(f), caused_by, observed_by)
+                        Node::primitive_successor(predecessor, PrimitiveValue::Float(f), caused_by)
                     }
                 }
             }
-            JsonValue::String(s) => {
-                Node::new_primitive(PrimitiveValue::String(s.clone()), caused_by, observed_by)
+            Value::String(s) => {
+                Node::primitive_successor(predecessor, PrimitiveValue::String(s), caused_by)
             }
+            // Composites don't have predecessors, so create them as new
             JsonValue::Array(arr) => {
-                Node::new_from_json_array(arr, &caused_by, &observed_by)
+                Node::new_from_json_array(arr, &caused_by)
             }
             JsonValue::Object(obj) => {
-                Node::new_from_json_object(obj, &caused_by, &observed_by)
+                Node::new_from_json_object(obj, &caused_by)
             }
         }
     }
 
-    pub fn new_from_json_object(obj: &Map<String, JsonValue>, caused_by: &Arc<Event>, observed_by: &Option<Observation>) -> Node {
+    pub fn successor(&self, value: JsonValue, caused_by: Arc<Event>, path: &Path) -> Result<Node, ApplyChangeError> {
+        let result = match self {
+            Node::Primitive(primitive) => Node::successor_from_primitive(primitive.clone(), value, caused_by),
+            // Composites don't have tracked data, so create as new
+            Node::Array(_) => {
+                if value.is_array() {
+                    return Err(ApplyChangeError::CannotReplaceArrayWithArray(path.clone()))
+                }
+                Node::new_from_json(value, caused_by)
+            }
+            Node::Object(_) => {
+                if value.is_object() {
+                    return Err(ApplyChangeError::CannotReplaceArrayWithArray(path.clone()))
+                }
+                Node::new_from_json(value, caused_by)
+            }
+        };
+
+        Ok(result)
+    }
+
+    pub fn new_from_json(value: JsonValue, caused_by: Arc<Event>) -> Node {
+        match value {
+            JsonValue::Null => {
+                Node::new_primitive(PrimitiveValue::Null, caused_by)
+            }
+            JsonValue::Bool(b) => {
+                Node::new_primitive(PrimitiveValue::Bool(b), caused_by)
+            }
+            JsonValue::Number(n) => {
+                match n.as_i64() {
+                    Some(i) => Node::new_primitive(PrimitiveValue::Int(i), caused_by),
+                    None => {
+                        let f = n.as_f64().expect("Number was neither i64 nor f64");
+                        Node::new_primitive(PrimitiveValue::Float(f), caused_by)
+                    }
+                }
+            }
+            JsonValue::String(s) => {
+                Node::new_primitive(PrimitiveValue::String(s), caused_by)
+            }
+            JsonValue::Array(arr) => {
+                Node::new_from_json_array(arr, &caused_by)
+            }
+            JsonValue::Object(obj) => {
+                Node::new_from_json_object(obj, &caused_by)
+            }
+        }
+    }
+
+    pub fn new_from_json_object(obj: Map<String, JsonValue>, caused_by: &Arc<Event>) -> Node {
         Node::Object(
             obj.into_iter()
                 .map(|(key, val)|
-                    (key.clone(), Node::new_from_json(val, caused_by.clone(), observed_by.clone())))
+                    (key.clone(), Node::new_from_json(val, caused_by.clone())))
                 .collect()
         )
     }
 
-    pub fn new_from_json_array(arr: &Vec<JsonValue>, caused_by: &Arc<Event>, observed_by: &Option<Observation>) -> Node {
+    pub fn new_from_json_array(arr: Vec<JsonValue>, caused_by: &Arc<Event>) -> Node {
         Node::Array(
             arr.into_iter()
-                .map(|val| Node::new_from_json(val, caused_by.clone(), observed_by.clone()))
+                .map(|val| Node::new_from_json(val, caused_by.clone()))
                 .collect()
         )
     }
@@ -317,14 +368,14 @@ pub struct Patch {
 impl Patch {
     pub async fn description(&self, state: &BlaseballState) -> Result<String, PathError> {
         let str = match &self.change {
-            ChangeType::Add(node) => {
-                format!("{}: Add value {}", self.path, node.to_string().await)
+            ChangeType::Add(value) => {
+                format!("{}: Add value {}", self.path, value)
             }
             ChangeType::Remove => {
                 format!("{}: Remove value {}", self.path, state.node_at(&self.path).await?.to_string().await)
             }
-            ChangeType::Replace(node) => {
-                format!("{}: Replace {} with {}", self.path, state.node_at(&self.path).await?.to_string().await, node.to_string().await)
+            ChangeType::Replace(value) => {
+                format!("{}: Replace {} with {}", self.path, state.node_at(&self.path).await?.to_string().await, value)
             }
             ChangeType::Increment => {
                 format!("{}: Increment {}", self.path, state.node_at(&self.path).await?.to_string().await)
@@ -337,9 +388,9 @@ impl Patch {
 
 #[derive(Clone)]
 pub enum ChangeType {
-    Add(Node),
+    Add(JsonValue),
     Remove,
-    Replace(Node),
+    Replace(JsonValue),
     Increment,
 }
 
@@ -630,7 +681,7 @@ async fn apply_change(data: &mut BlaseballData, change: Patch, caused_by: Arc<Ev
                 Node::Array(arr) => {
                     match last {
                         PathComponent::Index(idx) => {
-                            apply_change_to_vector(arr, *idx, change).await
+                            apply_change_to_vector(arr, *idx, change, caused_by).await
                         }
                         PathComponent::Key(_) => {
                             Err(PathError::UnexpectedType {
@@ -660,11 +711,14 @@ async fn apply_change(data: &mut BlaseballData, change: Patch, caused_by: Arc<Ev
 
 async fn apply_change_to_hashmap<T: Clone + std::hash::Hash + std::cmp::Eq>(container: &mut im::HashMap<T, Node>, key: &T, change: Patch, caused_by: Arc<Event>) -> Result<(), ApplyChangeError> {
     match change.change {
-        ChangeType::Add(node) => {
+        ChangeType::Add(value) => {
             if let Some(value) = container.get(key) {
                 return Err(ApplyChangeError::UnexpectedValue(change.path, value.to_string().await));
             }
-            container.insert(key.clone(), node);
+            container.insert(key.clone(), Node::new_from_json(
+                value,
+                caused_by,
+            ));
         }
         ChangeType::Remove => {
             let removed = container.remove(key);
@@ -672,11 +726,13 @@ async fn apply_change_to_hashmap<T: Clone + std::hash::Hash + std::cmp::Eq>(cont
                 return Err(ApplyChangeError::MissingValue(change.path));
             }
         }
-        ChangeType::Replace(node) => {
-            if let None = container.get_key_value(key) {
+        ChangeType::Replace(value) => {
+            if let Some(node) = container.get(key) {
+                let new_node = node.successor(value, caused_by, &change.path)?;
+                container.insert(key.clone(), new_node);
+            } else {
                 return Err(ApplyChangeError::MissingValue(change.path));
             }
-            container.insert(key.clone(), node);
         }
         ChangeType::Increment => {
             let new_node = match container.get(key) {
@@ -684,17 +740,15 @@ async fn apply_change_to_hashmap<T: Clone + std::hash::Hash + std::cmp::Eq>(cont
                 Some(Node::Primitive(primitive)) => {
                     let node = primitive.read().await;
                     let new_node = match &node.value {
-                        PrimitiveValue::Int(i) => Node::successor(
+                        PrimitiveValue::Int(i) => Node::primitive_successor(
                             primitive.clone(),
                             PrimitiveValue::Int(i + 1),
                             caused_by,
-                            None,
                         ),
-                        PrimitiveValue::IntRange(upper, lower) => Node::successor(
+                        PrimitiveValue::IntRange(upper, lower) => Node::primitive_successor(
                             primitive.clone(),
                             PrimitiveValue::IntRange(upper + 1, lower + 1),
                             caused_by,
-                            None,
                         ),
                         value => {
                             return Err(ApplyChangeError::CannotIncrement(change.path, value.to_string()));
@@ -713,13 +767,13 @@ async fn apply_change_to_hashmap<T: Clone + std::hash::Hash + std::cmp::Eq>(cont
     Ok(())
 }
 
-async fn apply_change_to_vector(container: &mut im::Vector<Node>, idx: usize, change: Patch) -> Result<(), ApplyChangeError> {
+async fn apply_change_to_vector(container: &mut im::Vector<Node>, idx: usize, change: Patch, caused_by: Arc<Event>) -> Result<(), ApplyChangeError> {
     match change.change {
-        ChangeType::Add(node) => {
-            if let Some(value) = container.get(idx) {
-                return Err(ApplyChangeError::UnexpectedValue(change.path, value.to_string().await));
+        ChangeType::Add(value) => {
+            if let Some(node) = container.get(idx) {
+                return Err(ApplyChangeError::UnexpectedValue(change.path, node.to_string().await));
             }
-            container.insert(idx, node);
+            container.insert(idx, Node::new_from_json(value, caused_by));
         }
         ChangeType::Remove => {
             if let None = container.get(idx) {
@@ -727,11 +781,13 @@ async fn apply_change_to_vector(container: &mut im::Vector<Node>, idx: usize, ch
             }
             container.remove(idx);
         }
-        ChangeType::Replace(node) => {
-            if let None = container.get(idx) {
+        ChangeType::Replace(value) => {
+            if let Some(node) = container.get(idx) {
+                let new_node = node.successor(value, caused_by, &change.path)?;
+                container.insert(idx, new_node);
+            } else {
                 return Err(ApplyChangeError::MissingValue(change.path));
             }
-            container.set(idx, node);
         }
         _ => { todo!() }
     }
@@ -746,7 +802,7 @@ fn entity_to_hashmap_entry(entity_type: &'static str, item: ChroniclerItem, caus
         observed_at: item.valid_from,
     };
 
-    (obs.entity_id.clone(), Node::new_from_json(&item.data, caused_by, Some(obs)))
+    (obs.entity_id.clone(), Node::new_from_json(item.data, caused_by))
 }
 
 fn records_from_chron_at_time(entity_type: &'static str, at_time: &'static str, caused_by: Arc<Event>) -> Box<dyn Iterator<Item=(Uuid, Node)>> {

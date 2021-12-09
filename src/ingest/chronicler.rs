@@ -8,7 +8,6 @@ use rocket::futures::stream::{self, Stream, StreamExt, TryStreamExt};
 
 use crate::api::{chronicler, ChroniclerItem};
 use crate::blaseball_state as bs;
-use crate::blaseball_state::PrimitiveValue;
 use crate::ingest::{IngestItem, BoxedIngestItem};
 use crate::ingest::error::{IngestError, IngestResult};
 use crate::ingest::log::IngestLogger;
@@ -102,11 +101,7 @@ fn observe_state<'a>(log: &'a IngestLogger, data: &'a bs::EntitySet, observed: &
             log.info(format!("Observed an unexpected value at {}", path)).await?;
             Ok(bs::Patch {
                 path,
-                change: bs::ChangeType::Add(bs::Node::new_from_json(
-                    observed,
-                    Arc::new(bs::Event::ImplicitChange(observation.clone())),
-                    Some(observation.clone()),
-                )),
+                change: bs::ChangeType::Add(observed.clone()),
             })
         })),
         Some(node) => {
@@ -129,23 +124,8 @@ fn observe_node<'a>(log: &'a IngestLogger, node: &'a bs::Node, observed: &'a Jso
         JsonValue::Array(vec) => {
             observe_array(log, node, vec, observation, path)
         }
-        JsonValue::String(s) => {
-            observe_primitive(log, node, s, observation, path)
-        }
-        JsonValue::Number(n) => {
-            if let Some(i) = n.as_i64() {
-                observe_primitive(log, node, i, observation, path)
-            } else {
-                let f = n.as_f64()
-                    .expect("Number could not be interpreted as int or float");
-                observe_primitive(log, node, f, observation, path)
-            }
-        }
-        JsonValue::Bool(b) => {
-            observe_primitive(log, node, b, observation, path)
-        }
-        JsonValue::Null => {
-            observe_primitive(log, node, (), observation, path)
+        _ => {
+            observe_primitive(log, node, observed, observation, path)
         }
     }
 }
@@ -194,11 +174,7 @@ fn observe_object<'a>(log: &'a IngestLogger, node: &'a bs::Node, observed: &'a J
                                 log.info(format!("Observed an unexpected value at {}", path)).await?;
                                 Ok(bs::Patch {
                                     path,
-                                    change: bs::ChangeType::Add(bs::Node::new_from_json(
-                                        value,
-                                        Arc::new(bs::Event::ImplicitChange(observation.clone())),
-                                        Some(observation.clone()),
-                                    )),
+                                    change: bs::ChangeType::Add(value.clone()),
                                 })
                             }))
                         }
@@ -209,13 +185,11 @@ fn observe_object<'a>(log: &'a IngestLogger, node: &'a bs::Node, observed: &'a J
 
         Box::pin(deletions.chain(changes_and_additions))
     } else {
-        let caused_by = Arc::new(bs::Event::ImplicitChange(observation.clone()));
-        let observation = Some(observation.clone());
         Box::pin(stream::once(async move {
             log.info(format!("Observed an unexpected change at {}: value changed from {} to Object({:?})", path, node.to_string().await, observed)).await?;
             Ok(bs::Patch {
                 path,
-                change: bs::ChangeType::Replace(bs::Node::new_from_json_object(observed, &caused_by, &observation)),
+                change: bs::ChangeType::Replace(JsonValue::Object(observed.clone())),
             })
         }))
     }
@@ -225,14 +199,12 @@ fn observe_array<'a>(log: &'a IngestLogger, node: &'a bs::Node, observed: &'a Ve
     if let bs::Node::Array(arr) = node {
         observe_array_subset(log, arr, 0, &observed, 0, observation, path)
     } else {
-        let caused_by = Arc::new(bs::Event::ImplicitChange(observation.clone()));
-        let observation = Some(observation.clone());
         Box::pin(stream::once(async move {
-            let new_node = bs::Node::new_from_json_array(observed, &caused_by, &observation);
-            log.info(format!("Observed an unexpected change at {}: value changed from {} to {}", path, node.to_string().await, new_node.to_string().await)).await?;
+            let new_value = JsonValue::Array(observed.clone());
+            log.info(format!("Observed an unexpected change at {}: value changed from {} to {}", path, node.to_string().await, new_value)).await?;
             Ok(bs::Patch {
                 path: path.clone(),
-                change: bs::ChangeType::Replace(new_node),
+                change: bs::ChangeType::Replace(new_value),
             })
         })) as BoxedPatchStream
     }
@@ -333,15 +305,10 @@ fn observe_array_slice_by_addition<'a>(
         observation,
         path.clone())
         .chain(stream::once(async move {
-            let new_node = bs::Node::new_from_json(
-                observed_value,
-                Arc::new(bs::Event::ImplicitChange(observation.clone())),
-                Some(observation.clone()),
-            );
-            log.info(format!("Observed a possible new array element {} at {}", new_node.to_string().await, path)).await?;
+            log.info(format!("Observed a possible new array element {} at {}", observed_value, path)).await?;
             Ok(bs::Patch {
                 path: path.extend(current_value_i.into()),
-                change: bs::ChangeType::Add(new_node),
+                change: bs::ChangeType::Add(observed_value.clone()),
             })
         }));
 
@@ -377,14 +344,12 @@ fn observe_array_slice_by_deletion<'a>(
     Box::pin(stream)
 }
 
-fn observe_primitive<'a, PrimitiveT: Send + Sync + 'a>(log: &'a IngestLogger, node: &'a bs::Node, observed: PrimitiveT, observation: &'a bs::Observation, path: bs::Path)
-                                                       -> BoxedPatchStream<'a>
-    where PrimitiveValue: From<PrimitiveT> {
+fn observe_primitive<'a>(log: &'a IngestLogger, node: &'a bs::Node, observed: &'a JsonValue, observation: &'a bs::Observation, path: bs::Path)
+                                                       -> BoxedPatchStream<'a> {
     let s = stream::once(async move {
-        let observed_primitive: PrimitiveValue = observed.into();
         if let bs::Node::Primitive(primitive_node) = node {
             let primitive = primitive_node.read().await;
-            if observed_primitive == primitive.value {
+            if primitive.match_observation(observed) {
                 if let None = primitive.observed_by {
                     // Must drop the read lock before opening a write lock or it deadlocks
                     drop(primitive);
@@ -397,34 +362,23 @@ fn observe_primitive<'a, PrimitiveT: Send + Sync + 'a>(log: &'a IngestLogger, no
                 }
                 None
             } else {
-                let new_node = bs::Node::successor(
-                    primitive_node.clone(),
-                    observed_primitive,
-                    Arc::new(bs::Event::ImplicitChange(observation.clone())),
-                    Some(observation.clone()),
-                );
-                let log_result = log.info(format!("Observed changed value at {} from {} to {}", path, primitive.value, new_node.to_string().await)).await;
+                let log_result = log.info(format!("Observed changed value at {} from {} to {}", path, primitive.value, observed)).await;
                 if let Err(e) = log_result {
                     return Some(Err(e.into()));
                 }
                 Some(Ok(bs::Patch {
                     path,
-                    change: bs::ChangeType::Replace(new_node),
+                    change: bs::ChangeType::Replace(observed.clone()),
                 }))
             }
         } else {
-            let new_node = bs::Node::new_primitive(
-                observed_primitive,
-                Arc::new(bs::Event::ImplicitChange(observation.clone())),
-                Some(observation.clone()),
-            );
-            let log_result = log.info(format!("Observed changed value at {} from {} to {}", path, node.to_string().await, new_node.to_string().await)).await;
+            let log_result = log.info(format!("Observed changed value at {} from {} to {}", path, node.to_string().await, observed)).await;
             if let Err(e) = log_result {
                 return Some(Err(e.into()));
             }
             Some(Ok(bs::Patch {
                 path,
-                change: bs::ChangeType::Replace(new_node),
+                change: bs::ChangeType::Replace(observed.clone()),
             }))
         }
     })
