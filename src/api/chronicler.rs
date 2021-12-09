@@ -3,7 +3,7 @@ use std::thread;
 use bincode;
 use log::{info, warn};
 
-use crate::api::chronicler_schema::{ChroniclerItem, ChroniclerResponse, ChroniclerV1Game, ChroniclerV1Response};
+use crate::api::chronicler_schema::{ChroniclerItem, ChroniclerResponse, ChroniclerGameUpdate, ChroniclerGameUpdatesResponse, ChroniclerGamesResponse};
 
 // This list comes directly from
 // https://github.com/xSke/Chronicler/blob/main/SIBR.Storage.Data/Models/UpdateType.cs
@@ -96,13 +96,11 @@ pub fn game_updates_or_schedule(schedule: bool, start: &'static str) -> impl Ite
         .map(|game| {
             ChroniclerItem {
                 entity_id: game.game_id,
-                hash: game.hash,
                 valid_from: game.timestamp,
                 valid_to: None,
                 data: game.data,
             }
         })
-
 }
 
 pub fn game_updates(start: &'static str) -> impl Iterator<Item=ChroniclerItem> {
@@ -174,7 +172,7 @@ fn chron_thread(sender: mpsc::SyncSender<Vec<ChroniclerItem>>,
     }
 }
 
-fn game_updates_thread(sender: mpsc::SyncSender<Vec<ChroniclerV1Game>>,
+fn game_updates_thread(sender: mpsc::SyncSender<Vec<ChroniclerGameUpdate>>,
                        schedule: bool,
                        start: &'static str) -> () {
     let client = reqwest::blocking::Client::new();
@@ -187,14 +185,8 @@ fn game_updates_thread(sender: mpsc::SyncSender<Vec<ChroniclerV1Game>>,
 
     loop {
         let request = client
-            .get("https://api.sibr.dev/chronicler/v1/games/updates")
+            .get("https://api.sibr.dev/chronicler/v1/games".to_string() + if schedule { "" } else { "/updates" })
             .query(&[("after", &start)]);
-
-        let request = if schedule {
-            request.query(&[("started", false)])
-        } else {
-            request
-        };
 
         let request = match page {
             Some(page) => request.query(&[("page", &page)]),
@@ -219,9 +211,46 @@ fn game_updates_thread(sender: mpsc::SyncSender<Vec<ChroniclerV1Game>>,
             }
         };
 
-        let response: ChroniclerV1Response = serde_json::from_str(&response).unwrap();
+        let (response_data, next_page) = if schedule {
+            let games_response: ChroniclerGamesResponse = serde_json::from_str(&response).unwrap();
+            let games: Vec<_> = games_response.data.into_iter()
+                .map(|item| {
+                    let request = client
+                        .get("https://api.sibr.dev/chronicler/v1/games/updates")
+                        .query(&[("game", item.game_id.to_string())])
+                        .query(&[("order", "asc")])
+                        .query(&[("count", 1)])
+                        .build().unwrap();
 
-        match sender.send(response.data) {
+                    let cache_key = request.url().to_string();
+                    let response = match cache.get(&cache_key).unwrap() {
+                        Some(text) => bincode::deserialize(&text).unwrap(),
+                        None => {
+                            info!("Fetching latest update for game {} from network", item.game_id);
+
+                            let text = client
+                                .execute(request).expect("Chronicler API call failed")
+                                .text().expect("Chronicler text decode failed");
+
+                            cache.insert(&cache_key, bincode::serialize(&text).unwrap()).unwrap();
+
+                            text
+                        }
+                    };
+
+                    let response: ChroniclerGameUpdatesResponse = serde_json::from_str(&response).unwrap();
+
+                    response.data.into_iter().next().unwrap()
+                })
+                .collect();
+
+            (games, games_response.next_page)
+        } else {
+            let response: ChroniclerGameUpdatesResponse = serde_json::from_str(&response).unwrap();
+            (response.data, response.next_page)
+        };
+
+        match sender.send(response_data) {
             Ok(_) => {}
             Err(err) => {
                 warn!("Exiting game {} thread due to {:?}", request_type, err);
@@ -229,7 +258,7 @@ fn game_updates_thread(sender: mpsc::SyncSender<Vec<ChroniclerV1Game>>,
             }
         }
 
-        page = match response.next_page {
+        page = match next_page {
             Some(p) => Some(p),
             None => return
         }

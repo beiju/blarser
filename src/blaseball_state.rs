@@ -369,13 +369,13 @@ impl Patch {
     pub async fn description(&self, state: &BlaseballState) -> Result<String, PathError> {
         let str = match &self.change {
             ChangeType::Add(value) => {
-                format!("{}: Add value {}", self.path, value)
+                format!("{}: Add value {:#}", self.path, value)
             }
             ChangeType::Remove => {
                 format!("{}: Remove value {}", self.path, state.node_at(&self.path).await?.to_string().await)
             }
             ChangeType::Replace(value) => {
-                format!("{}: Replace {} with {}", self.path, state.node_at(&self.path).await?.to_string().await, value)
+                format!("{}: Replace {} with {:#}", self.path, state.node_at(&self.path).await?.to_string().await, value)
             }
             ChangeType::Increment => {
                 format!("{}: Increment {}", self.path, state.node_at(&self.path).await?.to_string().await)
@@ -523,7 +523,13 @@ impl BlaseballState {
 
         let data = endpoints.into_iter()
             .map(|(endpoint_name, endpoint_iter)|
-                (endpoint_name, endpoint_iter.collect())
+                {
+                    let vec: Vec<_> = endpoint_iter.collect();
+                    println!("{} vector had {} elements", endpoint_name, vec.len());
+                    let x: EntitySet = vec.into_iter().collect();
+                    println!("{} initialized with {} elements", endpoint_name, x.len());
+                    (endpoint_name, x)
+                }
             )
             .collect();
 

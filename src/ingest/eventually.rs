@@ -63,6 +63,13 @@ async fn apply_lets_go(state: Arc<bs::BlaseballState>, log: &IngestLogger, event
     log.debug("Applying LetsGo event".to_string()).await?;
     let metadata: LetsGoMetadata = serde_json::from_value(event.metadata.clone())?;
 
+    let mut games: Vec<_> = state.data.get("game").unwrap().keys()
+        .into_iter()
+        .map(|uuid| format!("{}", uuid))
+        .collect();
+
+    games.sort_unstable();
+
     let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
     let diff = vec![
         bs::Patch {
