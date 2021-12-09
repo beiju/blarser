@@ -2,11 +2,11 @@ use std::future::Future;
 use std::sync::Arc;
 use rocket::async_trait;
 use chrono::{DateTime, Utc};
+use serde_json::json;
 use uuid::Uuid;
 
 use crate::api::{eventually, EventuallyEvent, EventType, LetsGoMetadata};
 use crate::blaseball_state as bs;
-use crate::blaseball_state::{Event, json_path, Patch};
 use crate::ingest::{IngestItem, BoxedIngestItem, IngestError, IngestResult};
 use crate::ingest::error::IngestApplyResult;
 use crate::ingest::log::IngestLogger;
@@ -62,28 +62,96 @@ async fn apply_big_deal(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: &
 async fn apply_lets_go(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &EventuallyEvent) -> IngestApplyResult {
     log.debug("Applying LetsGo event".to_string()).await?;
     let metadata: LetsGoMetadata = serde_json::from_value(event.metadata.clone())?;
+    let game_id = get_one_id(&event.game_tags, "gameTags")?;
+    let home_pitcher = get_active_pitcher(&state, metadata.home).await?;
+    let away_pitcher = get_active_pitcher(&state, metadata.away).await?;
 
-    let mut games: Vec<_> = state.data.get("game").unwrap().keys()
-        .into_iter()
-        .map(|uuid| format!("{}", uuid))
-        .collect();
+    let diff = [
+        // Team object changes
+        bs::Patch {
+            path: bs::json_path!("team", metadata.home, "rotationSlot"),
+            change: bs::ChangeType::Replace(home_pitcher.rotation_slot.into()),
+        },
+        bs::Patch {
+            path: bs::json_path!("team", metadata.away, "rotationSlot"),
+            change: bs::ChangeType::Replace(away_pitcher.rotation_slot.into()),
+        },
 
-    games.sort_unstable();
+        // Game object changes
+        bs::Patch {
+            path: bs::json_path!("game", game_id.clone(), "gameStart"),
+            change: bs::ChangeType::Replace(true.into()),
+        },
+        bs::Patch {
+            path: bs::json_path!("game", game_id.clone(), "gameStartPhase"),
+            change: bs::ChangeType::Replace((-1).into()),
+        },
+    ].into_iter()
+        .chain(game_start_team_specific_diffs(game_id, away_pitcher, "away"))
+        .chain(game_start_team_specific_diffs(game_id, home_pitcher, "home"));
 
     let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
-    let diff = vec![
-        bs::Patch {
-            path: json_path!("team", metadata.home, "rotationSlot"),
-            change: bs::ChangeType::Increment,
-        },
-        bs::Patch {
-            path: json_path!("team", metadata.away, "rotationSlot"),
-            change: bs::ChangeType::Increment,
-        },
-    ];
-
     state.successor(caused_by, diff).await
         .map(|s| vec![s])
+}
+
+fn game_start_team_specific_diffs(game_id: &Uuid, active_pitcher: ActivePitcher, which: &'static str) -> impl Iterator<Item=bs::Patch> {
+    [
+        bs::Patch {
+            path: bs::json_path!("game", game_id.clone(), format!("{}BatterName", which)),
+            change: bs::ChangeType::Replace("".to_string().into()),
+        },
+        bs::Patch {
+            path: bs::json_path!("game", game_id.clone(), format!("{}Odds", which)),
+            change: bs::ChangeType::Replace(bs::PrimitiveValue::FloatRange(0., 1.)),
+        },
+        bs::Patch {
+            path: bs::json_path!("game", game_id.clone(), format!("{}Pitcher", which)),
+            change: bs::ChangeType::Replace(active_pitcher.pitcher_id.to_string().into()),
+        },
+        bs::Patch {
+            path: bs::json_path!("game", game_id.clone(), format!("{}PitcherName", which)),
+            change: bs::ChangeType::Replace(active_pitcher.pitcher_name.into()),
+        },
+        bs::Patch {
+            path: bs::json_path!("game", game_id.clone(), format!("{}Score", which)),
+            change: bs::ChangeType::Replace(0.into()),
+        },
+        bs::Patch {
+            path: bs::json_path!("game", game_id.clone(), format!("{}Strikes", which)),
+            change: bs::ChangeType::Replace(3.into()),
+        },
+        bs::Patch {
+            path: bs::json_path!("game", game_id.clone(), format!("{}TeamBatterCount", which)),
+            change: bs::ChangeType::Replace((-1).into()),
+        },
+    ].into_iter()
+}
+
+struct ActivePitcher {
+    rotation_slot: i64,
+    pitcher_id: Uuid,
+    pitcher_name: String,
+}
+
+async fn get_active_pitcher(state: &Arc<bs::BlaseballState>, team_id: Uuid) -> Result<ActivePitcher, bs::PathError> {
+    let rotation = state.array_at(&bs::json_path!("team", team_id, "rotation")).await?;
+    let rotation_slot = state.int_at(&bs::json_path!("team", team_id, "rotationSlot")).await?;
+    let rotation_slot = (rotation_slot + 1) % rotation.len() as i64;
+
+    let pitcher_id = rotation.get(rotation_slot as usize)
+        .expect("rotation_slot should always be valid here");
+
+    let pitcher_id = pitcher_id.as_uuid().await
+        .map_err(|value| bs::PathError::UnexpectedType {
+            path: bs::json_path!("team", team_id, "rotation", rotation_slot as usize),
+            expected_type: "uuid",
+            value,
+        })?;
+
+    let pitcher_name = state.string_at(&bs::json_path!("player", pitcher_id, "name")).await?;
+
+    Ok(ActivePitcher { rotation_slot, pitcher_id, pitcher_name })
 }
 
 
@@ -144,13 +212,13 @@ async fn apply_ground_out(state: Arc<bs::BlaseballState>, log: &IngestLogger, ev
 async fn apply_hit(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &EventuallyEvent) -> IngestApplyResult {
     log.debug("Applying Hit event".to_string()).await?;
 
-    let player_id = get_one_player_id(event)?;
+    let player_id = get_one_id(&event.player_tags, "playerTags")?;
 
     log.info(format!("Observed hit by {}. Changing consecutiveHits", player_id)).await?;
     let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
-    let diff = vec![
+    let diff = [
         bs::Patch {
-            path: json_path!("player", player_id.clone(), "consecutiveHits"),
+            path: bs::json_path!("player", player_id.clone(), "consecutiveHits"),
             change: bs::ChangeType::Increment,
         },
     ];
@@ -164,19 +232,19 @@ async fn apply_strikeout(state: Arc<bs::BlaseballState>, log: &IngestLogger, eve
     log.debug("Applying Strikeout event".to_string()).await?;
 
     let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
-    let player_id = get_one_player_id(event)?;
+    let player_id = get_one_id(&event.player_tags, "playerTags")?;
     let diff = apply_out("strikeout", log, player_id).await?;
 
     state.successor(caused_by, diff).await
         .map(|s| vec![s])
 }
 
-fn apply_out<'a>(out_type: &'static str, log: &'a IngestLogger, player_id: &'a Uuid) -> impl Future<Output=IngestResult<Vec<Patch>>> + 'a {
+fn apply_out<'a>(out_type: &'static str, log: &'a IngestLogger, player_id: &'a Uuid) -> impl Future<Output=IngestResult<Vec<bs::Patch>>> + 'a {
     async move {
         log.info(format!("Observed {} by {}. Zeroing consecutiveHits", out_type, player_id)).await?;
         let diff = vec![
             bs::Patch {
-                path: json_path!("player", player_id.clone(), "consecutiveHits"),
+                path: bs::json_path!("player", player_id.clone(), "consecutiveHits"),
                 change: bs::ChangeType::Replace(0.into()),
             },
         ];
@@ -185,15 +253,16 @@ fn apply_out<'a>(out_type: &'static str, log: &'a IngestLogger, player_id: &'a U
     }
 }
 
-fn get_one_player_id(event: &EventuallyEvent) -> IngestResult<&Uuid> {
-    if event.player_tags.len() != 1 {
+fn get_one_id<'a>(tags: &'a Vec<Uuid>, field_name: &'static str) -> IngestResult<&'a Uuid> {
+    if tags.len() != 1 {
         return Err(IngestError::BadEvent(
-            format!("Expected exactly one element in playerTags but found {}", event.player_tags.len())
+            format!("Expected exactly one element in {} but found {}", field_name, tags.len())
         ));
     }
 
-    event.player_tags.get(0)
-        .ok_or_else(|| IngestError::BadEvent("Expected exactly one element in playerTags but found none".to_string()))
+    tags.get(0)
+        .ok_or_else(|| IngestError::BadEvent(
+            format!("Expected exactly one element in {} but found none", field_name)))
 }
 
 
@@ -232,10 +301,40 @@ async fn apply_home_run(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: &
 }
 
 
-async fn apply_storm_warning(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: &EventuallyEvent) -> IngestApplyResult {
+async fn apply_storm_warning(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &EventuallyEvent) -> IngestApplyResult {
     log.debug("Applying StormWarning event".to_string()).await?;
-    // TODO
-    Ok(vec![state])
+
+    let game_id = get_one_id(&event.game_tags, "gameTags")?;
+
+    let diff = [
+        bs::Patch {
+            path: bs::json_path!("game", game_id.clone(), "lastUpdate"),
+            change: bs::ChangeType::Replace("WINTER STORM WARNING\n".into()),
+        },
+        bs::Patch {
+            path: bs::json_path!("game", game_id.clone(), "lastUpdateFull"),
+            change: bs::ChangeType::ReplaceWithComposite(json!([{
+                "blurb": "",
+                "category": 1,
+                "created": event.created,
+                "day": event.day,
+                "description": "WINTER STORM WARNING",
+                "gameTags": [],
+                "id": event.id,
+                "nuts": 0,
+                "phase": 2,
+                "playerTags": [],
+                "season": event.season,
+                "teamTags": [],
+                "tournament": event.tournament,
+                "type": 263
+            }])),
+        },
+    ];
+
+    let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
+    state.successor(caused_by, diff).await
+        .map(|s| vec![s])
 }
 
 

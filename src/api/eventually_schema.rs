@@ -33,6 +33,9 @@ pub struct EventuallyEvent {
     pub player_tags: Vec<Uuid>,
     pub game_tags: Vec<Uuid>,
     pub team_tags: Vec<Uuid>,
+    pub day: i32,
+    pub season: i32,
+    pub tournament: i32,
 }
 
 #[derive(Deserialize, Debug)]

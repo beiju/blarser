@@ -1,5 +1,6 @@
 use std::fmt::{Debug, Display, Formatter};
 use std::iter;
+use std::str::FromStr;
 use im;
 use uuid::Uuid;
 use std::sync::Arc;
@@ -63,12 +64,12 @@ pub struct PrimitiveNode {
 }
 
 impl PrimitiveNode {
-    pub fn match_observation(&self, value: &JsonValue) -> bool {
+    pub fn match_observation(&self, value: &PrimitiveValue) -> bool {
         match &self.value {
             PrimitiveValue::Null => { value.is_null() }
-            PrimitiveValue::Bool(b) => { value.as_bool().map(|value_b| b == &value_b).unwrap_or(false) }
-            PrimitiveValue::Int(i) => { value.as_i64().map(|value_i| i == &value_i).unwrap_or(false) }
-            PrimitiveValue::Float(f) => { value.as_f64().map(|value_f| f == &value_f).unwrap_or(false) }
+            PrimitiveValue::Bool(b) => { value.as_bool().map(|value_b| b == value_b).unwrap_or(false) }
+            PrimitiveValue::Int(i) => { value.as_int().map(|value_i| i == value_i).unwrap_or(false) }
+            PrimitiveValue::Float(f) => { value.as_float().map(|value_f| f == value_f).unwrap_or(false) }
             PrimitiveValue::String(s) => { value.as_str().map(|value_s| s == value_s).unwrap_or(false) }
             PrimitiveValue::IntRange(_, _) => { todo!() }
             PrimitiveValue::FloatRange(_, _) => { todo!() }
@@ -76,7 +77,7 @@ impl PrimitiveNode {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum PrimitiveValue {
     // Simple primitives
     Null,
@@ -135,9 +136,85 @@ impl PartialEq for PrimitiveValue {
     }
 }
 
+impl From<i64> for PrimitiveValue {
+    fn from(i: i64) -> Self {
+        PrimitiveValue::Int(i)
+    }
+}
+
+impl From<bool> for PrimitiveValue {
+    fn from(b: bool) -> Self {
+        PrimitiveValue::Bool(b)
+    }
+}
+
+impl From<String> for PrimitiveValue {
+    fn from(s: String) -> Self {
+        PrimitiveValue::String(s)
+    }
+}
+
+impl From<&'static str> for PrimitiveValue {
+    fn from(s: &'static str) -> Self {
+        PrimitiveValue::String(s.into())
+    }
+}
+
 impl PrimitiveValue {
     pub fn equals<T: Into<Self>>(&self, other: T) -> bool {
         &other.into() == self
+    }
+
+    pub fn from_json_number(n: &serde_json::Number) -> PrimitiveValue {
+        match n.as_i64() {
+            Some(i) => PrimitiveValue::Int(i),
+            None => {
+                let f = n.as_f64().expect("Number was neither i64 nor f64");
+                PrimitiveValue::Float(f)
+            }
+        }
+    }
+
+    pub fn is_null(&self) -> bool {
+        match self {
+            PrimitiveValue::Null => { true }
+            _ => { false }
+        }
+    }
+
+    pub fn as_bool(&self) -> Option<&bool> {
+        match self {
+            PrimitiveValue::Bool(b) => { Some(b) }
+            _ => { None }
+        }
+    }
+
+    pub fn as_int(&self) -> Option<&i64> {
+        match self {
+            PrimitiveValue::Int(i) => { Some(i) }
+            _ => { None }
+        }
+    }
+
+    pub fn as_float(&self) -> Option<&f64> {
+        match self {
+            PrimitiveValue::Float(f) => { Some(f) }
+            _ => { None }
+        }
+    }
+
+    pub fn as_str(&self) -> Option<&str> {
+        match self {
+            PrimitiveValue::String(s) => { Some(s) }
+            _ => { None }
+        }
+    }
+
+    pub fn as_uuid(&self) -> Option<Uuid> {
+        match self {
+            PrimitiveValue::String(s) => { Uuid::from_str(s).ok() }
+            _ => { None }
+        }
     }
 }
 
@@ -158,6 +235,8 @@ pub enum PathError {
     #[error("Path error at {0}: Path does not exist")]
     MissingKey(Path),
 
+    #[error(transparent)]
+    UuidError(#[from] uuid::Error),
 }
 
 #[derive(Error, Debug)]
@@ -170,12 +249,6 @@ pub enum ApplyChangeError {
 
     #[error("Cannot increment value {1} at {0}")]
     CannotIncrement(Path, String),
-
-    #[error("Tried to replace object with object at path {0}")]
-    CannotReplaceObjectWithObject(Path),
-
-    #[error("Tried to replace array with array at path {0}")]
-    CannotReplaceArrayWithArray(Path),
 
     #[error(transparent)]
     PathError {
@@ -200,6 +273,47 @@ impl Node {
             }
         }
     }
+
+    pub async fn as_array(&self) -> Result<&im::Vector<Node>, String> {
+        match self {
+            Node::Array(arr) => { Ok(arr) }
+            _ => { Err(self.to_string().await) }
+        }
+    }
+
+    pub async fn as_int(&self) -> Result<i64, String> {
+        match self {
+            Node::Primitive(primitive_shared) => {
+                let primitive = primitive_shared.read().await;
+                primitive.value.as_int().cloned()
+                    .ok_or_else(|| primitive.value.to_string())
+            }
+            _ => { Err(self.to_string().await) }
+        }
+    }
+
+    pub async fn as_string(&self) -> Result<String, String> {
+        match self {
+            Node::Primitive(primitive_shared) => {
+                let primitive = primitive_shared.read().await;
+                primitive.value.as_str().map(|s| s.to_string())
+                    .ok_or_else(|| primitive.value.to_string())
+            }
+            _ => { Err(self.to_string().await) }
+        }
+    }
+
+    pub async fn as_uuid(&self) -> Result<Uuid, String> {
+        match self {
+            Node::Primitive(primitive_shared) => {
+                let primitive = primitive_shared.read().await;
+                primitive.value.as_uuid()
+                    .ok_or_else(|| primitive.value.to_string())
+            }
+            _ => { Err(self.to_string().await) }
+        }
+    }
+
 
     pub async fn primitive_to_string(primitive: &SharedPrimitiveNode) -> String {
         let lock = primitive.read().await;
@@ -291,21 +405,12 @@ impl Node {
         }
     }
 
-    pub fn successor(&self, value: JsonValue, caused_by: Arc<Event>, path: &Path) -> Result<Node, ApplyChangeError> {
+    pub fn successor(&self, value: PrimitiveValue, caused_by: Arc<Event>) -> Result<Node, ApplyChangeError> {
         let result = match self {
-            Node::Primitive(primitive) => Node::successor_from_primitive(primitive.clone(), value, caused_by),
+            Node::Primitive(primitive) => Node::primitive_successor(primitive.clone(), value, caused_by),
             // Composites don't have tracked data, so create as new
-            Node::Array(_) => {
-                if value.is_array() {
-                    return Err(ApplyChangeError::CannotReplaceArrayWithArray(path.clone()))
-                }
-                Node::new_from_json(value, caused_by)
-            }
-            Node::Object(_) => {
-                if value.is_object() {
-                    return Err(ApplyChangeError::CannotReplaceArrayWithArray(path.clone()))
-                }
-                Node::new_from_json(value, caused_by)
+            _ => {
+                Node::new_primitive(value, caused_by)
             }
         };
 
@@ -368,14 +473,17 @@ pub struct Patch {
 impl Patch {
     pub async fn description(&self, state: &BlaseballState) -> Result<String, PathError> {
         let str = match &self.change {
-            ChangeType::Add(value) => {
+            ChangeType::New(value) => {
                 format!("{}: Add value {:#}", self.path, value)
             }
             ChangeType::Remove => {
                 format!("{}: Remove value {}", self.path, state.node_at(&self.path).await?.to_string().await)
             }
             ChangeType::Replace(value) => {
-                format!("{}: Replace {} with {:#}", self.path, state.node_at(&self.path).await?.to_string().await, value)
+                format!("{}: Replace primitive {} with primitive {:#}", self.path, state.node_at(&self.path).await?.to_string().await, value)
+            }
+            ChangeType::ReplaceWithComposite(value) => {
+                format!("{}: Replace primitive {} with composite {:#}", self.path, state.node_at(&self.path).await?.to_string().await, value)
             }
             ChangeType::Increment => {
                 format!("{}: Increment {}", self.path, state.node_at(&self.path).await?.to_string().await)
@@ -388,9 +496,10 @@ impl Patch {
 
 #[derive(Clone)]
 pub enum ChangeType {
-    Add(JsonValue),
+    New(JsonValue),
     Remove,
-    Replace(JsonValue),
+    Replace(PrimitiveValue),
+    ReplaceWithComposite(JsonValue),
     Increment,
 }
 
@@ -451,9 +560,7 @@ impl Path {
             components: self.components[0..(index + 1)].to_vec(),
         }
     }
-}
 
-impl Path {
     pub fn extend(&self, end: PathComponent) -> Self {
         let mut components = self.components.clone();
         components.push(end);
@@ -540,7 +647,7 @@ impl BlaseballState {
         }
     }
 
-    pub async fn successor(self: Arc<Self>, caused_by: Arc<Event>, patches: Vec<Patch>) -> Result<Arc<BlaseballState>, IngestError> {
+    pub async fn successor(self: Arc<Self>, caused_by: Arc<Event>, patches: impl IntoIterator<Item=Patch>) -> Result<Arc<BlaseballState>, IngestError> {
         let mut new_data = self.data.clone();
 
         for patch in patches {
@@ -611,6 +718,36 @@ impl BlaseballState {
         }
 
         Ok(node)
+    }
+
+    pub async fn array_at(&self, path: &Path) -> Result<&im::Vector<Node>, PathError> {
+        self.node_at(path).await?
+            .as_array().await
+            .map_err(|value| PathError::UnexpectedType {
+                path: path.clone(),
+                expected_type: "array",
+                value,
+            })
+    }
+
+    pub async fn int_at(&self, path: &Path) -> Result<i64, PathError> {
+        self.node_at(path).await?
+            .as_int().await
+            .map_err(|value| PathError::UnexpectedType {
+                path: path.clone(),
+                expected_type: "int",
+                value,
+            })
+    }
+
+    pub async fn string_at(&self, path: &Path) -> Result<String, PathError> {
+        self.node_at(path).await?
+            .as_string().await
+            .map_err(|value| PathError::UnexpectedType {
+                path: path.clone(),
+                expected_type: "str",
+                value,
+            })
     }
 }
 
@@ -717,7 +854,7 @@ async fn apply_change(data: &mut BlaseballData, change: Patch, caused_by: Arc<Ev
 
 async fn apply_change_to_hashmap<T: Clone + std::hash::Hash + std::cmp::Eq>(container: &mut im::HashMap<T, Node>, key: &T, change: Patch, caused_by: Arc<Event>) -> Result<(), ApplyChangeError> {
     match change.change {
-        ChangeType::Add(value) => {
+        ChangeType::New(value) => {
             if let Some(value) = container.get(key) {
                 return Err(ApplyChangeError::UnexpectedValue(change.path, value.to_string().await));
             }
@@ -734,7 +871,15 @@ async fn apply_change_to_hashmap<T: Clone + std::hash::Hash + std::cmp::Eq>(cont
         }
         ChangeType::Replace(value) => {
             if let Some(node) = container.get(key) {
-                let new_node = node.successor(value, caused_by, &change.path)?;
+                let new_node = node.successor(value, caused_by)?;
+                container.insert(key.clone(), new_node);
+            } else {
+                return Err(ApplyChangeError::MissingValue(change.path));
+            }
+        }
+        ChangeType::ReplaceWithComposite(value) => {
+            if let Some(_) = container.get(key) {
+                let new_node = Node::new_from_json(value, caused_by);
                 container.insert(key.clone(), new_node);
             } else {
                 return Err(ApplyChangeError::MissingValue(change.path));
@@ -775,7 +920,7 @@ async fn apply_change_to_hashmap<T: Clone + std::hash::Hash + std::cmp::Eq>(cont
 
 async fn apply_change_to_vector(container: &mut im::Vector<Node>, idx: usize, change: Patch, caused_by: Arc<Event>) -> Result<(), ApplyChangeError> {
     match change.change {
-        ChangeType::Add(value) => {
+        ChangeType::New(value) => {
             if let Some(node) = container.get(idx) {
                 return Err(ApplyChangeError::UnexpectedValue(change.path, node.to_string().await));
             }
@@ -789,7 +934,7 @@ async fn apply_change_to_vector(container: &mut im::Vector<Node>, idx: usize, ch
         }
         ChangeType::Replace(value) => {
             if let Some(node) = container.get(idx) {
-                let new_node = node.successor(value, caused_by, &change.path)?;
+                let new_node = node.successor(value, caused_by)?;
                 container.insert(idx, new_node);
             } else {
                 return Err(ApplyChangeError::MissingValue(change.path));
