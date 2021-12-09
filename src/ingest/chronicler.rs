@@ -8,7 +8,7 @@ use rocket::futures::stream::{self, Stream, StreamExt, TryStreamExt};
 
 use crate::api::{chronicler, ChroniclerItem};
 use crate::blaseball_state as bs;
-use crate::blaseball_state::PrimitiveValue;
+use crate::blaseball_state::{Node, Observation, Patch, Path, PrimitiveValue};
 use crate::ingest::{IngestItem, BoxedIngestItem};
 use crate::ingest::error::{IngestError, IngestResult};
 use crate::ingest::log::IngestLogger;
@@ -120,14 +120,14 @@ fn observe_state<'a>(log: &'a IngestLogger, data: &'a bs::EntitySet, observed: &
 fn observe_node<'a>(log: &'a IngestLogger, node: &'a bs::Node, observed: &'a JsonValue, observation: &'a bs::Observation, path: bs::Path) -> BoxedPatchStream<'a> {
     let primitive = match observed {
         JsonValue::Object(map) => {
-            return observe_object(log, node, map, observation, path)
+            return observe_object(log, node, map, observation, path);
         }
         JsonValue::Array(vec) => {
-            return observe_array(log, node, vec, observation, path)
+            return observe_array(log, node, vec, observation, path);
         }
         Value::Null => { PrimitiveValue::Null }
         Value::Bool(b) => { PrimitiveValue::Bool(*b) }
-        Value::Number(n) => {PrimitiveValue::from_json_number(n) }
+        Value::Number(n) => { PrimitiveValue::from_json_number(n) }
         Value::String(s) => { PrimitiveValue::String(s.clone()) }
     };
 
@@ -349,44 +349,70 @@ fn observe_array_slice_by_deletion<'a>(
 }
 
 fn observe_primitive<'a>(log: &'a IngestLogger, node: &'a bs::Node, observed: PrimitiveValue, observation: &'a bs::Observation, path: bs::Path)
-                                                       -> BoxedPatchStream<'a> {
+                         -> BoxedPatchStream<'a> {
     let s = stream::once(async move {
-        if let bs::Node::Primitive(primitive_node) = node {
-            let primitive = primitive_node.read().await;
-            if primitive.match_observation(&observed) {
-                if let None = primitive.observed_by {
-                    // Must drop the read lock before opening a write lock or it deadlocks
-                    drop(primitive);
-                    let mut primitive = primitive_node.write().await;
-                    primitive.observed_by = Some(observation.clone());
-                    let log_result = log.info(format!("Observed expected value at {}", path)).await;
-                    if let Err(e) = log_result {
-                        return Some(Err(e.into()));
-                    }
-                }
-                None
-            } else {
-                let log_result = log.info(format!("Observed changed value at {} from {} to {}", path, primitive.value, observed)).await;
-                if let Err(e) = log_result {
-                    return Some(Err(e.into()));
-                }
-                Some(Ok(bs::Patch {
-                    path,
-                    change: bs::ChangeType::Replace(observed.clone()),
-                }))
-            }
-        } else {
-            let log_result = log.info(format!("Observed changed value at {} from {} to {}", path, node.to_string().await, observed)).await;
-            if let Err(e) = log_result {
-                return Some(Err(e.into()));
-            }
-            Some(Ok(bs::Patch {
-                path,
-                change: bs::ChangeType::Replace(observed.clone()),
-            }))
+        // This match statement is just to flip Result<Option<T>> to Option<Result<T>>, where an Err
+        // result is mapped to Some(Err)
+        match observe_primitive_internal(log, node, &observed, observation, path).await {
+            Ok(None) => { None }
+            Ok(Some(patch)) => { Some(Ok(patch)) }
+            Err(e) => { Some(Err(e)) }
         }
+
     })
         .filter_map(|v| async { v });
 
     Box::pin(s)
+}
+
+async fn observe_primitive_internal(log: &IngestLogger, node: &Node, observed: &PrimitiveValue, observation: &Observation, path: Path) -> IngestResult<Option<Patch>> {
+    if let bs::Node::Primitive(primitive_node) = node {
+        let mut primitive = primitive_node.write().await;
+        if match_observation(log, &mut primitive, &observed).await? {
+            if let None = primitive.observed_by {
+                primitive.observed_by = Some(observation.clone());
+                log.info(format!("Observed expected value at {}", path)).await?
+            }
+            Ok(None)
+        } else {
+            log.info(format!("Observed changed value at {} from {} to {}", path, primitive.value, observed)).await?;
+            Ok(Some(bs::Patch {
+                path,
+                change: bs::ChangeType::Replace(observed.clone()),
+            }))
+        }
+    } else {
+        log.info(format!("Observed changed value at {} from {} to {}", path, node.to_string().await, observed)).await?;
+        Ok(Some(bs::Patch {
+            path,
+            change: bs::ChangeType::Replace(observed.clone()),
+        }))
+    }
+}
+
+async fn match_observation(log: &IngestLogger, node: &mut bs::PrimitiveNode, value: &bs::PrimitiveValue) -> IngestResult<bool> {
+    let result = match &node.value {
+        bs::PrimitiveValue::Null => { value.is_null() }
+        bs::PrimitiveValue::Bool(b) => { value.as_bool().map(|value_b| b == value_b).unwrap_or(false) }
+        bs::PrimitiveValue::Int(i) => { value.as_int().map(|value_i| i == value_i).unwrap_or(false) }
+        bs::PrimitiveValue::Float(f) => { value.as_float().map(|value_f| f == value_f).unwrap_or(false) }
+        bs::PrimitiveValue::String(s) => { value.as_str().map(|value_s| s == value_s).unwrap_or(false) }
+        bs::PrimitiveValue::IntRange(_, _) => { todo!() }
+        bs::PrimitiveValue::FloatRange(lower, upper) => {
+            match value.as_float() {
+                None => { false }
+                Some(f) => {
+                    if lower < f && f < upper {
+                        log.info(format!("Observed concrete value {} for float range {}-{}", f, lower, upper)).await?;
+                        node.value = bs::PrimitiveValue::Float(*f);
+                        true
+                    } else {
+                        false
+                    }
+                }
+            }
+        }
+    };
+
+    Ok(result)
 }

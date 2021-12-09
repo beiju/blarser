@@ -60,6 +60,13 @@ impl IngestLogger {
 
             // into_iter().next() acts like first() but it moves the item out (and consumes the vec)
             if let Some(record) = existing.into_iter().next() {
+                // If the message changed, update it
+                if record.message != message {
+                    return diesel::update(&record)
+                        .set(dsl::message.eq(&message))
+                        .get_result(c);
+                }
+
                 return Ok(record)
             }
 

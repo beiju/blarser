@@ -38,15 +38,6 @@ pub struct EventuallyEvent {
     pub tournament: i32,
 }
 
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct LetsGoMetadata {
-    pub home: Uuid,
-    pub away: Uuid,
-    pub stadium: Option<Uuid>,
-    pub weather: Weather,
-}
-
 #[derive(Deserialize_repr, PartialEq, Debug)]
 #[repr(i32)]
 pub enum Weather {

@@ -63,20 +63,6 @@ pub struct PrimitiveNode {
     pub value: PrimitiveValue,
 }
 
-impl PrimitiveNode {
-    pub fn match_observation(&self, value: &PrimitiveValue) -> bool {
-        match &self.value {
-            PrimitiveValue::Null => { value.is_null() }
-            PrimitiveValue::Bool(b) => { value.as_bool().map(|value_b| b == value_b).unwrap_or(false) }
-            PrimitiveValue::Int(i) => { value.as_int().map(|value_i| i == value_i).unwrap_or(false) }
-            PrimitiveValue::Float(f) => { value.as_float().map(|value_f| f == value_f).unwrap_or(false) }
-            PrimitiveValue::String(s) => { value.as_str().map(|value_s| s == value_s).unwrap_or(false) }
-            PrimitiveValue::IntRange(_, _) => { todo!() }
-            PrimitiveValue::FloatRange(_, _) => { todo!() }
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 pub enum PrimitiveValue {
     // Simple primitives
