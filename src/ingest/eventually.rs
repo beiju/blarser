@@ -370,10 +370,31 @@ async fn apply_batter_up(state: Arc<bs::BlaseballState>, log: &IngestLogger, eve
 }
 
 
-async fn apply_strike(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: &EventuallyEvent) -> IngestApplyResult {
-    log.debug("Applying Strike event".to_string()).await?;
-    // TODO
-    Ok(vec![state])
+async fn apply_strike(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &EventuallyEvent) -> IngestApplyResult {
+    let game_id = get_one_id(&event.game_tags, "gameTags")?;
+    log.debug(format!("Applying Strike event for game {}", game_id)).await?;
+
+    // let top_of_inning = state.bool_at(&bs::json_path!("game", game_id.clone(), "topOfInning")).await?;
+    // let max_balls = state.int_at(&bs::json_path!("game", game_id.clone(), prefixed("Balls", top_of_inning))).await?;
+
+    let balls = state.int_at(&bs::json_path!("game", game_id.clone(), "atBatBalls")).await?;
+    let strikes = 1 + state.int_at(&bs::json_path!("game", game_id.clone(), "atBatStrikes")).await?;
+
+    log.debug(format!("Recording Strike for game {}, count {}-{}", game_id, balls, strikes)).await?;
+
+    let metadata: PlayMetadata = serde_json::from_value(event.metadata.clone())?;
+    let message = format!("Strike, looking. {}-{}", balls, strikes);
+    let diff = common_patches(event, game_id, message, metadata.play)
+        .chain([
+            bs::Patch {
+                path: bs::json_path!("game", game_id.clone(), "atBatStrikes"),
+                change: bs::ChangeType::Set(strikes.into()),
+            },
+        ]);
+
+    let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
+    state.successor(caused_by, diff).await
+        .map(|s| vec![s])
 }
 
 
