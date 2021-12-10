@@ -227,7 +227,7 @@ pub enum PathError {
     #[error("Path error at {0}/{1}: Entity does not exist")]
     EntityDoesNotExist(&'static str, Uuid),
 
-    #[error("Path error at {path}: Expected {expected_type} but found {value}")]
+    #[error("Path error at {path}: Expected {expected_type} but found {value:#}")]
     UnexpectedType { path: Path, expected_type: &'static str, value: String },
 
     #[error("Path error at {0}: Path does not exist")]
@@ -483,16 +483,16 @@ impl Patch {
     pub async fn description(&self, state: &BlaseballState) -> Result<String, PathError> {
         let str = match &self.change {
             ChangeType::New(value) => {
-                format!("{}: Add value {:#}", self.path, value)
+                format!("{}: Add {:#}", self.path, value)
             }
             ChangeType::Remove => {
-                format!("{}: Remove value {}", self.path, state.node_at(&self.path).await?.to_string().await)
+                format!("{}: Remove {}", self.path, state.node_at(&self.path).await?.to_string().await)
             }
             ChangeType::Set(value) => {
-                format!("{}: Replace primitive {} with primitive {:#}", self.path, state.node_at(&self.path).await?.to_string().await, value)
+                format!("{}: Replace {} with {:#}", self.path, state.node_at(&self.path).await?.to_string().await, value)
             }
-            ChangeType::ReplaceWithComposite(value) => {
-                format!("{}: Replace primitive {} with composite {:#}", self.path, state.node_at(&self.path).await?.to_string().await, value)
+            ChangeType::Overwrite(value) => {
+                format!("{}: Overwrite {} with {:#}", self.path, state.node_at(&self.path).await?.to_string().await, value)
             }
             ChangeType::Increment => {
                 format!("{}: Increment {}", self.path, state.node_at(&self.path).await?.to_string().await)
@@ -505,10 +505,13 @@ impl Patch {
 
 #[derive(Clone)]
 pub enum ChangeType {
+    // For a newly-added value with no history
     New(JsonValue),
     Remove,
+    // For changing a value with history
     Set(PrimitiveValue),
-    ReplaceWithComposite(JsonValue),
+    // For overwriting a value and not connecting it to history
+    Overwrite(JsonValue),
     Increment,
 }
 
@@ -774,7 +777,7 @@ impl BlaseballState {
             .as_uuid().await
             .map_err(|value| PathError::UnexpectedType {
                 path: path.clone(),
-                expected_type: "str",
+                expected_type: "uuid",
                 value,
             })
     }
@@ -906,7 +909,7 @@ async fn apply_change_to_hashmap<T: Clone + std::hash::Hash + std::cmp::Eq>(cont
                 return Err(ApplyChangeError::MissingValue(change.path));
             }
         }
-        ChangeType::ReplaceWithComposite(value) => {
+        ChangeType::Overwrite(value) => {
             if let Some(_) = container.get(key) {
                 let new_node = Node::new_from_json(value, caused_by);
                 container.insert(key.clone(), new_node);

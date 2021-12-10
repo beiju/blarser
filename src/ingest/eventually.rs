@@ -1,15 +1,13 @@
 use std::future::Future;
 use std::sync::Arc;
 use rocket::async_trait;
-use chrono::{DateTime, SecondsFormat, Timelike, Utc};
-use diesel::types::Date;
+use chrono::{DateTime, Utc};
 use serde_json::json;
 use uuid::Uuid;
 use serde::Deserialize;
 
 use crate::api::{eventually, EventuallyEvent, EventType, Weather};
 use crate::blaseball_state as bs;
-use crate::blaseball_state::PrimitiveValue;
 use crate::ingest::{IngestItem, BoxedIngestItem, IngestError, IngestResult};
 use crate::ingest::error::IngestApplyResult;
 use crate::ingest::log::IngestLogger;
@@ -183,57 +181,27 @@ async fn apply_play_ball(state: Arc<bs::BlaseballState>, log: &IngestLogger, eve
     }
 
     let metadata: PlayBallMetadata = serde_json::from_value(event.metadata.clone())?;
-    let diff = [
-        bs::Patch {
-            path: bs::json_path!("game", game_id.clone(), "gameStartPhase"),
-            change: bs::ChangeType::Set(20.into()),
-        },
-        bs::Patch {
-            path: bs::json_path!("game", game_id.clone(), "playCount"),
-            change: bs::ChangeType::Set(metadata.play.into()),
-        },
-        bs::Patch {
-            path: bs::json_path!("game", game_id.clone(), "inning"),
-            change: bs::ChangeType::Set((-1).into()),
-        },
-        bs::Patch {
-            path: bs::json_path!("game", game_id.clone(), "lastUpdate"),
-            change: bs::ChangeType::Set("Play ball!\n".into()),
-        },
-        bs::Patch {
-            path: bs::json_path!("game", game_id.clone(), "phase"),
-            change: bs::ChangeType::Set(2.into()),
-        },
-        bs::Patch {
-            path: bs::json_path!("game", game_id.clone(), "playCount"),
-            change: bs::ChangeType::Set((metadata.play + 1).into()),
-        },
-        bs::Patch {
-            path: bs::json_path!("game", game_id.clone(), "topOfInning"),
-            change: bs::ChangeType::Set(false.into()),
-        },
-        bs::Patch {
-            path: bs::json_path!("game", game_id.clone(), "lastUpdateFull"),
-            change: bs::ChangeType::ReplaceWithComposite(json!([{
-                "blurb": "",
-                "category": 0,
-                "created": format_blaseball_date(event.created),
-                "day": event.day,
-                "description": "Play ball!",
-                "gameTags": [],
-                "id": event.id,
-                "nuts": 0,
-                "phase": 2,
-                "playerTags": [],
-                "season": event.season,
-                "teamTags": [],
-                "tournament": event.tournament,
-                "type": 1
-            }])),
-        },
-    ].into_iter()
+    let diff = common_patches(event, game_id, "Play ball!".into(), metadata.play)
         .chain(play_ball_team_specific_diffs(game_id, "away"))
-        .chain(play_ball_team_specific_diffs(game_id, "home"));
+        .chain(play_ball_team_specific_diffs(game_id, "home"))
+        .chain([
+            bs::Patch {
+                path: bs::json_path!("game", game_id.clone(), "gameStartPhase"),
+                change: bs::ChangeType::Set(20.into()),
+            },
+            bs::Patch {
+                path: bs::json_path!("game", game_id.clone(), "inning"),
+                change: bs::ChangeType::Set((-1).into()),
+            },
+            bs::Patch {
+                path: bs::json_path!("game", game_id.clone(), "phase"),
+                change: bs::ChangeType::Set(2.into()),
+            },
+            bs::Patch {
+                path: bs::json_path!("game", game_id.clone(), "topOfInning"),
+                change: bs::ChangeType::Set(false.into()),
+            },
+        ]);
 
     let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
     state.successor(caused_by, diff).await
@@ -249,11 +217,45 @@ fn play_ball_team_specific_diffs(game_id: &Uuid, which: &'static str) -> impl It
     [
         bs::Patch {
             path: bs::json_path!("game", game_id.clone(), format!("{}Pitcher", which)),
-            change: bs::ChangeType::Set(PrimitiveValue::Null),
+            change: bs::ChangeType::Set(bs::PrimitiveValue::Null),
         },
         bs::Patch {
             path: bs::json_path!("game", game_id.clone(), format!("{}PitcherName", which)),
             change: bs::ChangeType::Set("".into()),
+        },
+    ].into_iter()
+}
+
+fn common_patches(event: &EventuallyEvent, game_id: &Uuid, message: String, play: i64) -> impl Iterator<Item=bs::Patch> {
+    [
+        bs::Patch {
+            path: bs::json_path!("game", game_id.clone(), "lastUpdate"),
+            change: bs::ChangeType::Set(format!("{}\n", message).into()),
+        },
+        bs::Patch {
+            path: bs::json_path!("game", game_id.clone(), "playCount"),
+            // play and playCount are out of sync by exactly 1
+            change: bs::ChangeType::Set((play + 1).into()),
+        },
+        // lastUpdateFull is not logically connected to the previous one. Re-set it each time
+        bs::Patch {
+            path: bs::json_path!("game", game_id.clone(), "lastUpdateFull"),
+            change: bs::ChangeType::Overwrite(json!([{
+                "blurb": "",
+                "category": event.category as i32,
+                "created": format_blaseball_date(event.created),
+                "day": event.day,
+                "description": message,
+                "gameTags": [],
+                "id": event.id,
+                "nuts": 0,
+                "phase": 2,
+                "playerTags": event.player_tags,
+                "season": event.season,
+                "teamTags": [],
+                "tournament": event.tournament,
+                "type": event.r#type as i32,
+            }])),
         },
     ].into_iter()
 }
@@ -281,50 +283,21 @@ async fn apply_half_inning(state: Arc<bs::BlaseballState>, log: &IngestLogger, e
 
     let top_or_bottom = if new_top_of_inning { "Top" } else { "Bottom" };
     let message = format!("{} of {}, {} batting.", top_or_bottom, new_inning + 1, batting_team_name);
-    let diff = [
-        bs  ::Patch {
-            path: bs::json_path!("game", game_id.clone(), "lastUpdate"),
-            change: bs::ChangeType::Set(format!("{}\n", message).into()),
-        },
-        bs::Patch {
-            path: bs::json_path!("game", game_id.clone(), "playCount"),
-            change: bs::ChangeType::Set(metadata.play.into()),
-        },
-        bs::Patch {
-            path: bs::json_path!("game", game_id.clone(), "phase"),
-            change: bs::ChangeType::Set((6).into()),
-        },
-        bs::Patch {
-            path: bs::json_path!("game", game_id.clone(), "topOfInning"),
-            change: bs::ChangeType::Set(new_top_of_inning.into()),
-        },
-        bs::Patch {
-            path: bs::json_path!("game", game_id.clone(), "inning"),
-            change: bs::ChangeType::Set(new_inning.into()),
-        },
-        bs::Patch {
-            path: bs::json_path!("game", game_id.clone(), "playCount"),
-            // play and playCount are out of sync by exactly 1
-            change: bs::ChangeType::Set((metadata.play + 1).into()),
-        },
-        // lastUpdateFull
-        bs::Patch {
-            path: bs::json_path!("game", game_id.clone(), "lastUpdateFull", 0, "created"),
-            change: bs::ChangeType::Set(format_blaseball_date(event.created).into()),
-        },
-        bs::Patch {
-            path: bs::json_path!("game", game_id.clone(), "lastUpdateFull", 0, "description"),
-            change: bs::ChangeType::Set(message.into()),
-        },
-        bs::Patch {
-            path: bs::json_path!("game", game_id.clone(), "lastUpdateFull", 0, "id"),
-            change: bs::ChangeType::Set(event.id.into()),
-        },
-        bs::Patch {
-            path: bs::json_path!("game", game_id.clone(), "lastUpdateFull", 0, "type"),
-            change: bs::ChangeType::Set(2.into()),
-        },
-    ];
+    let diff = common_patches(event, game_id, message, metadata.play)
+        .chain([
+            bs::Patch {
+                path: bs::json_path!("game", game_id.clone(), "phase"),
+                change: bs::ChangeType::Set((6).into()),
+            },
+            bs::Patch {
+                path: bs::json_path!("game", game_id.clone(), "topOfInning"),
+                change: bs::ChangeType::Set(new_top_of_inning.into()),
+            },
+            bs::Patch {
+                path: bs::json_path!("game", game_id.clone(), "inning"),
+                change: bs::ChangeType::Set(new_inning.into()),
+            },
+        ]);
 
     // The first halfInning event re-sets the data that PlayBall clears
     let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
@@ -361,10 +334,44 @@ fn half_inning_team_specific_diffs(game_id: &Uuid, active_pitcher: ActivePitcher
 }
 
 
-async fn apply_batter_up(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: &EventuallyEvent) -> IngestApplyResult {
-    log.debug("Applying BatterUp event".to_string()).await?;
-    // TODO
-    Ok(vec![state])
+async fn apply_batter_up(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &EventuallyEvent) -> IngestApplyResult {
+    let game_id = get_one_id(&event.game_tags, "gameTags")?;
+    log.debug(format!("Applying BatterUp event for game {}", game_id)).await?;
+
+    #[derive(Deserialize, Debug)]
+    #[serde(rename_all = "camelCase")]
+    pub struct BatterUpMetadata {
+        pub play: i64,
+    }
+
+    let top_of_inning = state.bool_at(&bs::json_path!("game", game_id.clone(), "topOfInning")).await?;
+    let batting_team_id = state.uuid_at(&bs::json_path!("game", game_id.clone(), prefixed("Team", top_of_inning))).await?;
+    let batting_team_name = state.string_at(&bs::json_path!("team", batting_team_id, "nickname")).await?;
+    let batter_count = 1 + state.int_at(&bs::json_path!("game", game_id.clone(), prefixed("TeamBatterCount", top_of_inning))).await?;
+    let batter_id = state.uuid_at(&bs::json_path!("team", batting_team_id, "lineup", batter_count as usize)).await?;
+    let batter_name = state.string_at(&bs::json_path!("player", batter_id, "name")).await?;
+
+    let metadata: BatterUpMetadata = serde_json::from_value(event.metadata.clone())?;
+    let message = format!("{} batting for the {}.", batter_name, batting_team_name);
+    let diff = common_patches(event, game_id, message, metadata.play)
+        .chain([
+            bs::Patch {
+                path: bs::json_path!("game", game_id.clone(), prefixed("Batter", top_of_inning)),
+                change: bs::ChangeType::Set(batter_id.into()),
+            },
+            bs::Patch {
+                path: bs::json_path!("game", game_id.clone(), prefixed("BatterName", top_of_inning)),
+                change: bs::ChangeType::Set(batter_name.into()),
+            },
+            bs::Patch {
+                path: bs::json_path!("game", game_id.clone(), prefixed("TeamBatterCount", top_of_inning)),
+                change: bs::ChangeType::Set(batter_count.into()),
+            },
+        ]);
+
+    let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
+    state.successor(caused_by, diff).await
+        .map(|s| vec![s])
 }
 
 
@@ -505,42 +512,13 @@ async fn apply_storm_warning(state: Arc<bs::BlaseballState>, log: &IngestLogger,
     }
 
     let metadata: StormWarningMetadata = serde_json::from_value(event.metadata.clone())?;
-
-    let created_fmt = format_blaseball_date(event.created);
-    let diff = [
-        bs::Patch {
-            path: bs::json_path!("game", game_id.clone(), "lastUpdate"),
-            change: bs::ChangeType::Set("WINTER STORM WARNING\n".into()),
-        },
-        bs::Patch {
-            path: bs::json_path!("game", game_id.clone(), "gameStartPhase"),
-            change: bs::ChangeType::Set(11.into()),
-        },
-        bs::Patch {
-            path: bs::json_path!("game", game_id.clone(), "playCount"),
-            // play and playCount are out of sync by exactly 1
-            change: bs::ChangeType::Set((metadata.play + 1).into()),
-        },
-        bs::Patch {
-            path: bs::json_path!("game", game_id.clone(), "lastUpdateFull"),
-            change: bs::ChangeType::ReplaceWithComposite(json!([{
-                "blurb": "",
-                "category": 1,
-                "created": created_fmt,
-                "day": event.day,
-                "description": "WINTER STORM WARNING",
-                "gameTags": [],
-                "id": event.id,
-                "nuts": 0,
-                "phase": 2,
-                "playerTags": [],
-                "season": event.season,
-                "teamTags": [],
-                "tournament": event.tournament,
-                "type": 263
-            }])),
-        },
-    ];
+    let diff = common_patches(event, game_id, "WINTER STORM WARNING".into(), metadata.play)
+        .chain([
+            bs::Patch {
+                path: bs::json_path!("game", game_id.clone(), "gameStartPhase"),
+                change: bs::ChangeType::Set(11.into()),
+            },
+        ]);
 
     let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
     state.successor(caused_by, diff).await

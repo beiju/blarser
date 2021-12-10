@@ -72,7 +72,7 @@ pub enum Weather {
     Night = 29,
 }
 
-#[derive(Deserialize_repr, PartialEq, Debug)]
+#[derive(Deserialize_repr, PartialEq, Debug, Copy, Clone)]
 #[repr(i32)]
 pub enum EventType {
     Undefined = -1,

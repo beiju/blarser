@@ -2,6 +2,7 @@ use std::iter;
 use std::pin::Pin;
 use std::sync::Arc;
 use chrono::{DateTime, Utc};
+use itertools::{Itertools, EitherOrBoth};
 use serde_json::{Value as JsonValue, map::Map as JsonMap, Value};
 use rocket::async_trait;
 use rocket::futures::stream::{self, Stream, StreamExt, TryStreamExt};
@@ -201,7 +202,42 @@ fn observe_object<'a>(log: &'a IngestLogger, node: &'a bs::Node, observed: &'a J
 
 fn observe_array<'a>(log: &'a IngestLogger, node: &'a bs::Node, observed: &'a Vec<JsonValue>, observation: &'a bs::Observation, path: bs::Path) -> BoxedPatchStream<'a> {
     if let bs::Node::Array(arr) = node {
-        observe_array_subset(log, arr, 0, &observed, 0, observation, path)
+        let s = stream::iter(arr.iter()
+            .zip_longest(observed.iter()))
+            .enumerate()
+            .map(move |(i, pair)| {
+                let path = path.extend(i.into());
+                match pair {
+                    EitherOrBoth::Both(node, observed) => {
+                        observe_node(log, node, observed, observation, path)
+                    }
+                    EitherOrBoth::Left(node) => {
+                        let s = stream::once(async move {
+                            log.info(format!("Observed removal at {}: value {}", path, node.to_string().await)).await?;
+                            Ok(bs::Patch {
+                                path: path.clone(),
+                                change: bs::ChangeType::Remove,
+                            })
+                        });
+
+                        Box::pin(s)
+                    }
+                    EitherOrBoth::Right(observed) => {
+                        let s = stream::once(async move {
+                            log.info(format!("Observed new element at {}: value {}", path, observed)).await?;
+                            Ok(bs::Patch {
+                                path: path.clone(),
+                                change: bs::ChangeType::New(observed.clone()),
+                            })
+                        });
+
+                        Box::pin(s)
+                    }
+                }
+            })
+            .flatten();
+
+        Box::pin(s)
     } else {
         Box::pin(stream::once(async move {
             let new_value = JsonValue::Array(observed.clone());
@@ -358,7 +394,6 @@ fn observe_primitive<'a>(log: &'a IngestLogger, node: &'a bs::Node, observed: Pr
             Ok(Some(patch)) => { Some(Ok(patch)) }
             Err(e) => { Some(Err(e)) }
         }
-
     })
         .filter_map(|v| async { v });
 

@@ -1,16 +1,17 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use log::error;
 use tokio::sync::oneshot::Sender;
 
 use crate::db::BlarserDbConn;
-use crate::ingest::ingest;
+use crate::ingest::{ingest, IngestError};
 use crate::ingest::log::IngestLogger;
 
 type CallbackRegistry = Arc<Mutex<HashMap<i32, Sender<()>>>>;
 
 #[derive(Clone)]
 pub struct IngestTask {
-    registry: CallbackRegistry
+    registry: CallbackRegistry,
 }
 
 impl IngestTask {
@@ -32,14 +33,20 @@ impl IngestTask {
 
 impl IngestTask {
     pub fn new() -> IngestTask {
-        IngestTask { registry: Arc::new(Mutex::new(HashMap::new()))}
+        IngestTask { registry: Arc::new(Mutex::new(HashMap::new())) }
     }
 
     pub fn start(&self, db: BlarserDbConn) {
         let self_clone = self.clone();
         tokio::spawn(async {
-                let log = IngestLogger::new(db, self_clone).await.unwrap();
-                ingest::run(log).await.unwrap();
+            let log = IngestLogger::new(db, self_clone).await.unwrap();
+            let result = ingest::run(log).await;
+            match result {
+                Ok(_) => {}
+                Err(e) => {
+                    error!("{}", e.to_string());
+                }
+            }
         });
     }
 }
