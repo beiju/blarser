@@ -9,3 +9,4 @@ pub mod db;
 #[allow(unused_imports)]
 pub mod schema;
 pub mod db_types;
+mod text_parser;

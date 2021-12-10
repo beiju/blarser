@@ -1,5 +1,6 @@
 use std::future::Future;
 use std::sync::Arc;
+use anyhow::anyhow;
 use rocket::async_trait;
 use chrono::{DateTime, Utc};
 use serde_json::json;
@@ -8,9 +9,11 @@ use serde::Deserialize;
 
 use crate::api::{eventually, EventuallyEvent, EventType, Weather};
 use crate::blaseball_state as bs;
-use crate::ingest::{IngestItem, BoxedIngestItem, IngestError, IngestResult};
+use crate::blaseball_state::BlaseballState;
+use crate::ingest::{IngestItem, BoxedIngestItem, IngestResult, IngestError};
 use crate::ingest::error::IngestApplyResult;
 use crate::ingest::log::IngestLogger;
+use crate::text_parser::{FieldingOutType, parse_ground_out, parse_strike, parse_strikeout, StrikeType};
 
 pub fn sources(start: &'static str) -> Vec<Box<dyn Iterator<Item=BoxedIngestItem> + Send>> {
     vec![
@@ -26,7 +29,7 @@ impl IngestItem for EventuallyEvent {
     }
 
     async fn apply(&self, log: &IngestLogger, state: Arc<bs::BlaseballState>) -> IngestApplyResult {
-        log.debug(format!("Applying Feed event: \"{}\"", self.description)).await?;
+        log.debug(format!("Applying Feed event {}: \"{}\"", self.id, self.description)).await?;
 
         let result = match self.r#type {
             EventType::BigDeal => apply_big_deal(state, log, self).await,
@@ -378,16 +381,20 @@ async fn apply_strike(state: Arc<bs::BlaseballState>, log: &IngestLogger, event:
     let game_id = get_one_id(&event.game_tags, "gameTags")?;
     log.debug(format!("Applying Strike event for game {}", game_id)).await?;
 
-    // let top_of_inning = state.bool_at(&bs::json_path!("game", game_id.clone(), "topOfInning")).await?;
-    // let max_balls = state.int_at(&bs::json_path!("game", game_id.clone(), prefixed("Balls", top_of_inning))).await?;
-
     let balls = state.int_at(&bs::json_path!("game", game_id.clone(), "atBatBalls")).await?;
     let strikes = 1 + state.int_at(&bs::json_path!("game", game_id.clone(), "atBatStrikes")).await?;
 
-    log.debug(format!("Recording Strike for game {}, count {}-{}", game_id, balls, strikes)).await?;
+    let strike_type = parse_strike(&event.description)
+        .map_err(|err| anyhow!("Error parsing strike: {}", err))?;
+    let strike_text = match strike_type {
+        StrikeType::Swinging => { "swinging" }
+        StrikeType::Looking => { "looking" }
+    };
+
+    log.debug(format!("Recording Strike, {} for game {}, count {}-{}", strike_text, game_id, balls, strikes)).await?;
 
     let metadata: PlayMetadata = serde_json::from_value(event.metadata.clone())?;
-    let message = format!("Strike, looking. {}-{}", balls, strikes);
+    let message = format!("Strike, {}. {}-{}", strike_text, balls, strikes);
     let diff = common_patches(event, game_id, message, metadata.play)
         .chain([
             bs::Patch {
@@ -430,19 +437,65 @@ async fn apply_ball(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &
 }
 
 
-async fn apply_foul_ball(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: &EventuallyEvent) -> IngestApplyResult {
-    log.debug("Applying FoulBall event".to_string()).await?;
-    // TODO
-    Ok(vec![state])
+async fn apply_foul_ball(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &EventuallyEvent) -> IngestApplyResult {
+    let game_id = get_one_id(&event.game_tags, "gameTags")?;
+    log.debug(format!("Applying FoulBall event for game {}", game_id)).await?;
+
+    let top_of_inning = state.bool_at(&bs::json_path!("game", game_id.clone(), "topOfInning")).await?;
+    let max_strikes = state.int_at(&bs::json_path!("game", game_id.clone(), prefixed("Strikes", top_of_inning))).await?;
+
+    let balls = state.int_at(&bs::json_path!("game", game_id.clone(), "atBatBalls")).await?;
+    let mut strikes = state.int_at(&bs::json_path!("game", game_id.clone(), "atBatStrikes")).await?;
+
+    if strikes != max_strikes {
+        strikes += 1;
+    }
+
+    log.debug(format!("Recording FoulBall for game {}, count {}-{}", game_id, balls, strikes)).await?;
+
+    let metadata: PlayMetadata = serde_json::from_value(event.metadata.clone())?;
+    let message = format!("Foul Ball. {}-{}", balls, strikes);
+    let diff = common_patches(event, game_id, message, metadata.play)
+        .chain([
+            bs::Patch {
+                path: bs::json_path!("game", game_id.clone(), "atBatStrikes"),
+                change: bs::ChangeType::Set(strikes.into()),
+            },
+        ]);
+
+    let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
+    state.successor(caused_by, diff).await
+        .map(|s| vec![s])
 }
 
 
 async fn apply_ground_out(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &EventuallyEvent) -> IngestApplyResult {
-    log.debug("Applying GroundOut event".to_string()).await?;
+    let game_id = get_one_id(&event.game_tags, "gameTags")?;
+    log.debug(format!("Applying GroundOut event for game {}", game_id)).await?;
 
+    // Look. I accidentally wrote the parsing logic to tell ground outs and flyouts apart before
+    // realizing that they're separate event types, so I'm just using it now.
+    apply_fielding_out(state, log, event, game_id).await
+}
+
+async fn apply_fielding_out(state: Arc<BlaseballState>, log: &IngestLogger, event: &EventuallyEvent, game_id: &Uuid) -> Result<Vec<Arc<BlaseballState>>, IngestError> {
     let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
-    let player_id = todo!(); // It's not in the object. Fuck
-    let diff = apply_out("ground out", log, player_id).await?;
+
+    let top_of_inning = state.bool_at(&bs::json_path!("game", game_id.clone(), "topOfInning")).await?;
+    let batter_id = state.uuid_at(&bs::json_path!("game", game_id.clone(), prefixed("Batter", top_of_inning))).await?;
+    let batter_name = state.string_at(&bs::json_path!("game", game_id.clone(), prefixed("BatterName", top_of_inning))).await?;
+    let (out_type, fielder_name) = parse_ground_out(&batter_name, &event.description)
+        .map_err(|err| anyhow!("Error parsing ground out: {}", err))?;
+    log.debug(format!("Ground out was hit to {}", fielder_name)).await?;
+
+    let out_text = match out_type {
+        FieldingOutType::GroundOut => "ground out",
+        FieldingOutType::Flyout => "flyout",
+    };
+
+    let metadata: PlayMetadata = serde_json::from_value(event.metadata.clone())?;
+    let message = format!("{} hit a {} to {}.", batter_name, out_text, fielder_name);
+    let diff = apply_out(out_text, log, &batter_id, event, game_id, message, metadata.play, top_of_inning).await?;
 
     state.successor(caused_by, diff).await
         .map(|s| vec![s])
@@ -469,25 +522,75 @@ async fn apply_hit(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &E
 
 
 async fn apply_strikeout(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &EventuallyEvent) -> IngestApplyResult {
-    log.debug("Applying Strikeout event".to_string()).await?;
+    let game_id = get_one_id(&event.game_tags, "gameTags")?;
+    log.debug(format!("Applying Strikeout event for game {}", game_id)).await?;
 
     let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
     let player_id = get_one_id(&event.player_tags, "playerTags")?;
-    let diff = apply_out("strikeout", log, player_id).await?;
+    let top_of_inning = state.bool_at(&bs::json_path!("game", game_id.clone(), "topOfInning")).await?;
+    let batter_id = state.uuid_at(&bs::json_path!("game", game_id.clone(), prefixed("Batter", top_of_inning))).await?;
+
+    if player_id != &batter_id {
+        return Err(anyhow!("Batter id from state ({}) didn't match batter id from event ({})", batter_id, player_id));
+    }
+
+    let batter_name = state.string_at(&bs::json_path!("game", game_id.clone(), prefixed("BatterName", top_of_inning))).await?;
+    let strike_type = parse_strikeout(&batter_name, &event.description)
+        .map_err(|err| anyhow!("Error parsing ground out: {}", err))?;
+
+    let strike_text = match strike_type {
+        StrikeType::Swinging => { "swinging" },
+        StrikeType::Looking => { "looking" },
+    };
+
+    let metadata: PlayMetadata = serde_json::from_value(event.metadata.clone())?;
+    let message = format!("{} strikes out {}.", batter_name, strike_text);
+    let diff = apply_out("strikeout", log, player_id, event, game_id, message, metadata.play, top_of_inning).await?;
 
     state.successor(caused_by, diff).await
         .map(|s| vec![s])
 }
 
-fn apply_out<'a>(out_type: &'static str, log: &'a IngestLogger, player_id: &'a Uuid) -> impl Future<Output=IngestResult<Vec<bs::Patch>>> + 'a {
+fn apply_out<'a>(
+    out_type: &'static str,
+    log: &'a IngestLogger,
+    player_id: &'a Uuid,
+    event: &'a EventuallyEvent,
+    game_id: &'a Uuid,
+    message: String,
+    play: i64,
+    top_of_inning: bool
+) -> impl Future<Output=Result<impl Iterator<Item=bs::Patch>, IngestError>> + 'a {
     async move {
         log.info(format!("Observed {} by {}. Zeroing consecutiveHits", out_type, player_id)).await?;
-        let diff = vec![
-            bs::Patch {
-                path: bs::json_path!("player", player_id.clone(), "consecutiveHits"),
-                change: bs::ChangeType::Set(0.into()),
-            },
-        ];
+
+        let diff = common_patches(event, game_id, message, play)
+            .chain([
+                bs::Patch {
+                    path: bs::json_path!("player", player_id.clone(), "consecutiveHits"),
+                    change: bs::ChangeType::Set(0.into()),
+                },
+                bs::Patch {
+                    path: bs::json_path!("game", game_id.clone(), prefixed("Batter", top_of_inning)),
+                    change: bs::ChangeType::Set(bs::PrimitiveValue::Null),
+                },
+                bs::Patch {
+                    path: bs::json_path!("game", game_id.clone(), prefixed("BatterName", top_of_inning)),
+                    change: bs::ChangeType::Set("".into()),
+                },
+                bs::Patch {
+                    path: bs::json_path!("game", game_id.clone(), "atBatBalls"),
+                    change: bs::ChangeType::Set(0.into()),
+                },
+                bs::Patch {
+                    path: bs::json_path!("game", game_id.clone(), "atBatStrikes"),
+                    change: bs::ChangeType::Set(0.into()),
+                },
+                bs::Patch {
+                    path: bs::json_path!("game", game_id.clone(), "halfInningOuts"),
+                    change: bs::ChangeType::Increment,
+                },
+            ]);
 
         Ok(diff)
     }
@@ -495,21 +598,21 @@ fn apply_out<'a>(out_type: &'static str, log: &'a IngestLogger, player_id: &'a U
 
 fn get_one_id<'a>(tags: &'a Vec<Uuid>, field_name: &'static str) -> IngestResult<&'a Uuid> {
     if tags.len() != 1 {
-        return Err(IngestError::BadEvent(
-            format!("Expected exactly one element in {} but found {}", field_name, tags.len())
-        ));
+        return Err(anyhow!("Expected exactly one element in {} but found {}", field_name, tags.len()));
     }
 
     tags.get(0)
-        .ok_or_else(|| IngestError::BadEvent(
-            format!("Expected exactly one element in {} but found none", field_name)))
+        .ok_or_else(|| anyhow!("Expected exactly one element in {} but found none", field_name))
 }
 
 
-async fn apply_fly_out(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: &EventuallyEvent) -> IngestApplyResult {
-    log.debug("Applying FlyOut event".to_string()).await?;
-    // TODO
-    Ok(vec![state])
+async fn apply_fly_out(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &EventuallyEvent) -> IngestApplyResult {
+    let game_id = get_one_id(&event.game_tags, "gameTags")?;
+    log.debug(format!("Applying FlyOut event for game {}", game_id)).await?;
+
+    // Look. I accidentally wrote the parsing logic to tell ground outs and flyouts apart before
+    // realizing that they're separate event types, so I'm just using it now.
+    apply_fielding_out(state, log, event, game_id).await
 }
 
 

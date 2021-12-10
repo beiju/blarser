@@ -7,7 +7,6 @@ use tokio::sync::oneshot;
 use crate::db::{NewIngest, Ingest, BlarserDbConn, NewIngestLog, NewIngestApproval, IngestApproval};
 use crate::db_types;
 use crate::ingest::IngestTask;
-use crate::schema::ingests::events_parsed;
 
 
 pub struct IngestLogger {

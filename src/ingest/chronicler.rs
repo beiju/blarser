@@ -1,6 +1,7 @@
 use std::iter;
 use std::pin::Pin;
 use std::sync::Arc;
+use anyhow::anyhow;
 use chrono::{DateTime, Utc};
 use itertools::{Itertools, EitherOrBoth};
 use serde_json::{Value as JsonValue, map::Map as JsonMap, Value};
@@ -86,7 +87,7 @@ impl IngestItem for ChronUpdate {
         ).await?;
 
         if !approved {
-            Err(IngestError::UnexpectedObservation(approval_msg))
+            Err(anyhow!("Unexpected observation: {}", approval_msg))
         } else {
             let event = Arc::new(bs::Event::ImplicitChange(observation));
             Ok(vec![state.successor(event, mismatches).await?])
