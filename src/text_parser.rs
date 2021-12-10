@@ -10,6 +10,13 @@ pub enum StrikeType {
     Looking,
 }
 
+
+pub enum HitType {
+    Single = 0,
+    Double = 1,
+    Triple = 2,
+}
+
 pub fn parse_ground_out<'input>(batter_name: &str, input: &'input str) -> Result<(FieldingOutType, &'input str), VerboseError<&'input str>> {
     let (_, (out_type, fielder_name)) = parse_ground_out_internal(batter_name, input).finish()?;
 
@@ -38,8 +45,8 @@ pub fn parse_strikeout<'input>(batter_name: &str, input: &'input str) -> Result<
     let (_, out_type) = parse_strikeout_internal(batter_name, input).finish()?;
 
     let out_type = match out_type {
-        "swinging" => StrikeType::Looking,
-        "looking" => StrikeType::Swinging,
+        "swinging" => StrikeType::Swinging,
+        "looking" => StrikeType::Looking,
         _ => panic!("Invalid strikeout type {}", out_type)
     };
 
@@ -78,4 +85,27 @@ fn parse_strike_internal(input: &str) -> IResult<&str, &str, VerboseError<&str>>
     let (input, _) = eof(input)?;
 
     IResult::Ok((input, strike_type))
+}
+
+pub fn parse_hit<'input>(batter_name: &str, input: &'input str) -> Result<HitType, VerboseError<&'input str>> {
+    let (_, hit_type) = parse_hit_internal(batter_name, input).finish()?;
+
+    let hit_type = match hit_type {
+        "Single" => HitType::Single,
+        "Double" => HitType::Double,
+        "Triple" => HitType::Triple,
+        _ => panic!("Invalid hit type {}", hit_type)
+    };
+
+    Ok(hit_type)
+}
+
+fn parse_hit_internal<'input>(batter_name: &str, input: &'input str) -> IResult<&'input str, &'input str, VerboseError<&'input str>> {
+    let (input, _) = tag(batter_name.as_bytes())(input)?;
+    let (input, _) = tag(" hits a ")(input)?;
+    let (input, hit_type) = alt((tag("Single"), tag("Double"), tag("Triple")))(input)?;
+    let (input, _) = tag("!")(input)?;
+    let (input, _) = eof(input)?;
+
+    IResult::Ok((input, hit_type))
 }

@@ -248,6 +248,9 @@ pub enum ApplyChangeError {
     #[error("Cannot increment value {1} at {0}")]
     CannotIncrement(Path, String),
 
+    #[error("Cannot push value {1} into non-array {2} at {0}")]
+    CannotPush(Path, String, String),
+
     #[error(transparent)]
     PathError {
         #[from]
@@ -339,7 +342,8 @@ impl Node {
         format!("[{}]", inner)
     }
 
-    pub async fn object_to_string(obj: &HashMap<String, Node>) -> String {
+    pub async fn object_to_string<T: Clone + std::hash::Hash + std::cmp::Eq + Display>(obj: &HashMap<T, Node>) -> String
+        where T: Clone + std::hash::Hash + std::cmp::Eq + Display {
         if obj.is_empty() {
             // Shortcut for two braces without spaces
             return "{}".to_string();
@@ -497,6 +501,9 @@ impl Patch {
             ChangeType::Increment => {
                 format!("{}: Increment {}", self.path, state.node_at(&self.path).await?.to_string().await)
             }
+            ChangeType::Push(value) => {
+                format!("{}: Push {:#} onto array", self.path, value)
+            }
         };
 
         Ok(str)
@@ -513,6 +520,8 @@ pub enum ChangeType {
     // For overwriting a value and not connecting it to history
     Overwrite(JsonValue),
     Increment,
+    // For pushing a value onto an array
+    Push(JsonValue),
 }
 
 #[derive(Clone, Debug)]
@@ -884,16 +893,12 @@ async fn apply_change(data: &mut BlaseballData, change: Patch, caused_by: Arc<Ev
     }
 }
 
-async fn apply_change_to_hashmap<T: Clone + std::hash::Hash + std::cmp::Eq>(container: &mut im::HashMap<T, Node>, key: &T, change: Patch, caused_by: Arc<Event>) -> Result<(), ApplyChangeError> {
+async fn apply_change_to_hashmap<T>(container: &mut im::HashMap<T, Node>, key: &T, change: Patch, caused_by: Arc<Event>) -> Result<(), ApplyChangeError>
+    where T: Clone + std::hash::Hash + std::cmp::Eq + Display {
     match change.change {
         ChangeType::New(value) => {
-            if let Some(value) = container.get(key) {
-                return Err(ApplyChangeError::UnexpectedValue(change.path, value.to_string().await));
-            }
-            container.insert(key.clone(), Node::new_from_json(
-                value,
-                caused_by,
-            ));
+            let new_node = apply_change_new(change.path, container.get(key), value, caused_by).await?;
+            container.insert(key.clone(), new_node);
         }
         ChangeType::Remove => {
             let removed = container.remove(key);
@@ -902,48 +907,19 @@ async fn apply_change_to_hashmap<T: Clone + std::hash::Hash + std::cmp::Eq>(cont
             }
         }
         ChangeType::Set(value) => {
-            if let Some(node) = container.get(key) {
-                let new_node = node.successor(value, caused_by)?;
-                container.insert(key.clone(), new_node);
-            } else {
-                return Err(ApplyChangeError::MissingValue(change.path));
-            }
+            let new_node = apply_change_set(change.path, container.get(key), value, caused_by).await?;
+            container.insert(key.clone(), new_node);
         }
         ChangeType::Overwrite(value) => {
-            if let Some(_) = container.get(key) {
-                let new_node = Node::new_from_json(value, caused_by);
-                container.insert(key.clone(), new_node);
-            } else {
-                return Err(ApplyChangeError::MissingValue(change.path));
-            }
+            let new_node = apply_change_overwrite(change.path, container.get(key), value, caused_by).await?;
+            container.insert(key.clone(), new_node);
         }
         ChangeType::Increment => {
-            let new_node = match container.get(key) {
-                None => { Err(ApplyChangeError::MissingValue(change.path)) }
-                Some(Node::Primitive(primitive)) => {
-                    let node = primitive.read().await;
-                    let new_node = match &node.value {
-                        PrimitiveValue::Int(i) => Node::primitive_successor(
-                            primitive.clone(),
-                            PrimitiveValue::Int(i + 1),
-                            caused_by,
-                        ),
-                        PrimitiveValue::IntRange(upper, lower) => Node::primitive_successor(
-                            primitive.clone(),
-                            PrimitiveValue::IntRange(upper + 1, lower + 1),
-                            caused_by,
-                        ),
-                        value => {
-                            return Err(ApplyChangeError::CannotIncrement(change.path, value.to_string()));
-                        }
-                    };
-                    Ok(new_node)
-                }
-                Some(node) => {
-                    Err(ApplyChangeError::CannotIncrement(change.path, node.to_string().await))
-                }
-            }?;
+            let new_node = apply_change_increment(change.path, container.get(key), caused_by).await?;
             container.insert(key.clone(), new_node);
+        }
+        ChangeType::Push(value) => {
+            apply_change_push(change.path, container.get_mut(key), value, caused_by).await?;
         }
     }
 
@@ -953,10 +929,8 @@ async fn apply_change_to_hashmap<T: Clone + std::hash::Hash + std::cmp::Eq>(cont
 async fn apply_change_to_vector(container: &mut im::Vector<Node>, idx: usize, change: Patch, caused_by: Arc<Event>) -> Result<(), ApplyChangeError> {
     match change.change {
         ChangeType::New(value) => {
-            if let Some(node) = container.get(idx) {
-                return Err(ApplyChangeError::UnexpectedValue(change.path, node.to_string().await));
-            }
-            container.insert(idx, Node::new_from_json(value, caused_by));
+            let new_node = apply_change_new(change.path, container.get(idx), value, caused_by).await?;
+            container.insert(idx, new_node);
         }
         ChangeType::Remove => {
             if let None = container.get(idx) {
@@ -965,17 +939,89 @@ async fn apply_change_to_vector(container: &mut im::Vector<Node>, idx: usize, ch
             container.remove(idx);
         }
         ChangeType::Set(value) => {
-            if let Some(node) = container.get(idx) {
-                let new_node = node.successor(value, caused_by)?;
-                container.insert(idx, new_node);
-            } else {
-                return Err(ApplyChangeError::MissingValue(change.path));
-            }
+            let new_node = apply_change_set(change.path, container.get(idx), value, caused_by).await?;
+            container.insert(idx, new_node);
         }
-        _ => { todo!() }
+        ChangeType::Overwrite(value) => {
+            let new_node = apply_change_overwrite(change.path, container.get(idx), value, caused_by).await?;
+            container.insert(idx, new_node);
+        }
+        ChangeType::Increment => {
+            let new_node = apply_change_increment(change.path, container.get(idx), caused_by).await?;
+            container.insert(idx, new_node);
+        }
+        ChangeType::Push(value) => {
+            apply_change_push(change.path, container.get_mut(idx), value, caused_by).await?;
+        }
     }
 
     Ok(())
+}
+
+
+
+async fn apply_change_new(path: Path, current_node: Option<&Node>, new_value: Value, caused_by: Arc<Event>) -> Result<Node, ApplyChangeError> {
+    match current_node {
+        Some(existing_node) => { Err(ApplyChangeError::UnexpectedValue(path, existing_node.to_string().await)) }
+        None => { Ok(Node::new_from_json(new_value, caused_by)) }
+    }
+}
+
+async fn apply_change_set(path: Path, current_node: Option<&Node>, new_value: PrimitiveValue, caused_by: Arc<Event>) -> Result<Node, ApplyChangeError> {
+    match current_node {
+        Some(existing_node) => { existing_node.successor(new_value, caused_by) }
+        None => { Err(ApplyChangeError::MissingValue(path)) }
+    }
+}
+
+async fn apply_change_overwrite(path: Path, current_node: Option<&Node>, new_value: Value, caused_by: Arc<Event>) -> Result<Node, ApplyChangeError> {
+    match current_node {
+        Some(_) => { Ok(Node::new_from_json(new_value, caused_by)) }
+        None => { Err(ApplyChangeError::MissingValue(path)) }
+    }
+}
+
+async fn apply_change_increment(path: Path, current_node: Option<&Node>, caused_by: Arc<Event>) -> Result<Node, ApplyChangeError> {
+    match current_node {
+        None => {
+            Err(ApplyChangeError::MissingValue(path))
+        }
+        Some(Node::Primitive(primitive)) => {
+            let node = primitive.read().await;
+            let new_node = match &node.value {
+                PrimitiveValue::Int(i) => Node::primitive_successor(
+                    primitive.clone(),
+                    PrimitiveValue::Int(i + 1),
+                    caused_by,
+                ),
+                PrimitiveValue::IntRange(upper, lower) => Node::primitive_successor(
+                    primitive.clone(),
+                    PrimitiveValue::IntRange(upper + 1, lower + 1),
+                    caused_by,
+                ),
+                value => {
+                    return Err(ApplyChangeError::CannotIncrement(path, value.to_string()));
+                }
+            };
+            Ok(new_node)
+        }
+        Some(node) => {
+            Err(ApplyChangeError::CannotIncrement(path, node.to_string().await))
+        }
+    }
+}
+
+async fn apply_change_push(path: Path, current_node: Option<&mut Node>, new_value: Value, caused_by: Arc<Event>) -> Result<(), ApplyChangeError> {
+    match current_node {
+        None => { Err(ApplyChangeError::MissingValue(path)) }
+        Some(Node::Array(arr)) => {
+            arr.push_back(Node::new_from_json(new_value, caused_by));
+            Ok(())
+        }
+        Some(node) => {
+            Err(ApplyChangeError::CannotPush(path, new_value.to_string(), node.to_string().await))
+        }
+    }
 }
 
 fn entity_to_hashmap_entry(entity_type: &'static str, item: ChroniclerItem, caused_by: Arc<Event>) -> (Uuid, Node) {
