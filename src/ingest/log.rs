@@ -7,6 +7,7 @@ use tokio::sync::oneshot;
 use crate::db::{NewIngest, Ingest, BlarserDbConn, NewIngestLog, NewIngestApproval, IngestApproval};
 use crate::db_types;
 use crate::ingest::IngestTask;
+use crate::schema::ingests::events_parsed;
 
 
 pub struct IngestLogger {
@@ -32,12 +33,12 @@ impl IngestLogger {
 
     pub async fn info(&self, msg: String) -> diesel::QueryResult<()> {
         info!("{}", msg);
-        self.save_log(msg, None,db_types::LogType::Info).await
+        self.save_log(msg, None, db_types::LogType::Info).await
     }
 
     pub async fn debug(&self, msg: String) -> diesel::QueryResult<()> {
         debug!("{}", msg);
-        self.save_log(msg, None,db_types::LogType::Debug).await
+        self.save_log(msg, None, db_types::LogType::Debug).await
     }
 
     pub async fn get_approval(
@@ -45,7 +46,7 @@ impl IngestLogger {
         endpoint: &'static str,
         entity_id: Uuid,
         update_time: DateTime<Utc>,
-        message: String
+        message: String,
     ) -> diesel::QueryResult<bool> {
         use crate::schema::ingest_approvals::dsl;
 
@@ -67,7 +68,7 @@ impl IngestLogger {
                         .get_result(c);
                 }
 
-                return Ok(record)
+                return Ok(record);
             }
 
             diesel::insert_into(dsl::ingest_approvals).values(NewIngestApproval {
@@ -87,14 +88,14 @@ impl IngestLogger {
             match self.get_approval_from_db(endpoint, entity_id, update_time).await? {
                 Some(approval) => {
                     self.task.unregister_callback(approval_record.id);
-                    return Ok(approval)
-                },
+                    return Ok(approval);
+                }
                 None => {}
             }
 
             let msg = format!("Waiting on approval for id {} from ingest {}", approval_record.id, self.ingest_id);
             info!("{}", msg);
-            self.save_log(msg, Some(approval_record.id),db_types::LogType::Info).await?;
+            self.save_log(msg, Some(approval_record.id), db_types::LogType::Info).await?;
             receiver.await.unwrap();
         }
     }
@@ -130,6 +131,19 @@ impl IngestLogger {
                 approval_id,
             }).execute(c)
         ).await?;
+
+        Ok(())
+    }
+
+    pub async fn increment_parsed_events(&self) -> diesel::QueryResult<()> {
+        use crate::schema::ingests::dsl::*;
+
+        let ingest_id = self.ingest_id.clone();
+        self.conn.run(move |c| {
+            diesel::update(ingests.filter(id.eq(ingest_id)))
+                .set(events_parsed.eq(events_parsed + 1))
+                .execute(c)
+        }).await?;
 
         Ok(())
     }

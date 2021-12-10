@@ -31,6 +31,7 @@ pub async fn index(conn: BlarserDbConn) -> Result<Template, ServerError> {
     #[derive(Serialize)]
     struct IndexTemplateParams {
         ingest_started_at: String,
+        events_parsed: i32,
         logs: Vec<IngestLogAndApproval>,
     }
 
@@ -39,6 +40,7 @@ pub async fn index(conn: BlarserDbConn) -> Result<Template, ServerError> {
         Some(ingest) => {
             Ok(Template::render("index", IndexTemplateParams {
                 ingest_started_at: ingest.started_at.format("%c").to_string(),
+                events_parsed: ingest.events_parsed,
                 logs,
             }))
         }

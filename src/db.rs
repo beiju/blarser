@@ -20,6 +20,7 @@ pub struct NewIngest {
 pub struct Ingest {
     pub id: i32,
     pub started_at: NaiveDateTime,
+    pub events_parsed: i32,
 }
 #[derive(Insertable)]
 #[table_name = "ingest_approvals"]

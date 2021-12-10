@@ -26,9 +26,9 @@ impl IngestItem for EventuallyEvent {
     }
 
     async fn apply(&self, log: &IngestLogger, state: Arc<bs::BlaseballState>) -> IngestApplyResult {
-        log.debug(format!("Applying Feed event: {}", self.description)).await?;
+        log.debug(format!("Applying Feed event: \"{}\"", self.description)).await?;
 
-        match self.r#type {
+        let result = match self.r#type {
             EventType::BigDeal => apply_big_deal(state, log, self).await,
             EventType::LetsGo => apply_lets_go(state, log, self).await,
             EventType::PlayBall => apply_play_ball(state, log, self).await,
@@ -50,7 +50,11 @@ impl IngestItem for EventuallyEvent {
             EventType::Snowflakes => apply_snowflakes(state, log, self).await,
             EventType::AddedMod => apply_added_mod(state, log, self).await,
             _ => todo!()
-        }
+        };
+
+        log.increment_parsed_events().await?;
+
+        result
     }
 }
 

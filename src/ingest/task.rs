@@ -4,7 +4,7 @@ use log::error;
 use tokio::sync::oneshot::Sender;
 
 use crate::db::BlarserDbConn;
-use crate::ingest::{ingest, IngestError};
+use crate::ingest::ingest;
 use crate::ingest::log::IngestLogger;
 
 type CallbackRegistry = Arc<Mutex<HashMap<i32, Sender<()>>>>;

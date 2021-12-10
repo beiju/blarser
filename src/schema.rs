@@ -36,6 +36,7 @@ table! {
     ingests (id) {
         id -> Int4,
         started_at -> Timestamp,
+        events_parsed -> Int4,
     }
 }
 

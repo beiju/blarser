@@ -1,7 +1,7 @@
 {{#> base title="Latest Ingest" }}
 
     {{#*inline "content-block"}}
-        <p>Started {{ ingest_started_at }}</p>
+        <p>Started {{ ingest_started_at }}. {{ events_parsed }} events parsed.</p>
 
         <ul class="logs">
             {{#each logs}}
