@@ -378,14 +378,14 @@ async fn observe_primitive_internal(log: &IngestLogger, node: &Node, observed: &
             log.info(format!("Observed changed value at {} from {} to {}", path, primitive.value, observed)).await?;
             Ok(Some(bs::Patch {
                 path,
-                change: bs::ChangeType::Replace(observed.clone()),
+                change: bs::ChangeType::Set(observed.clone()),
             }))
         }
     } else {
         log.info(format!("Observed changed value at {} from {} to {}", path, node.to_string().await, observed)).await?;
         Ok(Some(bs::Patch {
             path,
-            change: bs::ChangeType::Replace(observed.clone()),
+            change: bs::ChangeType::Set(observed.clone()),
         }))
     }
 }

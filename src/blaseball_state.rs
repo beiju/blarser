@@ -128,6 +128,12 @@ impl From<i64> for PrimitiveValue {
     }
 }
 
+impl From<i32> for PrimitiveValue {
+    fn from(i: i32) -> Self {
+        PrimitiveValue::Int(i.into())
+    }
+}
+
 impl From<bool> for PrimitiveValue {
     fn from(b: bool) -> Self {
         PrimitiveValue::Bool(b)
@@ -137,6 +143,12 @@ impl From<bool> for PrimitiveValue {
 impl From<String> for PrimitiveValue {
     fn from(s: String) -> Self {
         PrimitiveValue::String(s)
+    }
+}
+
+impl From<Uuid> for PrimitiveValue {
+    fn from(u: Uuid) -> Self {
+        PrimitiveValue::String(u.to_string())
     }
 }
 
@@ -272,6 +284,17 @@ impl Node {
             Node::Primitive(primitive_shared) => {
                 let primitive = primitive_shared.read().await;
                 primitive.value.as_int().cloned()
+                    .ok_or_else(|| primitive.value.to_string())
+            }
+            _ => { Err(self.to_string().await) }
+        }
+    }
+
+    pub async fn as_bool(&self) -> Result<bool, String> {
+        match self {
+            Node::Primitive(primitive_shared) => {
+                let primitive = primitive_shared.read().await;
+                primitive.value.as_bool().cloned()
                     .ok_or_else(|| primitive.value.to_string())
             }
             _ => { Err(self.to_string().await) }
@@ -465,7 +488,7 @@ impl Patch {
             ChangeType::Remove => {
                 format!("{}: Remove value {}", self.path, state.node_at(&self.path).await?.to_string().await)
             }
-            ChangeType::Replace(value) => {
+            ChangeType::Set(value) => {
                 format!("{}: Replace primitive {} with primitive {:#}", self.path, state.node_at(&self.path).await?.to_string().await, value)
             }
             ChangeType::ReplaceWithComposite(value) => {
@@ -484,7 +507,7 @@ impl Patch {
 pub enum ChangeType {
     New(JsonValue),
     Remove,
-    Replace(PrimitiveValue),
+    Set(PrimitiveValue),
     ReplaceWithComposite(JsonValue),
     Increment,
 }
@@ -682,7 +705,7 @@ impl BlaseballState {
                         PathComponent::Key(_) => {
                             Err(PathError::UnexpectedType {
                                 path: path.slice(i),
-                                expected_type: "array",
+                                expected_type: "object",
                                 value: node.to_string().await,
                             })
                         }
@@ -726,9 +749,29 @@ impl BlaseballState {
             })
     }
 
+    pub async fn bool_at(&self, path: &Path) -> Result<bool, PathError> {
+        self.node_at(path).await?
+            .as_bool().await
+            .map_err(|value| PathError::UnexpectedType {
+                path: path.clone(),
+                expected_type: "int",
+                value,
+            })
+    }
+
     pub async fn string_at(&self, path: &Path) -> Result<String, PathError> {
         self.node_at(path).await?
             .as_string().await
+            .map_err(|value| PathError::UnexpectedType {
+                path: path.clone(),
+                expected_type: "str",
+                value,
+            })
+    }
+
+    pub async fn uuid_at(&self, path: &Path) -> Result<Uuid, PathError> {
+        self.node_at(path).await?
+            .as_uuid().await
             .map_err(|value| PathError::UnexpectedType {
                 path: path.clone(),
                 expected_type: "str",
@@ -855,7 +898,7 @@ async fn apply_change_to_hashmap<T: Clone + std::hash::Hash + std::cmp::Eq>(cont
                 return Err(ApplyChangeError::MissingValue(change.path));
             }
         }
-        ChangeType::Replace(value) => {
+        ChangeType::Set(value) => {
             if let Some(node) = container.get(key) {
                 let new_node = node.successor(value, caused_by)?;
                 container.insert(key.clone(), new_node);
@@ -918,7 +961,7 @@ async fn apply_change_to_vector(container: &mut im::Vector<Node>, idx: usize, ch
             }
             container.remove(idx);
         }
-        ChangeType::Replace(value) => {
+        ChangeType::Set(value) => {
             if let Some(node) = container.get(idx) {
                 let new_node = node.successor(value, caused_by)?;
                 container.insert(idx, new_node);
