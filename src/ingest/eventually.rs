@@ -54,6 +54,13 @@ impl IngestItem for EventuallyEvent {
     }
 }
 
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct PlayMetadata {
+    pub play: i64,
+}
+
+
 async fn apply_big_deal(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: &EventuallyEvent) -> IngestApplyResult {
     log.debug("Ignoring BigDeal event".to_string()).await?;
     Ok(vec![state])
@@ -174,13 +181,7 @@ async fn apply_play_ball(state: Arc<bs::BlaseballState>, log: &IngestLogger, eve
     let game_id = get_one_id(&event.game_tags, "gameTags")?;
     log.debug(format!("Applying PlayBall event for game {}", game_id)).await?;
 
-    #[derive(Deserialize, Debug)]
-    #[serde(rename_all = "camelCase")]
-    pub struct PlayBallMetadata {
-        pub play: i64,
-    }
-
-    let metadata: PlayBallMetadata = serde_json::from_value(event.metadata.clone())?;
+    let metadata: PlayMetadata = serde_json::from_value(event.metadata.clone())?;
     let diff = common_patches(event, game_id, "Play ball!".into(), metadata.play)
         .chain(play_ball_team_specific_diffs(game_id, "away"))
         .chain(play_ball_team_specific_diffs(game_id, "home"))
@@ -264,25 +265,19 @@ async fn apply_half_inning(state: Arc<bs::BlaseballState>, log: &IngestLogger, e
     let game_id = get_one_id(&event.game_tags, "gameTags")?;
     log.debug(format!("Applying HalfInning event for game {}", game_id)).await?;
 
-    #[derive(Deserialize, Debug)]
-    #[serde(rename_all = "camelCase")]
-    pub struct HalfInningMetadata {
-        pub play: i64,
-    }
-
     let inning = state.int_at(&bs::json_path!("game", game_id.clone(), "inning")).await?;
     let top_of_inning = state.bool_at(&bs::json_path!("game", game_id.clone(), "topOfInning")).await?;
 
     let new_inning = if top_of_inning { inning } else { inning + 1 };
     let new_top_of_inning = !top_of_inning;
 
-    let metadata: HalfInningMetadata = serde_json::from_value(event.metadata.clone())?;
 
     let batting_team_id = state.uuid_at(&bs::json_path!("game", game_id.clone(), prefixed("Team", new_top_of_inning))).await?;
     let batting_team_name = state.string_at(&bs::json_path!("team", batting_team_id, "fullName")).await?;
 
     let top_or_bottom = if new_top_of_inning { "Top" } else { "Bottom" };
     let message = format!("{} of {}, {} batting.", top_or_bottom, new_inning + 1, batting_team_name);
+    let metadata: PlayMetadata = serde_json::from_value(event.metadata.clone())?;
     let diff = common_patches(event, game_id, message, metadata.play)
         .chain([
             bs::Patch {
@@ -382,10 +377,31 @@ async fn apply_strike(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: &Ev
 }
 
 
-async fn apply_ball(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: &EventuallyEvent) -> IngestApplyResult {
-    log.debug("Applying Ball event".to_string()).await?;
-    // TODO
-    Ok(vec![state])
+async fn apply_ball(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &EventuallyEvent) -> IngestApplyResult {
+    let game_id = get_one_id(&event.game_tags, "gameTags")?;
+    log.debug(format!("Applying Ball event for game {}", game_id)).await?;
+
+    // let top_of_inning = state.bool_at(&bs::json_path!("game", game_id.clone(), "topOfInning")).await?;
+    // let max_balls = state.int_at(&bs::json_path!("game", game_id.clone(), prefixed("Balls", top_of_inning))).await?;
+
+    let balls = 1 + state.int_at(&bs::json_path!("game", game_id.clone(), "atBatBalls")).await?;
+    let strikes = state.int_at(&bs::json_path!("game", game_id.clone(), "atBatStrikes")).await?;
+
+    log.debug(format!("Recording Ball for game {}, count {}-{}", game_id, balls, strikes)).await?;
+
+    let metadata: PlayMetadata = serde_json::from_value(event.metadata.clone())?;
+    let message = format!("Ball. {}-{}", balls, strikes);
+    let diff = common_patches(event, game_id, message, metadata.play)
+        .chain([
+            bs::Patch {
+                path: bs::json_path!("game", game_id.clone(), "atBatBalls"),
+                change: bs::ChangeType::Set(balls.into()),
+            },
+        ]);
+
+    let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
+    state.successor(caused_by, diff).await
+        .map(|s| vec![s])
 }
 
 
