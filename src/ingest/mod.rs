@@ -5,7 +5,8 @@ mod chronicler;
 mod error;
 mod log;
 mod task;
+mod text_parser;
 
 pub use error::{IngestError, IngestResult};
-pub use source::{IngestItem, BoxedIngestItem};
+pub use source::{BoxedIngestItem, IngestItem};
 pub use task::IngestTask;

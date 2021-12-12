@@ -26,10 +26,19 @@ impl IntoIterator for EventuallyResponse {
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct EventMetadata {
+    // In addition to collecting useful metadata, this should collect any metadata that isn't used
+    // in game update' lastUpdateFull field
     #[serde(default)]
     #[serde(rename = "_eventually_siblingEvents")]
     pub siblings: Vec<EventuallyEvent>,
+    #[serde(rename = "_eventually_ingest_time")]
+    pub ingest_time: i32,
+    #[serde(rename = "_eventually_ingest_source")]
+    pub ingest_source: String,
+
     pub play: Option<i32>,
+    pub sub_play: Option<i32>,
+    pub sibling_ids: Option<Vec<Uuid>>,
 
     #[serde(flatten)]
     pub other: Value,

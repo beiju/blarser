@@ -97,7 +97,7 @@ impl Display for PrimitiveValue {
                 write!(f, "{}", d)
             }
             PrimitiveValue::String(s) => {
-                f.write_str(s)
+                write!(f, "\"{}\"", s)
             }
             PrimitiveValue::IntRange(lower, upper) => {
                 write!(f, "<int between {} and {}>", lower, upper)

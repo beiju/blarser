@@ -3,7 +3,9 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use rocket::async_trait;
 use chrono::{DateTime, Utc};
-use serde_json::json;
+use futures::{stream, StreamExt, TryStreamExt};
+use itertools::Itertools;
+use serde_json::{json, Value};
 use uuid::Uuid;
 use serde::Deserialize;
 
@@ -13,7 +15,7 @@ use crate::blaseball_state::{BlaseballState, PrimitiveValue};
 use crate::ingest::{IngestItem, BoxedIngestItem, IngestResult, IngestError};
 use crate::ingest::error::IngestApplyResult;
 use crate::ingest::log::IngestLogger;
-use crate::text_parser::{FieldingOutType, HitType, parse_ground_out, parse_hit, parse_strike, parse_strikeout, StrikeType};
+use crate::ingest::text_parser::{FieldingOutType, HitType, parse_fielding_out, parse_hit, parse_snowfall, parse_strike, parse_strikeout, StrikeType};
 
 pub fn sources(start: &'static str) -> Vec<Box<dyn Iterator<Item=BoxedIngestItem> + Send>> {
     vec![
@@ -29,7 +31,7 @@ impl IngestItem for EventuallyEvent {
     }
 
     async fn apply(&self, log: &IngestLogger, state: Arc<bs::BlaseballState>) -> IngestApplyResult {
-        log.debug(format!("Applying Feed event {}: \"{}\"", self.id, self.description)).await?;
+        log.debug(format!("Applying Feed event {} from {}: \"{}\"", self.id, self.created, self.description)).await?;
 
         let result = match self.r#type {
             EventType::BigDeal => apply_big_deal(state, log, self).await,
@@ -189,7 +191,7 @@ async fn apply_play_ball(state: Arc<bs::BlaseballState>, log: &IngestLogger, eve
     log.debug(format!("Applying PlayBall event for game {}", game_id)).await?;
 
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
-    let diff = common_patches(event, game_id, "Play ball!".into(), play)
+    let diff = common_patches(&event.metadata.siblings, game_id, "Play ball!".into(), play)
         .chain(play_ball_team_specific_diffs(game_id, "away"))
         .chain(play_ball_team_specific_diffs(game_id, "home"))
         .chain([
@@ -234,7 +236,7 @@ fn play_ball_team_specific_diffs(game_id: &Uuid, which: &'static str) -> impl It
     ].into_iter()
 }
 
-fn common_patches(event: &EventuallyEvent, game_id: &Uuid, message: String, play: i32) -> impl Iterator<Item=bs::Patch> {
+fn common_patches(events: &Vec<EventuallyEvent>, game_id: &Uuid, message: String, play: i32) -> impl Iterator<Item=bs::Patch> {
     [
         bs::Patch {
             path: bs::json_path!("game", game_id.clone(), "lastUpdate"),
@@ -248,22 +250,34 @@ fn common_patches(event: &EventuallyEvent, game_id: &Uuid, message: String, play
         // lastUpdateFull is not logically connected to the previous one. Re-set it each time
         bs::Patch {
             path: bs::json_path!("game", game_id.clone(), "lastUpdateFull"),
-            change: bs::ChangeType::Overwrite(json!([{
-                "blurb": "",
-                "category": event.category as i32,
-                "created": format_blaseball_date(event.created),
-                "day": event.day,
-                "description": message,
-                "gameTags": [],
-                "id": event.id,
-                "nuts": 0,
-                "phase": 2,
-                "playerTags": event.player_tags,
-                "season": event.season,
-                "teamTags": [],
-                "tournament": event.tournament,
-                "type": event.r#type as i32,
-            }])),
+            change: bs::ChangeType::Overwrite(Value::Array(events.iter()
+                .map(|event| {
+                    let mut result = json!({
+                        "blurb": "",
+                        "category": event.category as i32,
+                        "created": format_blaseball_date(event.created),
+                        "day": event.day,
+                        "description": event.description,
+                        "gameTags": [],
+                        "id": event.id,
+                        "nuts": 0,
+                        "phase": 2,
+                        "playerTags": event.player_tags,
+                        "season": event.season,
+                        "teamTags": [],
+                        "tournament": event.tournament,
+                        "type": event.r#type as i32,
+                    });
+
+                    if let Value::Object(obj) = &event.metadata.other {
+                        if !obj.is_empty() {
+                            result["metadata"] = event.metadata.other.clone();
+                        }
+                    }
+
+                    result
+                })
+                .collect())),
         },
     ].into_iter()
 }
@@ -284,7 +298,7 @@ async fn apply_half_inning(state: Arc<bs::BlaseballState>, log: &IngestLogger, e
     let top_or_bottom = if new_top_of_inning { "Top" } else { "Bottom" };
     let message = format!("{} of {}, {} batting.", top_or_bottom, new_inning + 1, batting_team_name);
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
-    let diff = common_patches(event, game_id, message, play)
+    let diff = common_patches(&event.metadata.siblings, game_id, message, play)
         .chain([
             bs::Patch {
                 path: bs::json_path!("game", game_id.clone(), "phase"),
@@ -354,7 +368,7 @@ async fn apply_batter_up(state: Arc<bs::BlaseballState>, log: &IngestLogger, eve
 
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
     let message = format!("{} batting for the {}.", batter_name, batting_team_name);
-    let diff = common_patches(event, game_id, message, play)
+    let diff = common_patches(&event.metadata.siblings, game_id, message, play)
         .chain([
             bs::Patch {
                 path: bs::json_path!("game", game_id.clone(), prefixed("Batter", top_of_inning)),
@@ -383,8 +397,7 @@ async fn apply_strike(state: Arc<bs::BlaseballState>, log: &IngestLogger, event:
     let balls = state.int_at(&bs::json_path!("game", game_id.clone(), "atBatBalls")).await?;
     let strikes = 1 + state.int_at(&bs::json_path!("game", game_id.clone(), "atBatStrikes")).await?;
 
-    let strike_type = parse_strike(&event.description)
-        .map_err(|err| anyhow!("Error parsing strike: {}", err))?;
+    let strike_type = parse_strike(&event.description)?;
     let strike_text = match strike_type {
         StrikeType::Swinging => { "swinging" }
         StrikeType::Looking => { "looking" }
@@ -394,7 +407,7 @@ async fn apply_strike(state: Arc<bs::BlaseballState>, log: &IngestLogger, event:
 
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
     let message = format!("Strike, {}. {}-{}", strike_text, balls, strikes);
-    let diff = common_patches(event, game_id, message, play)
+    let diff = common_patches(&event.metadata.siblings, game_id, message, play)
         .chain([
             bs::Patch {
                 path: bs::json_path!("game", game_id.clone(), "atBatStrikes"),
@@ -422,7 +435,7 @@ async fn apply_ball(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &
 
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
     let message = format!("Ball. {}-{}", balls, strikes);
-    let diff = common_patches(event, game_id, message, play)
+    let diff = common_patches(&event.metadata.siblings, game_id, message, play)
         .chain([
             bs::Patch {
                 path: bs::json_path!("game", game_id.clone(), "atBatBalls"),
@@ -454,7 +467,7 @@ async fn apply_foul_ball(state: Arc<bs::BlaseballState>, log: &IngestLogger, eve
 
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
     let message = format!("Foul Ball. {}-{}", balls, strikes);
-    let diff = common_patches(event, game_id, message, play)
+    let diff = common_patches(&event.metadata.siblings, game_id, message, play)
         .chain([
             bs::Patch {
                 path: bs::json_path!("game", game_id.clone(), "atBatStrikes"),
@@ -483,7 +496,7 @@ async fn apply_fielding_out(state: Arc<BlaseballState>, log: &IngestLogger, even
     let top_of_inning = state.bool_at(&bs::json_path!("game", game_id.clone(), "topOfInning")).await?;
     let batter_id = state.uuid_at(&bs::json_path!("game", game_id.clone(), prefixed("Batter", top_of_inning))).await?;
     let batter_name = state.string_at(&bs::json_path!("game", game_id.clone(), prefixed("BatterName", top_of_inning))).await?;
-    let (out_type, fielder_name) = parse_ground_out(&batter_name, &event.description)
+    let (out_type, fielder_name) = parse_fielding_out(&batter_name, &event.description)
         .map_err(|err| anyhow!("Error parsing ground out: {}", err))?;
     log.debug(format!("Ground out was hit to {}", fielder_name)).await?;
 
@@ -513,8 +526,7 @@ async fn apply_hit(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &E
     if player_id != &batter_id {
         return Err(anyhow!("Batter id from state ({}) didn't match batter id from event ({})", batter_id, player_id));
     }
-    let hit_type = parse_hit(&batter_name, &event.description)
-        .map_err(|err| anyhow!("Error parsing hit: {}", err))?;
+    let hit_type = parse_hit(&batter_name, &event.description)?;
     let hit_text = match hit_type {
         HitType::Single => { "Single" }
         HitType::Double => { "Double" }
@@ -523,7 +535,7 @@ async fn apply_hit(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &E
 
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
     let message = format!("{} hits a {}!", batter_name, hit_text);
-    let diff = common_patches(event, game_id, message, play)
+    let diff = common_patches(&event.metadata.siblings, game_id, message, play)
         .chain(push_base_runner(game_id, batter_id, batter_name, hit_type as i32))
         .chain([
             bs::Patch {
@@ -594,12 +606,11 @@ async fn apply_strikeout(state: Arc<bs::BlaseballState>, log: &IngestLogger, eve
     }
 
     let batter_name = state.string_at(&bs::json_path!("game", game_id.clone(), prefixed("BatterName", top_of_inning))).await?;
-    let strike_type = parse_strikeout(&batter_name, &event.description)
-        .map_err(|err| anyhow!("Error parsing ground out: {}", err))?;
+    let strike_type = parse_strikeout(&batter_name, &event.description)?;
 
     let strike_text = match strike_type {
-        StrikeType::Swinging => { "swinging" },
-        StrikeType::Looking => { "looking" },
+        StrikeType::Swinging => { "swinging" }
+        StrikeType::Looking => { "looking" }
     };
 
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
@@ -618,12 +629,12 @@ fn apply_out<'a>(
     game_id: &'a Uuid,
     message: String,
     play: i32,
-    top_of_inning: bool
+    top_of_inning: bool,
 ) -> impl Future<Output=Result<impl Iterator<Item=bs::Patch>, IngestError>> + 'a {
     async move {
         log.info(format!("Observed {} by {}. Zeroing consecutiveHits", out_type, player_id)).await?;
 
-        let diff = common_patches(event, game_id, message, play)
+        let diff = common_patches(&event.metadata.siblings, game_id, message, play)
             .chain([
                 bs::Patch {
                     path: bs::json_path!("player", player_id.clone(), "consecutiveHits"),
@@ -709,7 +720,7 @@ async fn apply_storm_warning(state: Arc<bs::BlaseballState>, log: &IngestLogger,
 
     let game_id = get_one_id(&event.game_tags, "gameTags")?;
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
-    let diff = common_patches(event, game_id, "WINTER STORM WARNING".into(), play)
+    let diff = common_patches(&event.metadata.siblings, game_id, "WINTER STORM WARNING".into(), play)
         .chain([
             bs::Patch {
                 path: bs::json_path!("game", game_id.clone(), "gameStartPhase"),
@@ -740,10 +751,62 @@ async fn apply_player_stat_reroll(state: Arc<bs::BlaseballState>, log: &IngestLo
 }
 
 
-async fn apply_snowflakes(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: &EventuallyEvent) -> IngestApplyResult {
-    log.debug("Applying Snowflakes event".to_string()).await?;
-    // TODO
-    Ok(vec![state])
+async fn apply_snowflakes(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &EventuallyEvent) -> IngestApplyResult {
+    let game_id = get_one_id(&event.game_tags, "gameTags")?;
+    log.debug(format!("Applying Snowflakes event for game {}", game_id)).await?;
+
+    let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
+    let (snow_event, mod_events) = event.metadata.siblings.split_first()
+        .ok_or(anyhow!("Snowflakes event is missing metadata.siblings"))?;
+
+    let (num_snowflakes, modified_type) = parse_snowfall(&snow_event.description)?;
+    let frozen_player_ids: Vec<_> = mod_events.iter()
+        .map(|event| {
+            get_one_id(&event.player_tags, "playerTags")
+        })
+        .try_collect()?;
+
+    let state_ref = &state;
+    let frozen_team_ids: Vec<_> = stream::iter(frozen_player_ids.iter())
+        .then(|uuid| async move {
+            let team_id = state_ref.uuid_at(&bs::json_path!("player", *uuid.clone(), "leagueTeamId")).await?;
+            Ok::<_, anyhow::Error>(team_id)
+        })
+        .try_collect().await?;
+
+    let frozen_messages: Vec<String> = stream::iter(frozen_player_ids.iter())
+        .then(|uuid| async move {
+            let name = state_ref.string_at(&bs::json_path!("player", *uuid.clone(), "name")).await?;
+            Ok::<String, anyhow::Error>(format!("\n{} was Frozen!", name))
+        })
+        .try_collect().await?;
+
+    let message = format!("{} Snowflakes {} the field!{}", num_snowflakes, modified_type, frozen_messages.join(""));
+    let diff = common_patches(&event.metadata.siblings, game_id, message, play)
+        .chain([
+            bs::Patch {
+                path: bs::json_path!("game", game_id.clone(), "gameStartPhase"),
+                change: bs::ChangeType::Set(20.into()),
+            },
+            bs::Patch {
+                path: bs::json_path!("game", game_id.clone(), "state", "snowfallEvents"),
+                change: bs::ChangeType::Increment,
+            },
+        ])
+        .chain(
+            frozen_team_ids.into_iter()
+                .enumerate()
+                .map(|(i, team_id)| {
+                    bs::Patch {
+                        path: bs::json_path!("game", game_id.clone(), "lastUpdateFull", i + 1, "teamTags"),
+                        change: bs::ChangeType::Push(json!(team_id)),
+                    }
+                })
+        );
+
+    let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
+    state.successor(caused_by, diff).await
+        .map(|s| vec![s])
 }
 
 

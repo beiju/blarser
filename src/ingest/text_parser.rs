@@ -1,3 +1,4 @@
+use anyhow::anyhow;
 use nom::{IResult, error::VerboseError, bytes::complete::{tag, take_until}, character::complete::digit1, branch::alt, combinator::eof, Finish};
 
 pub enum FieldingOutType {
@@ -17,8 +18,9 @@ pub enum HitType {
     Triple = 2,
 }
 
-pub fn parse_ground_out<'input>(batter_name: &str, input: &'input str) -> Result<(FieldingOutType, &'input str), VerboseError<&'input str>> {
-    let (_, (out_type, fielder_name)) = parse_ground_out_internal(batter_name, input).finish()?;
+pub fn parse_fielding_out<'input>(batter_name: &str, input: &'input str) -> Result<(FieldingOutType, &'input str), anyhow::Error> {
+    let (_, (out_type, fielder_name)) = parse_fielding_out_internal(batter_name, input).finish()
+        .map_err(|err| anyhow!("Can't parse fielding out: {}", err))?;
 
     let out_type = match out_type {
         "flyout" => FieldingOutType::Flyout,
@@ -29,7 +31,7 @@ pub fn parse_ground_out<'input>(batter_name: &str, input: &'input str) -> Result
     Ok((out_type, fielder_name))
 }
 
-fn parse_ground_out_internal<'input>(batter_name: &str, input: &'input str) -> IResult<&'input str, (&'input str, &'input str), VerboseError<&'input str>> {
+fn parse_fielding_out_internal<'input>(batter_name: &str, input: &'input str) -> IResult<&'input str, (&'input str, &'input str), VerboseError<&'input str>> {
     let (input, _) = tag(batter_name.as_bytes())(input)?;
     let (input, _) = tag(" hit a ")(input)?;
     let (input, out_type) = alt((tag("flyout"), tag("ground out")))(input)?;
@@ -41,8 +43,10 @@ fn parse_ground_out_internal<'input>(batter_name: &str, input: &'input str) -> I
     IResult::Ok((input, (out_type, fielder_name)))
 }
 
-pub fn parse_strikeout<'input>(batter_name: &str, input: &'input str) -> Result<StrikeType, VerboseError<&'input str>> {
-    let (_, out_type) = parse_strikeout_internal(batter_name, input).finish()?;
+pub fn parse_strikeout(batter_name: &str, input: &str) -> Result<StrikeType, anyhow::Error> {
+    let (_, out_type) = parse_strikeout_internal(batter_name, input).finish()
+        .map_err(|err| anyhow!("Can't parse strikeout: {}", err))?;
+
 
     let out_type = match out_type {
         "swinging" => StrikeType::Swinging,
@@ -63,8 +67,10 @@ fn parse_strikeout_internal<'input>(batter_name: &str, input: &'input str) -> IR
     IResult::Ok((input, out_type))
 }
 
-pub fn parse_strike(input: &str) -> Result<StrikeType, VerboseError<&str>> {
-    let (_, strike_type) = parse_strike_internal(input).finish()?;
+pub fn parse_strike(input: &str) -> Result<StrikeType, anyhow::Error> {
+    let (_, strike_type) = parse_strike_internal(input).finish()
+        .map_err(|err| anyhow!("Can't parse strike: {}", err))?;
+
 
     let strike_type = match strike_type {
         "swinging" => StrikeType::Swinging,
@@ -87,8 +93,9 @@ fn parse_strike_internal(input: &str) -> IResult<&str, &str, VerboseError<&str>>
     IResult::Ok((input, strike_type))
 }
 
-pub fn parse_hit<'input>(batter_name: &str, input: &'input str) -> Result<HitType, VerboseError<&'input str>> {
-    let (_, hit_type) = parse_hit_internal(batter_name, input).finish()?;
+pub fn parse_hit(batter_name: &str, input: &str) -> Result<HitType, anyhow::Error> {
+    let (_, hit_type) = parse_hit_internal(batter_name, input).finish()
+        .map_err(|err| anyhow!("Can't parse hit: {}", err))?;
 
     let hit_type = match hit_type {
         "Single" => HitType::Single,
@@ -108,4 +115,24 @@ fn parse_hit_internal<'input>(batter_name: &str, input: &'input str) -> IResult<
     let (input, _) = eof(input)?;
 
     IResult::Ok((input, hit_type))
+}
+
+pub fn parse_snowfall(input: &str) -> Result<(i32, &str), anyhow::Error> {
+    let (_, (num_snowflakes, modified_type)) = parse_snowfall_internal(input).finish()
+        .map_err(|err| anyhow!("Can't parse snowfall: {}", err))?;
+
+    let num_snowflakes = num_snowflakes.parse()
+        .map_err(|err| anyhow!("Can't parse number of snowflakes: {:?}", err))?;
+
+    Ok((num_snowflakes, modified_type))
+}
+
+fn parse_snowfall_internal(input: &str) -> IResult<&str, (&str, &str), VerboseError<&str>> {
+    let (input, num_snowflakes) = digit1(input)?;
+    let (input, _) = tag(" Snowflakes ")(input)?;
+    let (input, modified_type) = alt((tag("slightly modified"), tag("modified"), tag("heavily modified")))(input)?;
+    let (input, _) = tag(" the field!")(input)?;
+    let (input, _) = eof(input)?;
+
+    IResult::Ok((input, (num_snowflakes, modified_type)))
 }

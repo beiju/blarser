@@ -13,7 +13,9 @@ pub fn events(start: &'static str) -> impl Iterator<Item=EventuallyEvent> {
         .scan(HashSet::new(), |seen_ids, event| {
             // If this event was already seen as a sibling of a processed event, skip it
             if seen_ids.remove(&event.id) {
-                return None
+                info!("Discarding duplicate event {} from {}", event.description, event.created);
+                // Double-option because the outer layer is used by `scan` to terminate the iterator
+                return Some(None)
             }
 
             // seen_ids shouldn't grow very large, since every uuid that's put into it should come
@@ -28,8 +30,11 @@ pub fn events(start: &'static str) -> impl Iterator<Item=EventuallyEvent> {
                 }
             }
 
-            Some(event)
+            info!("Yielding event {} from {}", event.description, event.created);
+            // Double-option because the outer layer is used by `scan` to terminate the iterator
+            Some(Some(event))
         })
+        .flatten()
 }
 
 fn events_thread(sender: mpsc::SyncSender<Vec<EventuallyEvent>>, start: &str) -> () {
