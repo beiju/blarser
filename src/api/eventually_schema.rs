@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
+use serde_json::Value;
 use serde_repr::Deserialize_repr;
 use uuid::Uuid;
 
@@ -21,6 +22,19 @@ impl IntoIterator for EventuallyResponse {
     }
 }
 
+
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct EventMetadata {
+    #[serde(default)]
+    #[serde(rename = "_eventually_siblingEvents")]
+    pub siblings: Vec<EventuallyEvent>,
+    pub play: Option<i32>,
+
+    #[serde(flatten)]
+    pub other: Value,
+}
+
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct EventuallyEvent {
@@ -28,7 +42,7 @@ pub struct EventuallyEvent {
     pub created: DateTime<Utc>,
     pub r#type: EventType,
     pub category: i32,
-    pub metadata: serde_json::Value,
+    pub metadata: EventMetadata,
     pub description: String,
     pub player_tags: Vec<Uuid>,
     pub game_tags: Vec<Uuid>,

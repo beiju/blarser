@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::mpsc;
 use std::thread;
 use log::{info, warn};
@@ -7,7 +8,28 @@ pub use crate::api::eventually_schema::{EventuallyEvent, EventuallyResponse};
 pub fn events(start: &'static str) -> impl Iterator<Item=EventuallyEvent> {
     let (sender, receiver) = mpsc::sync_channel(2);
     thread::spawn(move || events_thread(sender, start));
-    receiver.into_iter().flatten()
+    receiver.into_iter()
+        .flatten()
+        .scan(HashSet::new(), |seen_ids, event| {
+            // If this event was already seen as a sibling of a processed event, skip it
+            if seen_ids.remove(&event.id) {
+                return None
+            }
+
+            // seen_ids shouldn't grow very large, since every uuid that's put into it should come
+            // out within a few seconds
+            if seen_ids.len() > 50 {
+                warn!("seen_ids is larger than expected ({} ids)", seen_ids.len());
+            }
+
+            for sibling in &event.metadata.siblings {
+                if sibling.id != event.id {
+                    seen_ids.insert(sibling.id);
+                }
+            }
+
+            Some(event)
+        })
 }
 
 fn events_thread(sender: mpsc::SyncSender<Vec<EventuallyEvent>>, start: &str) -> () {
@@ -24,6 +46,7 @@ fn events_thread(sender: mpsc::SyncSender<Vec<EventuallyEvent>>, start: &str) ->
                 ("offset", page * PAGE_SIZE),
             ])
             .query(&[
+                ("expand_siblings", "true"),
                 ("sortby", "{created}"),
                 ("sortorder", "asc"),
                 ("after", start)

@@ -87,7 +87,7 @@ async fn apply_lets_go(state: Arc<bs::BlaseballState>, log: &IngestLogger, event
         pub weather: Weather,
     }
 
-    let metadata: LetsGoMetadata = serde_json::from_value(event.metadata.clone())?;
+    let metadata: LetsGoMetadata = serde_json::from_value(event.metadata.other.clone())?;
     let home_pitcher = get_active_pitcher(&state, metadata.home, event.day > 0).await?;
     let away_pitcher = get_active_pitcher(&state, metadata.away, event.day > 0).await?;
 
@@ -188,8 +188,8 @@ async fn apply_play_ball(state: Arc<bs::BlaseballState>, log: &IngestLogger, eve
     let game_id = get_one_id(&event.game_tags, "gameTags")?;
     log.debug(format!("Applying PlayBall event for game {}", game_id)).await?;
 
-    let metadata: PlayMetadata = serde_json::from_value(event.metadata.clone())?;
-    let diff = common_patches(event, game_id, "Play ball!".into(), metadata.play)
+    let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
+    let diff = common_patches(event, game_id, "Play ball!".into(), play)
         .chain(play_ball_team_specific_diffs(game_id, "away"))
         .chain(play_ball_team_specific_diffs(game_id, "home"))
         .chain([
@@ -234,7 +234,7 @@ fn play_ball_team_specific_diffs(game_id: &Uuid, which: &'static str) -> impl It
     ].into_iter()
 }
 
-fn common_patches(event: &EventuallyEvent, game_id: &Uuid, message: String, play: i64) -> impl Iterator<Item=bs::Patch> {
+fn common_patches(event: &EventuallyEvent, game_id: &Uuid, message: String, play: i32) -> impl Iterator<Item=bs::Patch> {
     [
         bs::Patch {
             path: bs::json_path!("game", game_id.clone(), "lastUpdate"),
@@ -283,8 +283,8 @@ async fn apply_half_inning(state: Arc<bs::BlaseballState>, log: &IngestLogger, e
 
     let top_or_bottom = if new_top_of_inning { "Top" } else { "Bottom" };
     let message = format!("{} of {}, {} batting.", top_or_bottom, new_inning + 1, batting_team_name);
-    let metadata: PlayMetadata = serde_json::from_value(event.metadata.clone())?;
-    let diff = common_patches(event, game_id, message, metadata.play)
+    let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
+    let diff = common_patches(event, game_id, message, play)
         .chain([
             bs::Patch {
                 path: bs::json_path!("game", game_id.clone(), "phase"),
@@ -352,9 +352,9 @@ async fn apply_batter_up(state: Arc<bs::BlaseballState>, log: &IngestLogger, eve
     let batter_id = state.uuid_at(&bs::json_path!("team", batting_team_id, "lineup", batter_count as usize)).await?;
     let batter_name = state.string_at(&bs::json_path!("player", batter_id, "name")).await?;
 
-    let metadata: BatterUpMetadata = serde_json::from_value(event.metadata.clone())?;
+    let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
     let message = format!("{} batting for the {}.", batter_name, batting_team_name);
-    let diff = common_patches(event, game_id, message, metadata.play)
+    let diff = common_patches(event, game_id, message, play)
         .chain([
             bs::Patch {
                 path: bs::json_path!("game", game_id.clone(), prefixed("Batter", top_of_inning)),
@@ -392,9 +392,9 @@ async fn apply_strike(state: Arc<bs::BlaseballState>, log: &IngestLogger, event:
 
     log.debug(format!("Recording Strike, {} for game {}, count {}-{}", strike_text, game_id, balls, strikes)).await?;
 
-    let metadata: PlayMetadata = serde_json::from_value(event.metadata.clone())?;
+    let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
     let message = format!("Strike, {}. {}-{}", strike_text, balls, strikes);
-    let diff = common_patches(event, game_id, message, metadata.play)
+    let diff = common_patches(event, game_id, message, play)
         .chain([
             bs::Patch {
                 path: bs::json_path!("game", game_id.clone(), "atBatStrikes"),
@@ -420,9 +420,9 @@ async fn apply_ball(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &
 
     log.debug(format!("Recording Ball for game {}, count {}-{}", game_id, balls, strikes)).await?;
 
-    let metadata: PlayMetadata = serde_json::from_value(event.metadata.clone())?;
+    let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
     let message = format!("Ball. {}-{}", balls, strikes);
-    let diff = common_patches(event, game_id, message, metadata.play)
+    let diff = common_patches(event, game_id, message, play)
         .chain([
             bs::Patch {
                 path: bs::json_path!("game", game_id.clone(), "atBatBalls"),
@@ -452,9 +452,9 @@ async fn apply_foul_ball(state: Arc<bs::BlaseballState>, log: &IngestLogger, eve
 
     log.debug(format!("Recording FoulBall for game {}, count {}-{}", game_id, balls, strikes)).await?;
 
-    let metadata: PlayMetadata = serde_json::from_value(event.metadata.clone())?;
+    let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
     let message = format!("Foul Ball. {}-{}", balls, strikes);
-    let diff = common_patches(event, game_id, message, metadata.play)
+    let diff = common_patches(event, game_id, message, play)
         .chain([
             bs::Patch {
                 path: bs::json_path!("game", game_id.clone(), "atBatStrikes"),
@@ -492,9 +492,9 @@ async fn apply_fielding_out(state: Arc<BlaseballState>, log: &IngestLogger, even
         FieldingOutType::Flyout => "flyout",
     };
 
-    let metadata: PlayMetadata = serde_json::from_value(event.metadata.clone())?;
+    let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
     let message = format!("{} hit a {} to {}.", batter_name, out_text, fielder_name);
-    let diff = apply_out(out_text, log, &batter_id, event, game_id, message, metadata.play, top_of_inning).await?;
+    let diff = apply_out(out_text, log, &batter_id, event, game_id, message, play, top_of_inning).await?;
 
     state.successor(caused_by, diff).await
         .map(|s| vec![s])
@@ -521,9 +521,9 @@ async fn apply_hit(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &E
         HitType::Triple => { "Triple" }
     };
 
-    let metadata: PlayMetadata = serde_json::from_value(event.metadata.clone())?;
+    let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
     let message = format!("{} hits a {}!", batter_name, hit_text);
-    let diff = common_patches(event, game_id, message, metadata.play)
+    let diff = common_patches(event, game_id, message, play)
         .chain(push_base_runner(game_id, batter_id, batter_name, hit_type as i32))
         .chain([
             bs::Patch {
@@ -602,9 +602,9 @@ async fn apply_strikeout(state: Arc<bs::BlaseballState>, log: &IngestLogger, eve
         StrikeType::Looking => { "looking" },
     };
 
-    let metadata: PlayMetadata = serde_json::from_value(event.metadata.clone())?;
+    let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
     let message = format!("{} strikes out {}.", batter_name, strike_text);
-    let diff = apply_out("strikeout", log, player_id, event, game_id, message, metadata.play, top_of_inning).await?;
+    let diff = apply_out("strikeout", log, player_id, event, game_id, message, play, top_of_inning).await?;
 
     state.successor(caused_by, diff).await
         .map(|s| vec![s])
@@ -617,7 +617,7 @@ fn apply_out<'a>(
     event: &'a EventuallyEvent,
     game_id: &'a Uuid,
     message: String,
-    play: i64,
+    play: i32,
     top_of_inning: bool
 ) -> impl Future<Output=Result<impl Iterator<Item=bs::Patch>, IngestError>> + 'a {
     async move {
@@ -708,14 +708,8 @@ async fn apply_storm_warning(state: Arc<bs::BlaseballState>, log: &IngestLogger,
     log.debug(format!("Applying StormWarning event for game {}", game_id)).await?;
 
     let game_id = get_one_id(&event.game_tags, "gameTags")?;
-    #[derive(Deserialize, Debug)]
-    #[serde(rename_all = "camelCase")]
-    pub struct StormWarningMetadata {
-        pub play: i64,
-    }
-
-    let metadata: StormWarningMetadata = serde_json::from_value(event.metadata.clone())?;
-    let diff = common_patches(event, game_id, "WINTER STORM WARNING".into(), metadata.play)
+    let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
+    let diff = common_patches(event, game_id, "WINTER STORM WARNING".into(), play)
         .chain([
             bs::Patch {
                 path: bs::json_path!("game", game_id.clone(), "gameStartPhase"),
