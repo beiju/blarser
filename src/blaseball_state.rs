@@ -498,8 +498,8 @@ impl Patch {
             ChangeType::Overwrite(value) => {
                 format!("{}: Overwrite {} with {:#}", self.path, state.node_at(&self.path).await?.to_string().await, value)
             }
-            ChangeType::Increment => {
-                format!("{}: Increment {}", self.path, state.node_at(&self.path).await?.to_string().await)
+            ChangeType::AddInt(value) => {
+                format!("{}: Add {} to {}", self.path, value, state.node_at(&self.path).await?.to_string().await)
             }
             ChangeType::Push(value) => {
                 format!("{}: Push {:#} onto array", self.path, value)
@@ -519,7 +519,8 @@ pub enum ChangeType {
     Set(PrimitiveValue),
     // For overwriting a value and not connecting it to history
     Overwrite(JsonValue),
-    Increment,
+    // For adding an int to an existing int
+    AddInt(i64),
     // For pushing a value onto an array
     Push(JsonValue),
 }
@@ -914,8 +915,8 @@ async fn apply_change_to_hashmap<T>(container: &mut im::HashMap<T, Node>, key: &
             let new_node = apply_change_overwrite(change.path, container.get(key), value, caused_by).await?;
             container.insert(key.clone(), new_node);
         }
-        ChangeType::Increment => {
-            let new_node = apply_change_increment(change.path, container.get(key), caused_by).await?;
+        ChangeType::AddInt(value) => {
+            let new_node = apply_change_increment(change.path, container.get(key), value, caused_by).await?;
             container.insert(key.clone(), new_node);
         }
         ChangeType::Push(value) => {
@@ -946,8 +947,8 @@ async fn apply_change_to_vector(container: &mut im::Vector<Node>, idx: usize, ch
             let new_node = apply_change_overwrite(change.path, container.get(idx), value, caused_by).await?;
             container.insert(idx, new_node);
         }
-        ChangeType::Increment => {
-            let new_node = apply_change_increment(change.path, container.get(idx), caused_by).await?;
+        ChangeType::AddInt(value) => {
+            let new_node = apply_change_increment(change.path, container.get(idx), value, caused_by).await?;
             container.insert(idx, new_node);
         }
         ChangeType::Push(value) => {
@@ -957,7 +958,6 @@ async fn apply_change_to_vector(container: &mut im::Vector<Node>, idx: usize, ch
 
     Ok(())
 }
-
 
 
 async fn apply_change_new(path: Path, current_node: Option<&Node>, new_value: Value, caused_by: Arc<Event>) -> Result<Node, ApplyChangeError> {
@@ -981,7 +981,7 @@ async fn apply_change_overwrite(path: Path, current_node: Option<&Node>, new_val
     }
 }
 
-async fn apply_change_increment(path: Path, current_node: Option<&Node>, caused_by: Arc<Event>) -> Result<Node, ApplyChangeError> {
+async fn apply_change_increment(path: Path, current_node: Option<&Node>, value: i64, caused_by: Arc<Event>) -> Result<Node, ApplyChangeError> {
     match current_node {
         None => {
             Err(ApplyChangeError::MissingValue(path))
@@ -991,7 +991,7 @@ async fn apply_change_increment(path: Path, current_node: Option<&Node>, caused_
             let new_node = match &node.value {
                 PrimitiveValue::Int(i) => Node::primitive_successor(
                     primitive.clone(),
-                    PrimitiveValue::Int(i + 1),
+                    PrimitiveValue::Int(i + value),
                     caused_by,
                 ),
                 PrimitiveValue::IntRange(upper, lower) => Node::primitive_successor(

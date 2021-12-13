@@ -11,11 +11,10 @@ use serde::Deserialize;
 
 use crate::api::{eventually, EventuallyEvent, EventType, Weather};
 use crate::blaseball_state as bs;
-use crate::blaseball_state::{BlaseballState, PrimitiveValue};
 use crate::ingest::{IngestItem, BoxedIngestItem, IngestResult, IngestError};
 use crate::ingest::error::IngestApplyResult;
 use crate::ingest::log::IngestLogger;
-use crate::ingest::text_parser::{FieldingOutType, HitType, parse_fielding_out, parse_hit, parse_snowfall, parse_strike, parse_strikeout, StrikeType};
+use crate::ingest::text_parser::{FieldingOutType, HitType, StrikeType, parse_fielding_out, parse_hit, parse_home_run, parse_snowfall, parse_strike, parse_strikeout};
 
 pub fn sources(start: &'static str) -> Vec<Box<dyn Iterator<Item=BoxedIngestItem> + Send>> {
     vec![
@@ -220,6 +219,11 @@ async fn apply_play_ball(state: Arc<bs::BlaseballState>, log: &IngestLogger, eve
 
 fn prefixed(text: &'static str, top_of_inning: bool) -> String {
     let home_or_away = if top_of_inning { "away" } else { "home" };
+    format!("{}{}", home_or_away, text)
+}
+
+fn inning_prefixed(text: &'static str, top_of_inning: bool) -> String {
+    let home_or_away = if top_of_inning { "top" } else { "bottom" };
     format!("{}{}", home_or_away, text)
 }
 
@@ -490,7 +494,7 @@ async fn apply_ground_out(state: Arc<bs::BlaseballState>, log: &IngestLogger, ev
     apply_fielding_out(state, log, event, game_id).await
 }
 
-async fn apply_fielding_out(state: Arc<BlaseballState>, log: &IngestLogger, event: &EventuallyEvent, game_id: &Uuid) -> Result<Vec<Arc<BlaseballState>>, IngestError> {
+async fn apply_fielding_out(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &EventuallyEvent, game_id: &Uuid) -> Result<Vec<Arc<bs::BlaseballState>>, IngestError> {
     let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
 
     let top_of_inning = state.bool_at(&bs::json_path!("game", game_id.clone(), "topOfInning")).await?;
@@ -537,30 +541,11 @@ async fn apply_hit(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &E
     let message = format!("{} hits a {}!", batter_name, hit_text);
     let diff = common_patches(&event.metadata.siblings, game_id, message, play)
         .chain(push_base_runner(game_id, batter_id, batter_name, hit_type as i32))
+        .chain(end_at_bat(game_id, top_of_inning))
         .chain([
             bs::Patch {
                 path: bs::json_path!("player", player_id.clone(), "consecutiveHits"),
-                change: bs::ChangeType::Increment,
-            },
-            bs::Patch {
-                path: bs::json_path!("game", game_id.clone(), "atBatBalls"),
-                change: bs::ChangeType::Set(0.into()),
-            },
-            bs::Patch {
-                path: bs::json_path!("game", game_id.clone(), "atBatStrikes"),
-                change: bs::ChangeType::Set(0.into()),
-            },
-            bs::Patch {
-                path: bs::json_path!("game", game_id.clone(), "baserunnerCount"),
-                change: bs::ChangeType::Increment,
-            },
-            bs::Patch {
-                path: bs::json_path!("game", game_id.clone(), prefixed("Batter", top_of_inning)),
-                change: bs::ChangeType::Set(PrimitiveValue::Null),
-            },
-            bs::Patch {
-                path: bs::json_path!("game", game_id.clone(), prefixed("BatterName", top_of_inning)),
-                change: bs::ChangeType::Set("".into()),
+                change: bs::ChangeType::AddInt(1),
             },
         ]);
 
@@ -587,6 +572,10 @@ fn push_base_runner(game_id: &Uuid, runner_id: Uuid, runner_name: String, to_bas
         bs::Patch {
             path: bs::json_path!("game", game_id.clone(), "baseRunnerMods"),
             change: bs::ChangeType::Push("".into()),
+        },
+        bs::Patch {
+            path: bs::json_path!("game", game_id.clone(), "baserunnerCount"),
+            change: bs::ChangeType::AddInt(1),
         },
     ].into_iter()
 }
@@ -621,6 +610,56 @@ async fn apply_strikeout(state: Arc<bs::BlaseballState>, log: &IngestLogger, eve
         .map(|s| vec![s])
 }
 
+fn end_at_bat(game_id: &Uuid, top_of_inning: bool) -> impl Iterator<Item=bs::Patch> {
+    [
+        bs::Patch {
+            path: bs::json_path!("game", game_id.clone(), prefixed("Batter", top_of_inning)),
+            change: bs::ChangeType::Set(bs::PrimitiveValue::Null),
+        },
+        bs::Patch {
+            path: bs::json_path!("game", game_id.clone(), prefixed("BatterName", top_of_inning)),
+            change: bs::ChangeType::Set("".into()),
+        },
+        bs::Patch {
+            path: bs::json_path!("game", game_id.clone(), "atBatBalls"),
+            change: bs::ChangeType::Set(0.into()),
+        },
+        bs::Patch {
+            path: bs::json_path!("game", game_id.clone(), "atBatStrikes"),
+            change: bs::ChangeType::Set(0.into()),
+        },
+    ].into_iter()
+}
+
+fn score_runs(game_id: &Uuid, top_of_inning: bool, num_runs: i64, source_name: &str) -> impl Iterator<Item=bs::Patch> {
+    let runs_plural = match num_runs {
+        1 => "",
+        _ => "s",
+    };
+    [
+        bs::Patch {
+            path: bs::json_path!("game", game_id.clone(), prefixed("Score", top_of_inning)),
+            change: bs::ChangeType::AddInt(num_runs),
+        },
+        bs::Patch {
+            path: bs::json_path!("game", game_id.clone(), "halfInningScore"),
+            change: bs::ChangeType::AddInt(num_runs),
+        },
+        bs::Patch {
+            path: bs::json_path!("game", game_id.clone(), inning_prefixed("InningScore", top_of_inning)),
+            change: bs::ChangeType::AddInt(num_runs),
+        },
+        bs::Patch {
+            path: bs::json_path!("game", game_id.clone(), "scoreLedger"),
+            change: bs::ChangeType::Set(format!("{}: {} Run{}", source_name, num_runs, runs_plural).into()),
+        },
+        bs::Patch {
+            path: bs::json_path!("game", game_id.clone(), "scoreUpdate"),
+            change: bs::ChangeType::Set(format!("{} Runs scored!", num_runs).into()),
+        },
+    ].into_iter()
+}
+
 fn apply_out<'a>(
     out_type: &'static str,
     log: &'a IngestLogger,
@@ -635,30 +674,15 @@ fn apply_out<'a>(
         log.info(format!("Observed {} by {}. Zeroing consecutiveHits", out_type, player_id)).await?;
 
         let diff = common_patches(&event.metadata.siblings, game_id, message, play)
+            .chain(end_at_bat(game_id, top_of_inning))
             .chain([
+                bs::Patch {
+                    path: bs::json_path!("game", game_id.clone(), "halfInningOuts"),
+                    change: bs::ChangeType::AddInt(1),
+                },
                 bs::Patch {
                     path: bs::json_path!("player", player_id.clone(), "consecutiveHits"),
                     change: bs::ChangeType::Set(0.into()),
-                },
-                bs::Patch {
-                    path: bs::json_path!("game", game_id.clone(), prefixed("Batter", top_of_inning)),
-                    change: bs::ChangeType::Set(bs::PrimitiveValue::Null),
-                },
-                bs::Patch {
-                    path: bs::json_path!("game", game_id.clone(), prefixed("BatterName", top_of_inning)),
-                    change: bs::ChangeType::Set("".into()),
-                },
-                bs::Patch {
-                    path: bs::json_path!("game", game_id.clone(), "atBatBalls"),
-                    change: bs::ChangeType::Set(0.into()),
-                },
-                bs::Patch {
-                    path: bs::json_path!("game", game_id.clone(), "atBatStrikes"),
-                    change: bs::ChangeType::Set(0.into()),
-                },
-                bs::Patch {
-                    path: bs::json_path!("game", game_id.clone(), "halfInningOuts"),
-                    change: bs::ChangeType::Increment,
                 },
             ]);
 
@@ -707,10 +731,45 @@ async fn apply_runs_scored(state: Arc<bs::BlaseballState>, log: &IngestLogger, _
 }
 
 
-async fn apply_home_run(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: &EventuallyEvent) -> IngestApplyResult {
-    log.debug("Applying HomeRun event".to_string()).await?;
-    // TODO
-    Ok(vec![state])
+async fn apply_home_run(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &EventuallyEvent) -> IngestApplyResult {
+    let game_id = get_one_id(&event.game_tags, "gameTags")?;
+    log.debug(format!("Applying HomeRun event for game {}", game_id)).await?;
+
+    let player_id = get_one_id(&event.player_tags, "playerTags")?;
+    let top_of_inning = state.bool_at(&bs::json_path!("game", game_id.clone(), "topOfInning")).await?;
+    let batter_id = state.uuid_at(&bs::json_path!("game", game_id.clone(), prefixed("Batter", top_of_inning))).await?;
+    let batter_name = state.string_at(&bs::json_path!("game", game_id.clone(), prefixed("BatterName", top_of_inning))).await?;
+    let team_id = state.uuid_at(&bs::json_path!("game", game_id.clone(), prefixed("Team", top_of_inning))).await?;
+    let team_name = state.string_at(&bs::json_path!("game", game_id.clone(), prefixed("TeamNickname", top_of_inning))).await?;
+
+    if player_id != &batter_id {
+        return Err(anyhow!("Batter id from state ({}) didn't match batter id from event ({})", batter_id, player_id));
+    }
+    let num_runs = parse_home_run(&batter_name, &event.description)?;
+    let home_run_text = match num_runs {
+        1 => { "solo".into() }
+        num => { format!("{}-run", num) }
+    };
+
+    let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
+    let message = format!("{} hits a {} home run!\nThe {} scored!", batter_name, home_run_text, team_name);
+    let diff = common_patches(&event.metadata.siblings, game_id, message, play)
+        .chain(end_at_bat(game_id, top_of_inning))
+        .chain(score_runs(game_id, top_of_inning, num_runs, "Home Run"))
+        .chain([
+            bs::Patch {
+                path: bs::json_path!("player", player_id.clone(), "consecutiveHits"),
+                change: bs::ChangeType::AddInt(1),
+            },
+            bs::Patch {
+                path: bs::json_path!("game", game_id.clone(), "lastUpdateFull", 1, "teamTags"),
+                change: bs::ChangeType::Push(team_id.to_string().into()),
+            },
+        ]);
+
+    let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
+    state.successor(caused_by, diff).await
+        .map(|s| vec![s])
 }
 
 
@@ -790,7 +849,7 @@ async fn apply_snowflakes(state: Arc<bs::BlaseballState>, log: &IngestLogger, ev
             },
             bs::Patch {
                 path: bs::json_path!("game", game_id.clone(), "state", "snowfallEvents"),
-                change: bs::ChangeType::Increment,
+                change: bs::ChangeType::AddInt(1),
             },
         ])
         .chain(

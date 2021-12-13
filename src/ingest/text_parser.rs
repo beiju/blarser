@@ -117,6 +117,31 @@ fn parse_hit_internal<'input>(batter_name: &str, input: &'input str) -> IResult<
     IResult::Ok((input, hit_type))
 }
 
+pub fn parse_home_run(batter_name: &str, input: &str) -> Result<i64, anyhow::Error> {
+    let (_, home_run_type) = parse_home_run_internal(batter_name, input).finish()
+        .map_err(|err| anyhow!("Can't parse home_run: {}", err))?;
+
+    let home_run_score = match home_run_type {
+        "solo" => 1,
+        "2-run" => 2,
+        "3-run" => 3,
+        "4-run" => 4,
+        _ => panic!("Invalid home_run type {}", home_run_type)
+    };
+
+    Ok(home_run_score)
+}
+
+fn parse_home_run_internal<'input>(batter_name: &str, input: &'input str) -> IResult<&'input str, &'input str, VerboseError<&'input str>> {
+    let (input, _) = tag(batter_name.as_bytes())(input)?;
+    let (input, _) = tag(" hits a ")(input)?;
+    let (input, home_run_type) = alt((tag("solo"), tag("2-run"), tag("3-run")))(input)?;
+    let (input, _) = tag(" home run!")(input)?;
+    let (input, _) = eof(input)?;
+
+    IResult::Ok((input, home_run_type))
+}
+
 pub fn parse_snowfall(input: &str) -> Result<(i32, &str), anyhow::Error> {
     let (_, (num_snowflakes, modified_type)) = parse_snowfall_internal(input).finish()
         .map_err(|err| anyhow!("Can't parse snowfall: {}", err))?;

@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::mpsc;
 use std::thread;
 use log::{info, warn};
@@ -10,7 +10,7 @@ pub fn events(start: &'static str) -> impl Iterator<Item=EventuallyEvent> {
     thread::spawn(move || events_thread(sender, start));
     receiver.into_iter()
         .flatten()
-        .scan(HashSet::new(), |seen_ids, event| {
+        .scan(HashSet::new(), |seen_ids, mut event| {
             // If this event was already seen as a sibling of a processed event, skip it
             if seen_ids.remove(&event.id) {
                 info!("Discarding duplicate event {} from {}", event.description, event.created);
@@ -29,6 +29,14 @@ pub fn events(start: &'static str) -> impl Iterator<Item=EventuallyEvent> {
                     seen_ids.insert(sibling.id);
                 }
             }
+
+            let id_order: HashMap<_, _> = event.metadata.sibling_ids.iter()
+                .flatten()
+                .enumerate()
+                .map(|(i, uuid)| (uuid, i))
+                .collect();
+
+            event.metadata.siblings.sort_by_key(|event| id_order.get(&event.id).unwrap());
 
             info!("Yielding event {} from {}", event.description, event.created);
             // Double-option because the outer layer is used by `scan` to terminate the iterator
