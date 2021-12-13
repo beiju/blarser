@@ -47,12 +47,9 @@ impl IngestItem for EventuallyEvent {
             EventType::FlyOut => apply_fly_out(state, log, self).await,
             EventType::StolenBase => apply_stolen_base(state, log, self).await,
             EventType::Walk => apply_walk(state, log, self).await,
-            EventType::RunsScored => apply_runs_scored(state, log, self).await,
             EventType::HomeRun => apply_home_run(state, log, self).await,
             EventType::StormWarning => apply_storm_warning(state, log, self).await,
-            EventType::PlayerStatReroll => apply_player_stat_reroll(state, log, self).await,
             EventType::Snowflakes => apply_snowflakes(state, log, self).await,
-            EventType::AddedMod => apply_added_mod(state, log, self).await,
             _ => todo!()
         };
 
@@ -724,13 +721,6 @@ async fn apply_walk(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: &Even
 }
 
 
-async fn apply_runs_scored(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: &EventuallyEvent) -> IngestApplyResult {
-    log.debug("Applying RunsScored event".to_string()).await?;
-    // TODO
-    Ok(vec![state])
-}
-
-
 async fn apply_home_run(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &EventuallyEvent) -> IngestApplyResult {
     let game_id = get_one_id(&event.game_tags, "gameTags")?;
     log.debug(format!("Applying HomeRun event for game {}", game_id)).await?;
@@ -803,13 +793,6 @@ fn format_blaseball_date(date: DateTime<Utc>) -> String {
 }
 
 
-async fn apply_player_stat_reroll(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: &EventuallyEvent) -> IngestApplyResult {
-    log.debug("Applying PlayerStatReroll event".to_string()).await?;
-    // TODO
-    Ok(vec![state])
-}
-
-
 async fn apply_snowflakes(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &EventuallyEvent) -> IngestApplyResult {
     let game_id = get_one_id(&event.game_tags, "gameTags")?;
     log.debug(format!("Applying Snowflakes event for game {}", game_id)).await?;
@@ -866,11 +849,4 @@ async fn apply_snowflakes(state: Arc<bs::BlaseballState>, log: &IngestLogger, ev
     let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
     state.successor(caused_by, diff).await
         .map(|s| vec![s])
-}
-
-
-async fn apply_added_mod(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: &EventuallyEvent) -> IngestApplyResult {
-    log.debug("Applying AddedMod event".to_string()).await?;
-    // TODO
-    Ok(vec![state])
 }
