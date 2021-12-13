@@ -24,7 +24,11 @@ pub enum Event {
     /// be manually approved.
     ImplicitChange(Observation),
 
+    /// Represents a change derived from a Feed event. This is the most common case.
     FeedEvent(Uuid),
+
+    /// Represents a change that automatically happens at a certain time.
+    TimedChange(DateTime<Utc>)
 }
 
 #[derive(Debug, Clone)]
@@ -278,6 +282,13 @@ impl Node {
     pub async fn as_array(&self) -> Result<&im::Vector<Node>, String> {
         match self {
             Node::Array(arr) => { Ok(arr) }
+            _ => { Err(self.to_string().await) }
+        }
+    }
+
+    pub async fn as_object(&self) -> Result<&im::HashMap<String, Node>, String> {
+        match self {
+            Node::Object(obj) => { Ok(obj) }
             _ => { Err(self.to_string().await) }
         }
     }

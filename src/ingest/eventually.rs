@@ -88,9 +88,10 @@ async fn apply_lets_go(state: Arc<bs::BlaseballState>, log: &IngestLogger, event
         pub weather: Weather,
     }
 
+
     let metadata: LetsGoMetadata = serde_json::from_value(event.metadata.other.clone())?;
-    let home_pitcher = get_active_pitcher(&state, metadata.home, event.day > 0).await?;
-    let away_pitcher = get_active_pitcher(&state, metadata.away, event.day > 0).await?;
+    let away_pitcher = get_active_pitcher(&state, metadata.home, event.day > 0).await?;
+    let home_pitcher = get_active_pitcher(&state, metadata.away, event.day > 0).await?;
 
     let diff = [
         // Team object changes
@@ -112,45 +113,18 @@ async fn apply_lets_go(state: Arc<bs::BlaseballState>, log: &IngestLogger, event
             path: bs::json_path!("game", game_id.clone(), "gameStartPhase"),
             change: bs::ChangeType::Set((-1).into()),
         },
-    ].into_iter()
-        .chain(game_start_team_specific_diffs(game_id, away_pitcher, "away"))
-        .chain(game_start_team_specific_diffs(game_id, home_pitcher, "home"));
+        bs::Patch {
+            path: bs::json_path!("game", game_id.clone(), "homeTeamBatterCount"),
+            change: bs::ChangeType::Set((-1).into()),
+        },
+        bs::Patch {
+            path: bs::json_path!("game", game_id.clone(), "awayTeamBatterCount"),
+            change: bs::ChangeType::Set((-1).into()),
+        },
+    ].into_iter();
 
     let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
     state.successor(caused_by, diff).await
-}
-
-fn game_start_team_specific_diffs(game_id: &Uuid, active_pitcher: ActivePitcher, which: &'static str) -> impl Iterator<Item=bs::Patch> {
-    [
-        bs::Patch {
-            path: bs::json_path!("game", game_id.clone(), format!("{}BatterName", which)),
-            change: bs::ChangeType::Set("".to_string().into()),
-        },
-        bs::Patch {
-            path: bs::json_path!("game", game_id.clone(), format!("{}Odds", which)),
-            change: bs::ChangeType::Set(bs::PrimitiveValue::FloatRange(0., 1.)),
-        },
-        bs::Patch {
-            path: bs::json_path!("game", game_id.clone(), format!("{}Pitcher", which)),
-            change: bs::ChangeType::Set(active_pitcher.pitcher_id.to_string().into()),
-        },
-        bs::Patch {
-            path: bs::json_path!("game", game_id.clone(), format!("{}PitcherName", which)),
-            change: bs::ChangeType::Set(active_pitcher.pitcher_name.into()),
-        },
-        bs::Patch {
-            path: bs::json_path!("game", game_id.clone(), format!("{}Score", which)),
-            change: bs::ChangeType::Set(0.into()),
-        },
-        bs::Patch {
-            path: bs::json_path!("game", game_id.clone(), format!("{}Strikes", which)),
-            change: bs::ChangeType::Set(3.into()),
-        },
-        bs::Patch {
-            path: bs::json_path!("game", game_id.clone(), format!("{}TeamBatterCount", which)),
-            change: bs::ChangeType::Set((-1).into()),
-        },
-    ].into_iter()
 }
 
 struct ActivePitcher {
@@ -182,7 +156,6 @@ async fn get_active_pitcher(state: &Arc<bs::BlaseballState>, team_id: Uuid, adva
 
     Ok(ActivePitcher { rotation_slot, pitcher_id, pitcher_name })
 }
-
 
 async fn apply_play_ball(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &EventuallyEvent) -> IngestApplyResult {
     let game_id = get_one_id(&event.game_tags, "gameTags")?;
@@ -367,12 +340,6 @@ fn half_inning_team_specific_diffs(game_id: &Uuid, active_pitcher: ActivePitcher
 async fn apply_batter_up(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &EventuallyEvent) -> IngestApplyResult {
     let game_id = get_one_id(&event.game_tags, "gameTags")?;
     log.debug(format!("Applying BatterUp event for game {}", game_id)).await?;
-
-    #[derive(Deserialize, Debug)]
-    #[serde(rename_all = "camelCase")]
-    pub struct BatterUpMetadata {
-        pub play: i64,
-    }
 
     let top_of_inning = state.bool_at(&bs::json_path!("game", game_id.clone(), "topOfInning")).await?;
     let batting_team_id = state.uuid_at(&bs::json_path!("game", game_id.clone(), prefixed("Team", top_of_inning))).await?;

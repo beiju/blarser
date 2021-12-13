@@ -32,26 +32,32 @@ pub async fn run(log: IngestLogger) -> Result<(), IngestError> {
     // make the move block move a reference to log instead of the actual object
     let log = &log;
     rocket::futures::stream::iter(all_sources(BLARSER_START))
-        .try_fold(start_state, |state, ingest_item| async move {
-            let state = if let Some(internal_event) = get_internal_event(&state, ingest_item.date()).await? {
+        .try_fold((start_state, None), |(state, last_update), ingest_item| async move {
+            let state = if let Some(internal_event) = get_internal_event(&state, last_update,ingest_item.date()).await? {
                 internal_event.apply(log, state).await?
             } else {
                 state
             };
 
-            ingest_item.apply(log, state).await
+            Ok((ingest_item.apply(log, state).await?, Some(ingest_item.date())))
         })
         .await?;
 
     Ok(())
 }
 
-async fn get_internal_event(state: &Arc<BlaseballState>, before_date: DateTime<Utc>) -> IngestResult<Option<impl IngestItem>> {
+async fn get_internal_event(state: &Arc<BlaseballState>, last_update: Option<DateTime<Utc>>, next_update: DateTime<Utc>) -> IngestResult<Option<impl IngestItem>> {
     let sim_start_date = state.string_at(&json_path!("sim", uuid::Uuid::nil(), "earlseasonDate")).await?;
     let sim_start_date = DateTime::parse_from_rfc3339(&sim_start_date)?;
     let sim_start_date = sim_start_date.with_timezone(&Utc);
 
-    if sim_start_date < before_date {
+    let is_after_last_update = if let Some(last_update) = last_update {
+        sim_start_date > last_update
+    } else {
+        true
+    };
+
+    if is_after_last_update && sim_start_date < next_update {
         Ok(Some(StartSeasonItem::new(sim_start_date)))
     } else {
         Ok(None)
