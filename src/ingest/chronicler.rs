@@ -299,12 +299,26 @@ async fn match_observation(log: &IngestLogger, node: &mut bs::PrimitiveNode, val
         bs::PrimitiveValue::Int(i) => { value.as_int().map(|value_i| i == value_i).unwrap_or(false) }
         bs::PrimitiveValue::Float(f) => { value.as_float().map(|value_f| f == value_f).unwrap_or(false) }
         bs::PrimitiveValue::String(s) => { value.as_str().map(|value_s| s == value_s).unwrap_or(false) }
-        bs::PrimitiveValue::IntRange(_, _) => { todo!() }
+        bs::PrimitiveValue::IntRange(lower, upper) => {
+            match value.as_int() {
+                None => { false }
+                Some(i) => {
+                    if lower <= i && i <= upper {
+                        log.info(format!("Observed concrete value {} for int range {}-{}", i, lower, upper)).await?;
+                        node.value = bs::PrimitiveValue::Int(*i);
+                        true
+                    } else {
+                        false
+                    }
+                }
+            }
+
+        }
         bs::PrimitiveValue::FloatRange(lower, upper) => {
             match value.as_float() {
                 None => { false }
                 Some(f) => {
-                    if lower < f && f < upper {
+                    if lower <= f && f <= upper {
                         log.info(format!("Observed concrete value {} for float range {}-{}", f, lower, upper)).await?;
                         node.value = bs::PrimitiveValue::Float(*f);
                         true

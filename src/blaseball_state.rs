@@ -502,7 +502,7 @@ impl Patch {
                 format!("{}: Add {} to {}", self.path, value, state.node_at(&self.path).await?.to_string().await)
             }
             ChangeType::Push(value) => {
-                format!("{}: Push {:#} onto array", self.path, value)
+                format!("{}: Push {:#} onto array {}", self.path, value, state.node_at(&self.path).await?.to_string().await)
             }
         };
 
@@ -908,8 +908,7 @@ async fn apply_change_to_hashmap<T>(container: &mut im::HashMap<T, Node>, key: &
             }
         }
         ChangeType::Set(value) => {
-            let new_node = apply_change_set(change.path, container.get(key), value, caused_by).await?;
-            container.insert(key.clone(), new_node);
+            apply_change_set(change.path, container.get_mut(key), value, caused_by).await?;
         }
         ChangeType::Overwrite(value) => {
             let new_node = apply_change_overwrite(change.path, container.get(key), value, caused_by).await?;
@@ -940,8 +939,7 @@ async fn apply_change_to_vector(container: &mut im::Vector<Node>, idx: usize, ch
             container.remove(idx);
         }
         ChangeType::Set(value) => {
-            let new_node = apply_change_set(change.path, container.get(idx), value, caused_by).await?;
-            container.insert(idx, new_node);
+            apply_change_set(change.path, container.get_mut(idx), value, caused_by).await?;
         }
         ChangeType::Overwrite(value) => {
             let new_node = apply_change_overwrite(change.path, container.get(idx), value, caused_by).await?;
@@ -967,9 +965,12 @@ async fn apply_change_new(path: Path, current_node: Option<&Node>, new_value: Va
     }
 }
 
-async fn apply_change_set(path: Path, current_node: Option<&Node>, new_value: PrimitiveValue, caused_by: Arc<Event>) -> Result<Node, ApplyChangeError> {
+async fn apply_change_set(path: Path, current_node: Option<&mut Node>, new_value: PrimitiveValue, caused_by: Arc<Event>) -> Result<(), ApplyChangeError> {
     match current_node {
-        Some(existing_node) => { existing_node.successor(new_value, caused_by) }
+        Some(existing_node) => {
+            *existing_node = existing_node.successor(new_value, caused_by)?;
+            Ok(())
+        }
         None => { Err(ApplyChangeError::MissingValue(path)) }
     }
 }
