@@ -493,7 +493,7 @@ impl Patch {
                 format!("{}: Remove {}", self.path, state.node_at(&self.path).await?.to_string().await)
             }
             ChangeType::Set(value) => {
-                format!("{}: Replace {} with {:#}", self.path, state.node_at(&self.path).await?.to_string().await, value)
+                format!("{}: Change {} with {:#}", self.path, state.node_at(&self.path).await?.to_string().await, value)
             }
             ChangeType::Overwrite(value) => {
                 format!("{}: Overwrite {} with {:#}", self.path, state.node_at(&self.path).await?.to_string().await, value)
@@ -960,7 +960,9 @@ async fn apply_change_to_vector(container: &mut im::Vector<Node>, idx: usize, ch
 
 async fn apply_change_new(path: Path, current_node: Option<&Node>, new_value: Value, caused_by: Arc<Event>) -> Result<Node, ApplyChangeError> {
     match current_node {
-        Some(existing_node) => { Err(ApplyChangeError::UnexpectedValue(path, existing_node.to_string().await)) }
+        Some(existing_node) => {
+            Err(ApplyChangeError::UnexpectedValue(path, existing_node.to_string().await))
+        }
         None => { Ok(Node::new_from_json(new_value, caused_by)) }
     }
 }

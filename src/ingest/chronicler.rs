@@ -195,7 +195,7 @@ fn observe_object<'a>(log: &'a IngestLogger, node: &'a bs::Node, observed: &'a J
             log.info(format!("Observed an unexpected change at {}: value changed from {} to Object({:?})", path, node.to_string().await, observed)).await?;
             Ok(bs::Patch {
                 path,
-                change: bs::ChangeType::New(JsonValue::Object(observed.clone())),
+                change: bs::ChangeType::Overwrite(JsonValue::Object(observed.clone())),
             })
         }))
     }
@@ -245,7 +245,7 @@ fn observe_array<'a>(log: &'a IngestLogger, node: &'a bs::Node, observed: &'a Ve
             log.info(format!("Observed an unexpected change at {}: value changed from {} to {}", path, node.to_string().await, new_value)).await?;
             Ok(bs::Patch {
                 path: path.clone(),
-                change: bs::ChangeType::New(new_value),
+                change: bs::ChangeType::Overwrite(new_value),
             })
         })) as BoxedPatchStream
     }

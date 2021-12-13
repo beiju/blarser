@@ -632,7 +632,6 @@ async fn apply_strikeout(state: Arc<bs::BlaseballState>, log: &IngestLogger, eve
     let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
     let player_id = get_one_id(&event.player_tags, "playerTags")?;
     let top_of_inning = state.bool_at(&bs::json_path!("game", game_id.clone(), "topOfInning")).await?;
-    let top_of_inning = state.bool_at(&bs::json_path!("game", game_id.clone(), "topOfInning")).await?;
     let batter_id = state.uuid_at(&bs::json_path!("game", game_id.clone(), prefixed("Batter", top_of_inning))).await?;
 
     if player_id != &batter_id {
