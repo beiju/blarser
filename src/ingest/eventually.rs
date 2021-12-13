@@ -11,6 +11,7 @@ use serde::Deserialize;
 
 use crate::api::{eventually, EventuallyEvent, EventType, Weather};
 use crate::blaseball_state as bs;
+use crate::blaseball_state::ChangeType;
 use crate::ingest::{IngestItem, BoxedIngestItem, IngestResult, IngestError};
 use crate::ingest::error::IngestApplyResult;
 use crate::ingest::log::IngestLogger;
@@ -537,7 +538,7 @@ async fn apply_hit(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &E
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
     let message = format!("{} hits a {}!", batter_name, hit_text);
     let diff = common_patches(&event.metadata.siblings, game_id, message, play)
-        .chain(push_base_runner(game_id, batter_id, batter_name, hit_type as i32))
+        .chain(push_base_runner(&state, game_id.clone(), batter_id, batter_name, hit_type as i64).await?)
         .chain(end_at_bat(game_id, top_of_inning))
         .chain([
             bs::Patch {
@@ -551,8 +552,10 @@ async fn apply_hit(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &E
         .map(|s| vec![s])
 }
 
-fn push_base_runner(game_id: &Uuid, runner_id: Uuid, runner_name: String, to_base: i32) -> impl Iterator<Item=bs::Patch> {
-    [
+async fn push_base_runner(state: &bs::BlaseballState, game_id: Uuid, runner_id: Uuid, runner_name: String, to_base: i64) -> IngestResult<impl Iterator<Item=bs::Patch>> {
+    let existing_runners = state.array_at(&bs::json_path!("game", game_id.clone(), "basesOccupied")).await?.len();
+
+    let it = [
         bs::Patch {
             path: bs::json_path!("game", game_id.clone(), "basesOccupied"),
             change: bs::ChangeType::Push(to_base.into()),
@@ -575,6 +578,15 @@ fn push_base_runner(game_id: &Uuid, runner_id: Uuid, runner_name: String, to_bas
             change: bs::ChangeType::AddInt(1),
         },
     ].into_iter()
+        .chain((0..existing_runners).into_iter()
+            .map(move |i| {
+                bs::Patch {
+                    path: bs::json_path!("game", game_id.clone(), "basesOccupied", i),
+                    change: ChangeType::AddInt(to_base + 1)
+                }
+            }));
+
+    Ok(it)
 }
 
 

@@ -12,6 +12,7 @@ pub enum StrikeType {
 }
 
 
+#[repr(i64)]
 pub enum HitType {
     Single = 0,
     Double = 1,
