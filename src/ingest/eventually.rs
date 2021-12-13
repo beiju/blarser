@@ -88,7 +88,6 @@ async fn apply_lets_go(state: Arc<bs::BlaseballState>, log: &IngestLogger, event
         pub weather: Weather,
     }
 
-
     let metadata: LetsGoMetadata = serde_json::from_value(event.metadata.other.clone())?;
     let away_pitcher = get_active_pitcher(&state, metadata.home, event.day > 0).await?;
     let home_pitcher = get_active_pitcher(&state, metadata.away, event.day > 0).await?;
@@ -736,7 +735,7 @@ async fn apply_stolen_base(state: Arc<bs::BlaseballState>, log: &IngestLogger, e
     let thief_uuid = get_one_id(&event.player_tags, "playerTags")?;
     let thief_name = state.string_at(&bs::json_path!("player", thief_uuid.clone(), "name")).await?;
 
-    let which_base = parse_stolen_base( &thief_name, &event.description)?;
+    let which_base = parse_stolen_base(&thief_name, &event.description)?;
 
     let baserunner_index = get_baserunner(&state, game_id, thief_uuid, which_base).await?;
 
@@ -885,17 +884,18 @@ async fn apply_snowflakes(state: Arc<bs::BlaseballState>, log: &IngestLogger, ev
         .try_collect()?;
 
     let state_ref = &state;
-    let frozen_team_ids: Vec<_> = stream::iter(frozen_player_ids.iter())
-        .then(|uuid| async move {
-            let team_id = state_ref.uuid_at(&bs::json_path!("player", *uuid.clone(), "leagueTeamId")).await?;
-            Ok::<_, anyhow::Error>(team_id)
-        })
-        .try_collect().await?;
 
     let frozen_messages: Vec<String> = stream::iter(frozen_player_ids.iter())
         .then(|uuid| async move {
             let name = state_ref.string_at(&bs::json_path!("player", *uuid.clone(), "name")).await?;
             Ok::<String, anyhow::Error>(format!("\n{} was Frozen!", name))
+        })
+        .try_collect().await?;
+
+    let frozen_player_and_team_ids: Vec<_> = stream::iter(frozen_player_ids.into_iter().cloned())
+        .then(|player_id| async move {
+            let team_id = state_ref.uuid_at(&bs::json_path!("player", player_id.clone(), "leagueTeamId")).await?;
+            Ok::<_, anyhow::Error>((player_id, team_id))
         })
         .try_collect().await?;
 
@@ -912,14 +912,21 @@ async fn apply_snowflakes(state: Arc<bs::BlaseballState>, log: &IngestLogger, ev
             },
         ])
         .chain(
-            frozen_team_ids.into_iter()
+            frozen_player_and_team_ids.into_iter()
                 .enumerate()
-                .map(|(i, team_id)| {
-                    bs::Patch {
-                        path: bs::json_path!("game", game_id.clone(), "lastUpdateFull", i + 1, "teamTags"),
-                        change: bs::ChangeType::Push(json!(team_id)),
-                    }
+                .map(|(i, (player_id, team_id))| {
+                    [
+                        bs::Patch {
+                            path: bs::json_path!("game", game_id.clone(), "lastUpdateFull", i + 1, "teamTags"),
+                            change: bs::ChangeType::Push(json!(team_id)),
+                        },
+                        bs::Patch {
+                            path: bs::json_path!("player", player_id, "gameAttr"),
+                            change: bs::ChangeType::Push(json!("FROZEN")),
+                        }
+                    ]
                 })
+                .flatten()
         );
 
     let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
