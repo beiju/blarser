@@ -71,7 +71,7 @@ pub struct PlayMetadata {
 
 async fn apply_big_deal(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: &EventuallyEvent) -> IngestApplyResult {
     log.debug("Ignoring BigDeal event".to_string()).await?;
-    Ok(vec![state])
+    Ok(state)
 }
 
 
@@ -118,7 +118,6 @@ async fn apply_lets_go(state: Arc<bs::BlaseballState>, log: &IngestLogger, event
 
     let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
     state.successor(caused_by, diff).await
-        .map(|s| vec![s])
 }
 
 fn game_start_team_specific_diffs(game_id: &Uuid, active_pitcher: ActivePitcher, which: &'static str) -> impl Iterator<Item=bs::Patch> {
@@ -214,7 +213,6 @@ async fn apply_play_ball(state: Arc<bs::BlaseballState>, log: &IngestLogger, eve
 
     let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
     state.successor(caused_by, diff).await
-        .map(|s| vec![s])
 }
 
 fn prefixed(text: &'static str, top_of_inning: bool) -> String {
@@ -347,10 +345,8 @@ async fn apply_half_inning(state: Arc<bs::BlaseballState>, log: &IngestLogger, e
             .chain(half_inning_team_specific_diffs(game_id, home_pitcher, "home"));
 
         state.successor(caused_by, diff).await
-            .map(|s| vec![s])
     } else {
         state.successor(caused_by, diff).await
-            .map(|s| vec![s])
     }
 }
 
@@ -405,7 +401,6 @@ async fn apply_batter_up(state: Arc<bs::BlaseballState>, log: &IngestLogger, eve
 
     let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
     state.successor(caused_by, diff).await
-        .map(|s| vec![s])
 }
 
 
@@ -436,7 +431,6 @@ async fn apply_strike(state: Arc<bs::BlaseballState>, log: &IngestLogger, event:
 
     let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
     state.successor(caused_by, diff).await
-        .map(|s| vec![s])
 }
 
 
@@ -464,7 +458,6 @@ async fn apply_ball(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &
 
     let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
     state.successor(caused_by, diff).await
-        .map(|s| vec![s])
 }
 
 
@@ -496,7 +489,6 @@ async fn apply_foul_ball(state: Arc<bs::BlaseballState>, log: &IngestLogger, eve
 
     let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
     state.successor(caused_by, diff).await
-        .map(|s| vec![s])
 }
 
 
@@ -509,7 +501,7 @@ async fn apply_ground_out(state: Arc<bs::BlaseballState>, log: &IngestLogger, ev
     apply_fielding_out(state, log, event, game_id).await
 }
 
-async fn apply_fielding_out(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &EventuallyEvent, game_id: &Uuid) -> Result<Vec<Arc<bs::BlaseballState>>, IngestError> {
+async fn apply_fielding_out(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &EventuallyEvent, game_id: &Uuid) -> IngestApplyResult {
     let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
 
     let top_of_inning = state.bool_at(&bs::json_path!("game", game_id.clone(), "topOfInning")).await?;
@@ -530,7 +522,6 @@ async fn apply_fielding_out(state: Arc<bs::BlaseballState>, log: &IngestLogger, 
     let diff = apply_out(out_text, log, &batter_id, event, game_id, message, play, top_of_inning, num_outs == 3).await?;
 
     state.successor(caused_by, diff).await
-        .map(|s| vec![s])
 }
 
 
@@ -573,7 +564,6 @@ async fn apply_hit(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &E
 
     let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
     state.successor(caused_by, diff_vec.into_iter()).await
-        .map(|s| vec![s])
 }
 
 async fn push_base_runner(state: &bs::BlaseballState, game_id: Uuid, runner_id: Uuid, runner_name: String, to_base: i64) -> IngestResult<impl Iterator<Item=bs::Patch>> {
@@ -653,7 +643,6 @@ async fn apply_strikeout(state: Arc<bs::BlaseballState>, log: &IngestLogger, eve
     let diff = apply_out("strikeout", log, player_id, event, game_id, message, play, top_of_inning, num_outs == 3).await?;
 
     state.successor(caused_by, diff).await
-        .map(|s| vec![s])
 }
 
 fn end_at_bat(game_id: &Uuid, top_of_inning: bool) -> impl Iterator<Item=bs::Patch> {
@@ -801,7 +790,6 @@ async fn apply_stolen_base(state: Arc<bs::BlaseballState>, log: &IngestLogger, e
 
     let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
     state.successor(caused_by, diff_vec.into_iter()).await
-        .map(|s| vec![s])
 }
 
 async fn get_baserunner(state: &BlaseballState, game_id: &Uuid, thief_uuid: &Uuid, which_base: Base) -> Result<usize, anyhow::Error> {
@@ -840,7 +828,7 @@ async fn get_baserunner(state: &BlaseballState, game_id: &Uuid, thief_uuid: &Uui
 async fn apply_walk(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: &EventuallyEvent) -> IngestApplyResult {
     log.debug("Applying Walk event".to_string()).await?;
     // TODO
-    Ok(vec![state])
+    Ok(state)
 }
 
 
@@ -882,7 +870,6 @@ async fn apply_home_run(state: Arc<bs::BlaseballState>, log: &IngestLogger, even
 
     let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
     state.successor(caused_by, diff).await
-        .map(|s| vec![s])
 }
 
 
@@ -902,7 +889,6 @@ async fn apply_storm_warning(state: Arc<bs::BlaseballState>, log: &IngestLogger,
 
     let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
     state.successor(caused_by, diff).await
-        .map(|s| vec![s])
 }
 
 
@@ -971,7 +957,6 @@ async fn apply_snowflakes(state: Arc<bs::BlaseballState>, log: &IngestLogger, ev
 
     let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
     state.successor(caused_by, diff).await
-        .map(|s| vec![s])
 }
 
 
@@ -985,5 +970,4 @@ async fn apply_player_stat_reroll(state: Arc<bs::BlaseballState>, log: &IngestLo
 
     let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
     state.successor(caused_by, diff).await
-        .map(|s| vec![s])
 }

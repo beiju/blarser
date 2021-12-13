@@ -41,7 +41,7 @@ impl IngestItem for ChronUpdate {
         self.item.valid_from
     }
 
-    async fn apply(&self, log: &IngestLogger, state: Arc<bs::BlaseballState>) -> Result<Vec<Arc<bs::BlaseballState>>, IngestError> {
+    async fn apply(&self, log: &IngestLogger, state: Arc<bs::BlaseballState>) -> Result<Arc<bs::BlaseballState>, IngestError> {
         log.info(format!("Applying chron update from {}", self.item.valid_from)).await?;
 
         let observation = bs::Observation {
@@ -61,7 +61,7 @@ impl IngestItem for ChronUpdate {
         // changes needed to be made. Filling in placeholders mutates in place and is not considered
         // a change for this purpose.
         if mismatches.is_empty() {
-            return Ok(vec![state]);
+            return Ok(state);
         }
 
         let approval_msg = stream::iter(&mismatches)
@@ -90,7 +90,7 @@ impl IngestItem for ChronUpdate {
             Err(anyhow!("Unexpected observation: {}", approval_msg))
         } else {
             let event = Arc::new(bs::Event::ImplicitChange(observation));
-            Ok(vec![state.successor(event, mismatches).await?])
+            state.successor(event, mismatches).await
         }
     }
 }

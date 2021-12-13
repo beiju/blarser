@@ -6,6 +6,7 @@ mod error;
 mod log;
 mod task;
 mod text_parser;
+mod internal_events;
 
 pub use error::{IngestError, IngestResult};
 pub use source::{BoxedIngestItem, IngestItem};
