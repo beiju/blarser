@@ -12,11 +12,11 @@ use serde::Deserialize;
 
 use crate::api::{eventually, EventuallyEvent, EventType, Weather};
 use crate::blaseball_state as bs;
-use crate::blaseball_state::ChangeType;
+use crate::blaseball_state::{BlaseballState, ChangeType};
 use crate::ingest::{IngestItem, BoxedIngestItem, IngestResult, IngestError};
 use crate::ingest::error::IngestApplyResult;
 use crate::ingest::log::IngestLogger;
-use crate::ingest::text_parser::{FieldingOutType, HitType, StrikeType, parse_fielding_out, parse_hit, parse_home_run, parse_snowfall, parse_strike, parse_strikeout};
+use crate::ingest::text_parser::{FieldingOutType, Base, StrikeType, parse_fielding_out, parse_hit, parse_home_run, parse_snowfall, parse_strike, parse_strikeout, parse_stolen_base};
 
 pub fn sources(start: &'static str) -> Vec<Box<dyn Iterator<Item=BoxedIngestItem> + Send>> {
     vec![
@@ -548,9 +548,10 @@ async fn apply_hit(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &E
     }
     let hit_type = parse_hit(&batter_name, &event.description)?;
     let hit_text = match hit_type {
-        HitType::Single => { "Single" }
-        HitType::Double => { "Double" }
-        HitType::Triple => { "Triple" }
+        Base::First => { "Single" }
+        Base::Second => { "Double" }
+        Base::Third => { "Triple" }
+        Base::Fourth => { "Quadruple" }
     };
 
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
@@ -772,10 +773,67 @@ async fn apply_fly_out(state: Arc<bs::BlaseballState>, log: &IngestLogger, event
 }
 
 
-async fn apply_stolen_base(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: &EventuallyEvent) -> IngestApplyResult {
-    log.debug("Applying StolenBase event".to_string()).await?;
-    // TODO
-    Ok(vec![state])
+async fn apply_stolen_base(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &EventuallyEvent) -> IngestApplyResult {
+    let game_id = get_one_id(&event.game_tags, "gameTags")?;
+    log.debug(format!("Applying StolenBase event for game {}", game_id)).await?;
+
+    let thief_uuid = get_one_id(&event.player_tags, "playerTags")?;
+    let thief_name = state.string_at(&bs::json_path!("player", thief_uuid.clone(), "name")).await?;
+
+    let which_base = parse_stolen_base( &thief_name, &event.description)?;
+
+    let baserunner_index = get_baserunner(&state, game_id, thief_uuid, which_base).await?;
+
+    let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
+    let message = format!("{} steals {} base!", thief_name, which_base.name());
+    let diff = common_patches(&event.metadata.siblings, game_id, message, play, true)
+        .chain([
+            bs::Patch {
+                path: bs::json_path!("game", game_id.clone(), "basesOccupied", baserunner_index),
+                change: bs::ChangeType::AddInt(1),
+            },
+        ]);
+
+    let diff_vec: Vec<_> = diff.collect();
+    for patch in &diff_vec {
+        println!("Diff: {}", patch.description(&state).await?)
+    }
+
+    let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
+    state.successor(caused_by, diff_vec.into_iter()).await
+        .map(|s| vec![s])
+}
+
+async fn get_baserunner(state: &BlaseballState, game_id: &Uuid, thief_uuid: &Uuid, which_base: Base) -> Result<usize, anyhow::Error> {
+    let baserunner_uuids: Vec<_> = stream::iter(state.array_at(&bs::json_path!("game", game_id.clone(), "baseRunners")).await?)
+        .then(|uuid_node| async {
+            uuid_node.as_uuid().await
+                .map_err(|val| anyhow!("Expected uuids in baseRunners array but found {}", val))
+        })
+        .try_collect().await?;
+    let baserunner_bases: Vec<_> = stream::iter(state.array_at(&bs::json_path!("game", game_id.clone(), "basesOccupied")).await?)
+        .then(|base_node| async {
+            base_node.as_int().await
+                .map_err(|val| anyhow!("Expected ints in basesOccupied array but found {}", val))
+        })
+        .try_collect().await?;
+
+    let possible_baserunner_indices: Vec<_> = Iterator::zip(baserunner_uuids.into_iter(), baserunner_bases.into_iter())
+        .enumerate()
+        .filter_map(|(i, (uuid, base))| {
+            if &uuid == thief_uuid && base + 1 == which_base as i64 {
+                Some(i)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    if let Some((baserunner_index, )) = possible_baserunner_indices.into_iter().collect_tuple() {
+        Ok(baserunner_index)
+    } else {
+        Err(anyhow!("Couldn't determine which baserunner advanced on base steal"))
+    }
 }
 
 

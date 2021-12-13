@@ -915,8 +915,7 @@ async fn apply_change_to_hashmap<T>(container: &mut im::HashMap<T, Node>, key: &
             container.insert(key.clone(), new_node);
         }
         ChangeType::AddInt(value) => {
-            let new_node = apply_change_increment(change.path, container.get(key), value, caused_by).await?;
-            container.insert(key.clone(), new_node);
+            apply_change_increment(change.path, container.get_mut(key), value, caused_by).await?;
         }
         ChangeType::Push(value) => {
             apply_change_push(change.path, container.get_mut(key), value, caused_by).await?;
@@ -946,8 +945,7 @@ async fn apply_change_to_vector(container: &mut im::Vector<Node>, idx: usize, ch
             container.insert(idx, new_node);
         }
         ChangeType::AddInt(value) => {
-            let new_node = apply_change_increment(change.path, container.get(idx), value, caused_by).await?;
-            container.insert(idx, new_node);
+            apply_change_increment(change.path, container.get_mut(idx), value, caused_by).await?;
         }
         ChangeType::Push(value) => {
             apply_change_push(change.path, container.get_mut(idx), value, caused_by).await?;
@@ -984,32 +982,38 @@ async fn apply_change_overwrite(path: Path, current_node: Option<&Node>, new_val
     }
 }
 
-async fn apply_change_increment(path: Path, current_node: Option<&Node>, value: i64, caused_by: Arc<Event>) -> Result<Node, ApplyChangeError> {
+async fn apply_change_increment(path: Path, current_node: Option<&mut Node>, value: i64, caused_by: Arc<Event>) -> Result<(), ApplyChangeError> {
     match current_node {
         None => {
             Err(ApplyChangeError::MissingValue(path))
         }
-        Some(Node::Primitive(primitive)) => {
-            let node = primitive.read().await;
-            let new_node = match &node.value {
-                PrimitiveValue::Int(i) => Node::primitive_successor(
-                    primitive.clone(),
-                    PrimitiveValue::Int(i + value),
-                    caused_by,
-                ),
-                PrimitiveValue::IntRange(upper, lower) => Node::primitive_successor(
-                    primitive.clone(),
-                    PrimitiveValue::IntRange(upper + 1, lower + 1),
-                    caused_by,
-                ),
-                value => {
-                    return Err(ApplyChangeError::CannotIncrement(path, value.to_string()));
+        Some(current_node) => {
+            let new_node = match current_node {
+                Node::Primitive(primitive) => {
+                    let node = primitive.read().await;
+                    let new_node = match &node.value {
+                        PrimitiveValue::Int(i) => Node::primitive_successor(
+                            primitive.clone(),
+                            PrimitiveValue::Int(i + value),
+                            caused_by,
+                        ),
+                        PrimitiveValue::IntRange(upper, lower) => Node::primitive_successor(
+                            primitive.clone(),
+                            PrimitiveValue::IntRange(upper + 1, lower + 1),
+                            caused_by,
+                        ),
+                        value => {
+                            return Err(ApplyChangeError::CannotIncrement(path, value.to_string()));
+                        }
+                    };
+                    Ok(new_node)
                 }
-            };
-            Ok(new_node)
-        }
-        Some(node) => {
-            Err(ApplyChangeError::CannotIncrement(path, node.to_string().await))
+                _ => {
+                    Err(ApplyChangeError::CannotIncrement(path, current_node.to_string().await))
+                }
+            }?;
+            *current_node = new_node;
+            Ok(())
         }
     }
 }

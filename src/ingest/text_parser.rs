@@ -12,11 +12,24 @@ pub enum StrikeType {
 }
 
 
+#[derive(Copy, Clone)]
 #[repr(i64)]
-pub enum HitType {
-    Single = 0,
-    Double = 1,
-    Triple = 2,
+pub enum Base {
+    First = 0,
+    Second = 1,
+    Third = 2,
+    Fourth = 3,
+}
+
+impl Base {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Base::First => { "first" }
+            Base::Second => { "second" }
+            Base::Third => { "third" }
+            Base::Fourth => { "fourth " }
+        }
+    }
 }
 
 pub fn parse_fielding_out<'input>(batter_name: &str, input: &'input str) -> Result<(FieldingOutType, &'input str), anyhow::Error> {
@@ -94,14 +107,14 @@ fn parse_strike_internal(input: &str) -> IResult<&str, &str, VerboseError<&str>>
     IResult::Ok((input, strike_type))
 }
 
-pub fn parse_hit(batter_name: &str, input: &str) -> Result<HitType, anyhow::Error> {
+pub fn parse_hit(batter_name: &str, input: &str) -> Result<Base, anyhow::Error> {
     let (_, hit_type) = parse_hit_internal(batter_name, input).finish()
         .map_err(|err| anyhow!("Can't parse hit: {}", err))?;
 
     let hit_type = match hit_type {
-        "Single" => HitType::Single,
-        "Double" => HitType::Double,
-        "Triple" => HitType::Triple,
+        "Single" => Base::First,
+        "Double" => Base::Second,
+        "Triple" => Base::Third,
         _ => panic!("Invalid hit type {}", hit_type)
     };
 
@@ -116,6 +129,30 @@ fn parse_hit_internal<'input>(batter_name: &str, input: &'input str) -> IResult<
     let (input, _) = eof(input)?;
 
     IResult::Ok((input, hit_type))
+}
+
+pub fn parse_stolen_base(thief_name: &str, input: &str) -> Result<Base, anyhow::Error> {
+    let (_, which_base) = parse_stolen_base_internal(thief_name, input).finish()
+        .map_err(|err| anyhow!("Can't parse stolen base: {}", err))?;
+
+    let which_base = match which_base {
+        "second" => Base::Second,
+        "third" => Base::Third,
+        "fourth" => Base::Fourth,
+        _ => panic!("Invalid stolen base type {}", which_base)
+    };
+
+    Ok(which_base)
+}
+
+fn parse_stolen_base_internal<'input>(thief_name: &str, input: &'input str) -> IResult<&'input str, &'input str, VerboseError<&'input str>> {
+    let (input, _) = tag(thief_name.as_bytes())(input)?;
+    let (input, _) = tag(" steals ")(input)?;
+    let (input, which_base) = alt((tag("second"), tag("third"), tag("fourth")))(input)?;
+    let (input, _) = tag(" base!")(input)?;
+    let (input, _) = eof(input)?;
+
+    IResult::Ok((input, which_base))
 }
 
 pub fn parse_home_run(batter_name: &str, input: &str) -> Result<i64, anyhow::Error> {
