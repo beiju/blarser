@@ -799,10 +799,27 @@ async fn get_baserunner(state: &BlaseballState, game_id: &Uuid, thief_uuid: &Uui
 }
 
 
-async fn apply_walk(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: &EventuallyEvent) -> IngestApplyResult {
-    log.debug("Applying Walk event".to_string()).await?;
-    // TODO
-    Ok(state)
+async fn apply_walk(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &EventuallyEvent) -> IngestApplyResult {
+    let game_id = get_one_id(&event.game_tags, "gameTags")?;
+    log.debug(format!("Applying Walk event for game {}", game_id)).await?;
+
+    let player_id = get_one_id(&event.player_tags, "playerTags")?;
+    let top_of_inning = state.bool_at(&bs::json_path!("game", game_id.clone(), "topOfInning")).await?;
+    let batter_id = state.uuid_at(&bs::json_path!("game", game_id.clone(), prefixed("Batter", top_of_inning))).await?;
+    let batter_name = state.string_at(&bs::json_path!("game", game_id.clone(), prefixed("BatterName", top_of_inning))).await?;
+
+    if player_id != &batter_id {
+        return Err(anyhow!("Batter id from state ({}) didn't match batter id from event ({})", batter_id, player_id));
+    }
+
+    let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
+    let message = format!("{} draws a walk.", batter_name);
+    let diff = common_patches(&event.metadata.siblings, game_id, message, play, true)
+        .chain(push_base_runner(&state, game_id.clone(), batter_id, batter_name, 0).await?)
+        .chain(end_at_bat(game_id, top_of_inning));
+
+    let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
+    state.successor(caused_by, diff).await
 }
 
 
