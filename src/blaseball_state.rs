@@ -4,6 +4,7 @@ use std::str::FromStr;
 use im;
 use uuid::Uuid;
 use std::sync::Arc;
+use anyhow::Context;
 use tokio::sync::{RwLock};
 use rocket::futures::stream::{self, StreamExt};
 use chrono::{DateTime, Utc};
@@ -67,7 +68,7 @@ pub struct PrimitiveNode {
     pub value: PrimitiveValue,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub enum PrimitiveValue {
     // Simple primitives
     Null,
@@ -521,7 +522,7 @@ impl Patch {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum ChangeType {
     // For a newly-added value with no history
     New(JsonValue),
@@ -684,7 +685,9 @@ impl BlaseballState {
         let mut new_data = self.data.clone();
 
         for patch in patches {
-            apply_change(&mut new_data, patch, caused_by.clone()).await?;
+            let context_str = format!("Error applying change {:?}", patch.change);
+            apply_change(&mut new_data, patch, caused_by.clone()).await
+                .context(context_str)?;
         }
 
         Ok(Arc::new(BlaseballState {

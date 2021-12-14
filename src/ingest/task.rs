@@ -44,7 +44,7 @@ impl IngestTask {
             match result {
                 Ok(_) => {}
                 Err(e) => {
-                    error!("{}", e.to_string());
+                    error!("{:?}", e);
                 }
             }
         });

@@ -12,9 +12,8 @@ use serde::Deserialize;
 
 use crate::api::{eventually, EventuallyEvent, EventType, Weather};
 use crate::blaseball_state as bs;
-use crate::blaseball_state::{BlaseballState, ChangeType};
-use crate::ingest::{IngestItem, BoxedIngestItem, IngestResult, IngestError};
-use crate::ingest::error::IngestApplyResult;
+use crate::blaseball_state::Patch;
+use crate::ingest::{IngestItem, BoxedIngestItem, IngestResult, IngestError, IngestApplyResult};
 use crate::ingest::log::IngestLogger;
 use crate::ingest::text_parser::{FieldingOut, Base, StrikeType, parse_simple_out, parse_hit, parse_home_run, parse_snowfall, parse_strike, parse_strikeout, parse_stolen_base, parse_complex_out};
 
@@ -484,19 +483,54 @@ async fn apply_fielding_out(state: Arc<bs::BlaseballState>, log: &IngestLogger, 
     let message = match out {
         FieldingOut::GroundOut(fielder_name) => {
             format!("{} hit a ground out to {}.", batter_name, fielder_name)
-        },
+        }
         FieldingOut::Flyout(fielder_name) => {
             format!("{} hit a flyout to {}.", batter_name, fielder_name)
-        },
+        }
         FieldingOut::FieldersChoice(runner_name, base) => {
-            format!("{} out at {} base.{} reaches on fielder's choice.", runner_name, base.name(), batter_name)
+            format!("{} out at {} base.\n{} reaches on fielder's choice.", runner_name, base.name(), batter_name)
         }
     };
 
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
     let diff = apply_out(log, &batter_id, event, game_id, message, play, top_of_inning, num_outs == 3).await?;
 
-    state.successor(caused_by, diff).await
+    if let FieldingOut::FieldersChoice(runner_name_parsed, out_at_base) = out {
+        let runner_idx = get_baserunner_with_name(&state, game_id, runner_name_parsed, out_at_base).await?;
+
+        let diff = diff
+            .chain(remove_base_runner(game_id, runner_idx))
+            .chain(push_base_runner( game_id, batter_id, batter_name, 0));
+
+        state.successor(caused_by, diff).await
+    } else {
+        state.successor(caused_by, diff).await
+    }
+}
+
+fn remove_base_runner(game_id: &Uuid, runner_idx: usize) -> impl Iterator<Item=bs::Patch> {
+    [
+        bs::Patch {
+            path: bs::json_path!("game", game_id.clone(), "baseRunners", runner_idx),
+            change: bs::ChangeType::Remove,
+        },
+        bs::Patch {
+            path: bs::json_path!("game", game_id.clone(), "baseRunnerNames", runner_idx),
+            change: bs::ChangeType::Remove,
+        },
+        bs::Patch {
+            path: bs::json_path!("game", game_id.clone(), "baseRunnerMods", runner_idx),
+            change: bs::ChangeType::Remove,
+        },
+        bs::Patch {
+            path: bs::json_path!("game", game_id.clone(), "basesOccupied", runner_idx),
+            change: bs::ChangeType::Remove,
+        },
+        bs::Patch {
+            path: bs::json_path!("game", game_id.clone(), "baserunnerCount"),
+            change: bs::ChangeType::AddInt((-1).into()),
+        },
+    ].into_iter()
 }
 
 
@@ -523,7 +557,7 @@ async fn apply_hit(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &E
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
     let message = format!("{} hits a {}!", batter_name, hit_text);
     let diff = common_patches(&event.metadata.siblings, game_id, message, play, true)
-        .chain(push_base_runner(&state, game_id.clone(), batter_id, batter_name, hit_type as i64).await?)
+        .chain(push_base_runner_and_advance(&state, game_id, batter_id, batter_name, hit_type as i64, None).await?)
         .chain(end_at_bat(game_id, top_of_inning))
         .chain([
             bs::Patch {
@@ -541,7 +575,7 @@ async fn apply_hit(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &E
     state.successor(caused_by, diff_vec.into_iter()).await
 }
 
-async fn push_base_runner(state: &bs::BlaseballState, game_id: Uuid, runner_id: Uuid, runner_name: String, to_base: i64) -> IngestResult<impl Iterator<Item=bs::Patch>> {
+async fn push_base_runner_and_advance<'a>(state: &bs::BlaseballState, game_id: &'a Uuid, runner_id: Uuid, runner_name: String, to_base: i64, ignore_runner: Option<usize>) -> IngestResult<impl Iterator<Item=bs::Patch> + 'a> {
     let existing_runners = state.array_at(&bs::json_path!("game", game_id.clone(), "basesOccupied")).await?;
     let existing_runners = stream::iter(existing_runners)
         .then(|current_base| async move {
@@ -553,41 +587,51 @@ async fn push_base_runner(state: &bs::BlaseballState, game_id: Uuid, runner_id: 
     let it = existing_runners.into_iter()
         .enumerate()
         // Advance current runners
-        .map(move |(i, current_base)| {
+        .flat_map(move |(i, current_base)| {
+            if let Some(ignored_runner) = ignore_runner {
+                if ignored_runner == i {
+                    return None;
+                }
+            }
+
             let min_base = current_base + to_base + 1;
             // I think you can only advance 1 extra base, and you can only advance to third
             // (otherwise it's a run; I'll deal with fifth base later)
             let max_base = min(min_base + 1, 2);
-            bs::Patch {
+            Some(bs::Patch {
                 path: bs::json_path!("game", game_id.clone(), "basesOccupied", i),
-                change: ChangeType::Set(bs::PrimitiveValue::IntRange(min_base, max_base)),
-            }
+                change: bs::ChangeType::Set(bs::PrimitiveValue::IntRange(min_base, max_base)),
+            })
         })
-        .chain([
-            bs::Patch {
-                path: bs::json_path!("game", game_id.clone(), "basesOccupied"),
-                change: bs::ChangeType::Push(to_base.into()),
-            },
-            bs::Patch {
-                path: bs::json_path!("game", game_id.clone(), "baseRunners"),
-                change: bs::ChangeType::Push(runner_id.to_string().into()),
-            },
-            bs::Patch {
-                path: bs::json_path!("game", game_id.clone(), "baseRunnerNames"),
-                change: bs::ChangeType::Push(runner_name.into()),
-            },
-            // Will implement this properly whenever it becomes relevant
-            bs::Patch {
-                path: bs::json_path!("game", game_id.clone(), "baseRunnerMods"),
-                change: bs::ChangeType::Push("".into()),
-            },
-            bs::Patch {
-                path: bs::json_path!("game", game_id.clone(), "baserunnerCount"),
-                change: bs::ChangeType::AddInt(1),
-            },
-        ]);
+        .chain(push_base_runner(game_id, runner_id, runner_name, to_base));
 
     Ok(it)
+}
+
+fn push_base_runner(game_id: &Uuid, runner_id: Uuid, runner_name: String, to_base: i64) -> impl Iterator<Item=bs::Patch> {
+    [
+        bs::Patch {
+            path: bs::json_path!("game", game_id.clone(), "basesOccupied"),
+            change: bs::ChangeType::Push(to_base.into()),
+        },
+        bs::Patch {
+            path: bs::json_path!("game", game_id.clone(), "baseRunners"),
+            change: bs::ChangeType::Push(runner_id.to_string().into()),
+        },
+        bs::Patch {
+            path: bs::json_path!("game", game_id.clone(), "baseRunnerNames"),
+            change: bs::ChangeType::Push(runner_name.into()),
+        },
+        // Will implement this properly whenever it becomes relevant
+        bs::Patch {
+            path: bs::json_path!("game", game_id.clone(), "baseRunnerMods"),
+            change: bs::ChangeType::Push("".into()),
+        },
+        bs::Patch {
+            path: bs::json_path!("game", game_id.clone(), "baserunnerCount"),
+            change: bs::ChangeType::AddInt(1),
+        },
+    ].into_iter()
 }
 
 
@@ -745,7 +789,7 @@ async fn apply_stolen_base(state: Arc<bs::BlaseballState>, log: &IngestLogger, e
 
     let which_base = parse_stolen_base(&thief_name, &event.description)?;
 
-    let baserunner_index = get_baserunner(&state, game_id, thief_uuid, which_base).await?;
+    let baserunner_index = get_baserunner_with_uuid(&state, game_id, thief_uuid, which_base).await?;
 
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
     let message = format!("{} steals {} base!", thief_name, which_base.name());
@@ -766,13 +810,21 @@ async fn apply_stolen_base(state: Arc<bs::BlaseballState>, log: &IngestLogger, e
     state.successor(caused_by, diff_vec.into_iter()).await
 }
 
-async fn get_baserunner(state: &BlaseballState, game_id: &Uuid, thief_uuid: &Uuid, which_base: Base) -> Result<usize, anyhow::Error> {
+async fn get_baserunner_with_uuid(state: &bs::BlaseballState, game_id: &Uuid, expected_uuid: &Uuid, which_base: Base) -> Result<usize, anyhow::Error> {
     let baserunner_uuids: Vec<_> = stream::iter(state.array_at(&bs::json_path!("game", game_id.clone(), "baseRunners")).await?)
         .then(|uuid_node| async {
             uuid_node.as_uuid().await
                 .map_err(|val| anyhow!("Expected uuids in baseRunners array but found {}", val))
         })
         .try_collect().await?;
+
+    get_baserunner_with_property(state, &game_id, expected_uuid, which_base, baserunner_uuids).await?
+        .ok_or_else(|| anyhow!("Couldn't find baserunner with uuid {} on {} base", expected_uuid, which_base.name()))
+}
+
+async fn get_baserunner_with_property<T: ?Sized, U: std::cmp::PartialEq<T>>(
+    state: &bs::BlaseballState, game_id: &Uuid, expected_property: &T, which_base: Base, baserunner_properties: Vec<U>,
+) -> IngestResult<Option<usize>> {
     let baserunner_bases: Vec<_> = stream::iter(state.array_at(&bs::json_path!("game", game_id.clone(), "basesOccupied")).await?)
         .then(|base_node| async {
             base_node.as_int().await
@@ -780,10 +832,10 @@ async fn get_baserunner(state: &BlaseballState, game_id: &Uuid, thief_uuid: &Uui
         })
         .try_collect().await?;
 
-    let possible_baserunner_indices: Vec<_> = Iterator::zip(baserunner_uuids.into_iter(), baserunner_bases.into_iter())
+    let possible_baserunner_indices: Vec<_> = Iterator::zip(baserunner_properties.into_iter(), baserunner_bases.into_iter())
         .enumerate()
-        .filter_map(|(i, (uuid, base))| {
-            if &uuid == thief_uuid && base + 1 == which_base as i64 {
+        .filter_map(|(i, (name, base))| {
+            if &name == expected_property && base + 1 == which_base as i64 {
                 Some(i)
             } else {
                 None
@@ -792,10 +844,22 @@ async fn get_baserunner(state: &BlaseballState, game_id: &Uuid, thief_uuid: &Uui
         .collect();
 
     if let Some((baserunner_index, )) = possible_baserunner_indices.into_iter().collect_tuple() {
-        Ok(baserunner_index)
+        Ok(Some(baserunner_index))
     } else {
-        Err(anyhow!("Couldn't determine which baserunner advanced on base steal"))
+        Ok(None)
     }
+}
+
+async fn get_baserunner_with_name(state: &bs::BlaseballState, game_id: &Uuid, expected_name: &str, base_plus_one: Base) -> Result<usize, anyhow::Error> {
+    let baserunner_names: Vec<_> = stream::iter(state.array_at(&bs::json_path!("game", game_id.clone(), "baseRunnerNames")).await?)
+        .then(|name_node| async {
+            name_node.as_string().await
+                .map_err(|val| anyhow!("Expected strings in baseRunnerNames array but found {}", val))
+        })
+        .try_collect().await?;
+
+    get_baserunner_with_property(state, &game_id, expected_name, base_plus_one, baserunner_names).await?
+        .ok_or_else(|| anyhow!("Couldn't find baserunner with name {} on {} base", expected_name, base_plus_one.name()))
 }
 
 
@@ -815,7 +879,7 @@ async fn apply_walk(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
     let message = format!("{} draws a walk.", batter_name);
     let diff = common_patches(&event.metadata.siblings, game_id, message, play, true)
-        .chain(push_base_runner(&state, game_id.clone(), batter_id, batter_name, 0).await?)
+        .chain(push_base_runner_and_advance(&state, game_id, batter_id, batter_name, 0, None).await?)
         .chain(end_at_bat(game_id, top_of_inning));
 
     let caused_by = Arc::new(bs::Event::FeedEvent(event.id));

@@ -8,6 +8,6 @@ mod task;
 mod text_parser;
 mod internal_events;
 
-pub use error::{IngestError, IngestResult};
+pub use error::{IngestError, IngestResult, IngestApplyResult};
 pub use source::{BoxedIngestItem, IngestItem};
 pub use task::IngestTask;

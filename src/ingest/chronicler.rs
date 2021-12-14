@@ -273,7 +273,7 @@ async fn observe_primitive_internal(log: &IngestLogger, node: &Node, observed: &
         if match_observation(log, &mut primitive, &observed).await? {
             if let None = primitive.observed_by {
                 primitive.observed_by = Some(observation.clone());
-                log.info(format!("Observed expected value at {}", path)).await?
+                // log.info(format!("Observed expected value at {}", path)).await?
             }
             Ok(None)
         } else {
