@@ -1,14 +1,25 @@
 use anyhow::anyhow;
 use nom::{IResult, error::VerboseError, bytes::complete::{tag, take_until}, character::complete::digit1, branch::alt, combinator::eof, Finish};
 
-pub enum FieldingOutType {
-    Flyout,
-    GroundOut,
+pub enum FieldingOut<'a> {
+    Flyout(&'a str),
+    GroundOut(&'a str),
+    FieldersChoice(&'a str, Base),
 }
 
 pub enum StrikeType {
     Swinging,
     Looking,
+}
+
+impl StrikeType {
+    fn from_string(name: &str) -> Self {
+        match name {
+            "swinging" => { StrikeType::Swinging }
+            "looking" => { StrikeType::Looking }
+            _ => { panic!("Invalid strike type {}", name) }
+        }
+    }
 }
 
 
@@ -27,75 +38,111 @@ impl Base {
             Base::First => { "first" }
             Base::Second => { "second" }
             Base::Third => { "third" }
-            Base::Fourth => { "fourth " }
+            Base::Fourth => { "fourth" }
+        }
+    }
+
+    pub fn from_string(base_name: &str) -> Self {
+        match base_name {
+            "first" => { Base::First }
+            "second" => { Base::Second }
+            "third" => { Base::Third }
+            "fourth" => { Base::Fourth }
+            _ => { panic!("Invalid base name {}", base_name) }
+        }
+    }
+
+    pub fn from_hit(hit_name: &str) -> Self {
+        match hit_name {
+            "Single" => Base::First,
+            "Double" => Base::Second,
+            "Triple" => Base::Third,
+            "Quadruple" => Base::Fourth,
+            _ => panic!("Invalid hit type {}", hit_name)
         }
     }
 }
 
-pub fn parse_fielding_out<'input>(batter_name: &str, input: &'input str) -> Result<(FieldingOutType, &'input str), anyhow::Error> {
-    let (_, (out_type, fielder_name)) = parse_fielding_out_internal(batter_name, input).finish()
-        .map_err(|err| anyhow!("Can't parse fielding out: {}", err))?;
-
-    let out_type = match out_type {
-        "flyout" => FieldingOutType::Flyout,
-        "ground out" => FieldingOutType::GroundOut,
-        _ => panic!("Invalid ground out type {}", out_type)
-    };
-
-    Ok((out_type, fielder_name))
+pub fn parse_fielding_out<'input>(batter_name: &'input str, input: &'input str) -> Result<FieldingOut<'input>, anyhow::Error> {
+    alt((
+        simple_out(batter_name),
+        fielders_choice(batter_name),
+    ))(input)
+        .finish()
+        .map_err(|err| anyhow!("Couldn't parse fielding out: {}", err))
+        .map(|(_, result)| result)
 }
 
-fn parse_fielding_out_internal<'input>(batter_name: &str, input: &'input str) -> IResult<&'input str, (&'input str, &'input str), VerboseError<&'input str>> {
-    let (input, _) = tag(batter_name.as_bytes())(input)?;
-    let (input, _) = tag(" hit a ")(input)?;
-    let (input, out_type) = alt((tag("flyout"), tag("ground out")))(input)?;
-    let (input, _) = tag(" to ")(input)?;
-    let (input, fielder_name) = take_until(".")(input)?;
-    let (input, _) = tag(".")(input)?;
-    let (input, _) = eof(input)?;
+fn simple_out<'i>(batter_name: &'i str) -> impl Fn(&'i str) -> IResult<&'i str, FieldingOut, VerboseError<&'i str>> {
+    |input| {
+        let (input, _) = tag(batter_name.as_bytes())(input)?;
+        let (input, _) = tag(" hit a ")(input)?;
+        let (input, out_type) = alt((tag("flyout"), tag("ground out")))(input)?;
+        let (input, _) = tag(" to ")(input)?;
+        let (input, fielder_name) = take_until(".")(input)?;
+        let (input, _) = tag(".")(input)?;
+        let (input, _) = eof(input)?;
 
-    IResult::Ok((input, (out_type, fielder_name)))
+        let out = match out_type {
+            "flyout" => FieldingOut::Flyout(fielder_name),
+            "ground out" => FieldingOut::GroundOut(fielder_name),
+            _ => panic!("Invalid fielding out type")
+        };
+
+        Ok((input, out))
+    }
+}
+
+fn fielders_choice<'i>(batter_name: &'i str) -> impl Fn(&'i str) -> IResult<&'i str, FieldingOut, VerboseError<&'i str>> {
+    |input| {
+        let (input, runner_name) = take_until(" out at ")(input)?;
+        let (input, _) = tag(" out at ")(input)?;
+        let (input, base) = parse_base(input)?;
+        let (input, _) = tag(" base.\n")(input)?;
+        let (input, _) = tag(batter_name.as_bytes())(input)?;
+        let (input, _) = tag(" reaches on fielder's choice.")(input)?;
+        let (input, _) = eof(input)?;
+
+        let out = FieldingOut::FieldersChoice(runner_name, base);
+
+        Ok((input, out))
+    }
 }
 
 pub fn parse_strikeout(batter_name: &str, input: &str) -> Result<StrikeType, anyhow::Error> {
-    let (_, out_type) = parse_strikeout_internal(batter_name, input).finish()
-        .map_err(|err| anyhow!("Can't parse strikeout: {}", err))?;
-
-
-    let out_type = match out_type {
-        "swinging" => StrikeType::Swinging,
-        "looking" => StrikeType::Looking,
-        _ => panic!("Invalid strikeout type {}", out_type)
-    };
-
-    Ok(out_type)
+    strikeout(batter_name)(input)
+        .finish()
+        .map_err(|err| anyhow!("Couldn't parse strikeout: {}", err))
+        .map(|(_, result)| result)
 }
 
-fn parse_strikeout_internal<'input>(batter_name: &str, input: &'input str) -> IResult<&'input str, &'input str, VerboseError<&'input str>> {
-    let (input, _) = tag(batter_name.as_bytes())(input)?;
-    let (input, _) = tag(" strikes out ")(input)?;
-    let (input, out_type) = alt((tag("looking"), tag("swinging")))(input)?;
-    let (input, _) = tag(".")(input)?;
-    let (input, _) = eof(input)?;
+fn strikeout(batter_name: &str) -> impl Fn(&str) -> IResult<&str, StrikeType, VerboseError<&str>> + '_ {
+    |input| {
+        let (input, _) = tag(batter_name.as_bytes())(input)?;
+        let (input, _) = tag(" strikes out ")(input)?;
+        let (input, out_type) = strike_type(input)?;
+        let (input, _) = tag(".")(input)?;
+        let (input, _) = eof(input)?;
 
-    IResult::Ok((input, out_type))
+        IResult::Ok((input, out_type))
+    }
+}
+
+fn strike_type(input: &str) -> IResult<&str, StrikeType, VerboseError<&str>> {
+    let (input, strike_type_name) = alt((tag("looking"), tag("swinging")))(input)?;
+
+    IResult::Ok((input, StrikeType::from_string(strike_type_name)))
 }
 
 pub fn parse_strike(input: &str) -> Result<StrikeType, anyhow::Error> {
-    let (_, strike_type) = parse_strike_internal(input).finish()
-        .map_err(|err| anyhow!("Can't parse strike: {}", err))?;
-
-
-    let strike_type = match strike_type {
-        "swinging" => StrikeType::Swinging,
-        "looking" => StrikeType::Looking,
-        _ => panic!("Invalid strike type {}", strike_type)
-    };
-
-    Ok(strike_type)
+    strike(input)
+        .finish()
+        .map_err(|err| anyhow!("Couldn't parse strike: {}", err))
+        .map(|(_, result)| result)
 }
 
-fn parse_strike_internal(input: &str) -> IResult<&str, &str, VerboseError<&str>> {
+
+fn strike(input: &str) -> IResult<&str, StrikeType, VerboseError<&str>> {
     let (input, _) = tag("Strike, ")(input)?;
     let (input, strike_type) = alt((tag("looking"), tag("swinging")))(input)?;
     let (input, _) = tag(". ")(input)?;
@@ -104,98 +151,111 @@ fn parse_strike_internal(input: &str) -> IResult<&str, &str, VerboseError<&str>>
     let (input, _) = digit1(input)?;
     let (input, _) = eof(input)?;
 
-    IResult::Ok((input, strike_type))
+    IResult::Ok((input, StrikeType::from_string(strike_type)))
 }
+
 
 pub fn parse_hit(batter_name: &str, input: &str) -> Result<Base, anyhow::Error> {
-    let (_, hit_type) = parse_hit_internal(batter_name, input).finish()
-        .map_err(|err| anyhow!("Can't parse hit: {}", err))?;
-
-    let hit_type = match hit_type {
-        "Single" => Base::First,
-        "Double" => Base::Second,
-        "Triple" => Base::Third,
-        _ => panic!("Invalid hit type {}", hit_type)
-    };
-
-    Ok(hit_type)
+    hit(batter_name)(input)
+        .finish()
+        .map_err(|err| anyhow!("Couldn't parse hit: {}", err))
+        .map(|(_, result)| result)
 }
 
-fn parse_hit_internal<'input>(batter_name: &str, input: &'input str) -> IResult<&'input str, &'input str, VerboseError<&'input str>> {
-    let (input, _) = tag(batter_name.as_bytes())(input)?;
-    let (input, _) = tag(" hits a ")(input)?;
-    let (input, hit_type) = alt((tag("Single"), tag("Double"), tag("Triple")))(input)?;
-    let (input, _) = tag("!")(input)?;
-    let (input, _) = eof(input)?;
+fn hit(batter_name: &str) -> impl Fn(&str) -> IResult<&str, Base, VerboseError<&str>> + '_ {
+    |input| {
+        let (input, _) = tag(batter_name.as_bytes())(input)?;
+        let (input, _) = tag(" hits a ")(input)?;
+        let (input, base) = hit_base(input)?;
+        let (input, _) = tag("!")(input)?;
+        let (input, _) = eof(input)?;
 
-    IResult::Ok((input, hit_type))
+        IResult::Ok((input, base))
+    }
+}
+
+fn hit_base(input: &str) -> IResult<&str, Base, VerboseError<&str>> {
+    let (input, hit_name) = alt((tag("Single"), tag("Double"), tag("Triple")))(input)?;
+
+    IResult::Ok((input, Base::from_hit(hit_name)))
 }
 
 pub fn parse_stolen_base(thief_name: &str, input: &str) -> Result<Base, anyhow::Error> {
-    let (_, which_base) = parse_stolen_base_internal(thief_name, input).finish()
-        .map_err(|err| anyhow!("Can't parse stolen base: {}", err))?;
-
-    let which_base = match which_base {
-        "second" => Base::Second,
-        "third" => Base::Third,
-        "fourth" => Base::Fourth,
-        _ => panic!("Invalid stolen base type {}", which_base)
-    };
-
-    Ok(which_base)
+    stolen_base(thief_name)(input)
+        .finish()
+        .map_err(|err| anyhow!("Couldn't parse stolen base: {}", err))
+        .map(|(_, result)| result)
 }
 
-fn parse_stolen_base_internal<'input>(thief_name: &str, input: &'input str) -> IResult<&'input str, &'input str, VerboseError<&'input str>> {
-    let (input, _) = tag(thief_name.as_bytes())(input)?;
-    let (input, _) = tag(" steals ")(input)?;
-    let (input, which_base) = alt((tag("second"), tag("third"), tag("fourth")))(input)?;
-    let (input, _) = tag(" base!")(input)?;
-    let (input, _) = eof(input)?;
+fn stolen_base(thief_name: &str) -> impl Fn(&str) -> IResult<&str, Base, VerboseError<&str>> + '_ {
+    |input| {
+        let (input, _) = tag(thief_name.as_bytes())(input)?;
+        let (input, _) = tag(" steals ")(input)?;
+        let (input, which_base) = parse_base(input)?;
+        let (input, _) = tag(" base!")(input)?;
+        let (input, _) = eof(input)?;
 
-    IResult::Ok((input, which_base))
+        IResult::Ok((input, which_base))
+    }
+}
+
+fn parse_base(input: &str) -> IResult<&str, Base, VerboseError<&str>> {
+    let (input, base_name) = alt((tag("first"), tag("second"), tag("third"), tag("fourth")))(input)?;
+
+    IResult::Ok((input, Base::from_string(base_name)))
 }
 
 pub fn parse_home_run(batter_name: &str, input: &str) -> Result<i64, anyhow::Error> {
-    let (_, home_run_type) = parse_home_run_internal(batter_name, input).finish()
-        .map_err(|err| anyhow!("Can't parse home_run: {}", err))?;
+    home_run(batter_name)(input)
+        .finish()
+        .map_err(|err| anyhow!("Couldn't parse home run: {}", err))
+        .map(|(_, result)| result)
+}
 
-    let home_run_score = match home_run_type {
+fn home_run(batter_name: &str) -> impl Fn(&str) -> IResult<&str, i64, VerboseError<&str>> + '_ {
+    |input| {
+        let (input, _) = tag(batter_name.as_bytes())(input)?;
+        let (input, _) = tag(" hits a ")(input)?;
+        let (input, home_run_type) = home_run_type(input)?;
+        let (input, _) = tag(" home run!")(input)?;
+        let (input, _) = eof(input)?;
+
+        IResult::Ok((input, home_run_type))
+    }
+}
+
+fn home_run_type(input: &str) -> IResult<&str, i64, VerboseError<&str>> {
+    let (input, home_run_type_name) = alt((tag("solo"), tag("2-run"), tag("3-run"), tag("4-run")))(input)?;
+
+    let result = match home_run_type_name {
         "solo" => 1,
         "2-run" => 2,
         "3-run" => 3,
         "4-run" => 4,
-        _ => panic!("Invalid home_run type {}", home_run_type)
+        _ => panic!("Invalid home_run type {}", home_run_type_name)
     };
 
-    Ok(home_run_score)
-}
-
-fn parse_home_run_internal<'input>(batter_name: &str, input: &'input str) -> IResult<&'input str, &'input str, VerboseError<&'input str>> {
-    let (input, _) = tag(batter_name.as_bytes())(input)?;
-    let (input, _) = tag(" hits a ")(input)?;
-    let (input, home_run_type) = alt((tag("solo"), tag("2-run"), tag("3-run")))(input)?;
-    let (input, _) = tag(" home run!")(input)?;
-    let (input, _) = eof(input)?;
-
-    IResult::Ok((input, home_run_type))
+    IResult::Ok((input, result))
 }
 
 pub fn parse_snowfall(input: &str) -> Result<(i32, &str), anyhow::Error> {
-    let (_, (num_snowflakes, modified_type)) = parse_snowfall_internal(input).finish()
-        .map_err(|err| anyhow!("Can't parse snowfall: {}", err))?;
-
-    let num_snowflakes = num_snowflakes.parse()
-        .map_err(|err| anyhow!("Can't parse number of snowflakes: {:?}", err))?;
-
-    Ok((num_snowflakes, modified_type))
+    snowfall(input)
+        .finish()
+        .map_err(|err| anyhow!("Couldn't parse snowfall: {}", err))
+        .map(|(_, result)| result)
 }
 
-fn parse_snowfall_internal(input: &str) -> IResult<&str, (&str, &str), VerboseError<&str>> {
+fn snowfall(input: &str) -> IResult<&str, (i32, &str), VerboseError<&str>> {
     let (input, num_snowflakes) = digit1(input)?;
     let (input, _) = tag(" Snowflakes ")(input)?;
     let (input, modified_type) = alt((tag("slightly modified"), tag("modified"), tag("heavily modified")))(input)?;
     let (input, _) = tag(" the field!")(input)?;
     let (input, _) = eof(input)?;
+
+
+    let num_snowflakes: i32 = num_snowflakes.parse()
+        .expect("Can't parse number of snowflakes: {}");
+
 
     IResult::Ok((input, (num_snowflakes, modified_type)))
 }

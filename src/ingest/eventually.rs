@@ -16,7 +16,7 @@ use crate::blaseball_state::{BlaseballState, ChangeType};
 use crate::ingest::{IngestItem, BoxedIngestItem, IngestResult, IngestError};
 use crate::ingest::error::IngestApplyResult;
 use crate::ingest::log::IngestLogger;
-use crate::ingest::text_parser::{FieldingOutType, Base, StrikeType, parse_fielding_out, parse_hit, parse_home_run, parse_snowfall, parse_strike, parse_strikeout, parse_stolen_base};
+use crate::ingest::text_parser::{FieldingOut, Base, StrikeType, parse_fielding_out, parse_hit, parse_home_run, parse_snowfall, parse_strike, parse_strikeout, parse_stolen_base};
 
 pub fn sources(start: &'static str) -> Vec<Box<dyn Iterator<Item=BoxedIngestItem> + Send>> {
     vec![
@@ -474,18 +474,22 @@ async fn apply_fielding_out(state: Arc<bs::BlaseballState>, log: &IngestLogger, 
     let batter_id = state.uuid_at(&bs::json_path!("game", game_id.clone(), prefixed("Batter", top_of_inning))).await?;
     let batter_name = state.string_at(&bs::json_path!("game", game_id.clone(), prefixed("BatterName", top_of_inning))).await?;
     let num_outs = 1 + state.int_at(&bs::json_path!("game", game_id.clone(), "halfInningOuts")).await?;
-    let (out_type, fielder_name) = parse_fielding_out(&batter_name, &event.description)
-        .map_err(|err| anyhow!("Error parsing ground out: {}", err))?;
-    log.debug(format!("Ground out was hit to {}", fielder_name)).await?;
+    let out = parse_fielding_out(&batter_name, &event.description)?;
 
-    let out_text = match out_type {
-        FieldingOutType::GroundOut => "ground out",
-        FieldingOutType::Flyout => "flyout",
+    let message = match out {
+        FieldingOut::GroundOut(fielder_name) => {
+            format!("{} hit a ground out to {}.", batter_name, fielder_name)
+        },
+        FieldingOut::Flyout(fielder_name) => {
+            format!("{} hit a flyout to {}.", batter_name, fielder_name)
+        },
+        FieldingOut::FieldersChoice(runner_name, base) => {
+            format!("{} out at {} base.{} reaches on fielder's choice.", runner_name, base.name(), batter_name)
+        }
     };
 
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
-    let message = format!("{} hit a {} to {}.", batter_name, out_text, fielder_name);
-    let diff = apply_out(out_text, log, &batter_id, event, game_id, message, play, top_of_inning, num_outs == 3).await?;
+    let diff = apply_out(log, &batter_id, event, game_id, message, play, top_of_inning, num_outs == 3).await?;
 
     state.successor(caused_by, diff).await
 }
@@ -606,7 +610,7 @@ async fn apply_strikeout(state: Arc<bs::BlaseballState>, log: &IngestLogger, eve
 
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
     let message = format!("{} strikes out {}.", batter_name, strike_text);
-    let diff = apply_out("strikeout", log, player_id, event, game_id, message, play, top_of_inning, num_outs == 3).await?;
+    let diff = apply_out(log, player_id, event, game_id, message, play, top_of_inning, num_outs == 3).await?;
 
     state.successor(caused_by, diff).await
 }
@@ -662,7 +666,6 @@ fn score_runs(game_id: &Uuid, top_of_inning: bool, num_runs: i64, source_name: &
 }
 
 fn apply_out<'a>(
-    out_type: &'static str,
     log: &'a IngestLogger,
     player_id: &'a Uuid,
     event: &'a EventuallyEvent,
@@ -673,7 +676,7 @@ fn apply_out<'a>(
     end_of_inning: bool,
 ) -> impl Future<Output=Result<impl Iterator<Item=bs::Patch>, IngestError>> + 'a {
     async move {
-        log.info(format!("Observed {} by {}. Zeroing consecutiveHits", out_type, player_id)).await?;
+        log.info(format!("Observed out by {}. Zeroing consecutiveHits", player_id)).await?;
 
         let diff = common_patches(&event.metadata.siblings, game_id, message, play, true)
             .chain(end_at_bat(game_id, top_of_inning))
