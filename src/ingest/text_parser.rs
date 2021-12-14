@@ -63,13 +63,10 @@ impl Base {
     }
 }
 
-pub fn parse_fielding_out<'input>(batter_name: &'input str, input: &'input str) -> Result<FieldingOut<'input>, anyhow::Error> {
-    alt((
-        simple_out(batter_name),
-        fielders_choice(batter_name),
-    ))(input)
+pub fn parse_simple_out<'input>(batter_name: &'input str, input: &'input str) -> Result<FieldingOut<'input>, anyhow::Error> {
+    simple_out(batter_name)(input)
         .finish()
-        .map_err(|err| anyhow!("Couldn't parse fielding out: {}", err))
+        .map_err(|err| anyhow!("Couldn't parse simple fielding out: {}", err))
         .map(|(_, result)| result)
 }
 
@@ -93,19 +90,28 @@ fn simple_out<'i>(batter_name: &'i str) -> impl Fn(&'i str) -> IResult<&'i str, 
     }
 }
 
-fn fielders_choice<'i>(batter_name: &'i str) -> impl Fn(&'i str) -> IResult<&'i str, FieldingOut, VerboseError<&'i str>> {
-    |input| {
-        let (input, runner_name) = take_until(" out at ")(input)?;
-        let (input, _) = tag(" out at ")(input)?;
-        let (input, base) = parse_base(input)?;
-        let (input, _) = tag(" base.\n")(input)?;
-        let (input, _) = tag(batter_name.as_bytes())(input)?;
-        let (input, _) = tag(" reaches on fielder's choice.")(input)?;
-        let (input, _) = eof(input)?;
+pub fn parse_complex_out<'input>(batter_name: &'input str, input1: &'input str, input2: &'input str) -> Result<FieldingOut<'input>, anyhow::Error> {
+    fielders_choice(batter_name)((input1, input2))
+        .finish()
+        .map_err(|err| anyhow!("Couldn't parse complex fielding out: {}", err))
+        .map(|(_, result)| result)
+}
+
+fn fielders_choice<'i>(batter_name: &'i str) -> impl Fn((&'i str, &'i str)) -> IResult<(&'i str, &'i str), FieldingOut, VerboseError<&'i str>> {
+    |(input1, input2)| {
+        let (input1, runner_name) = take_until(" out at ")(input1)?;
+        let (input1, _) = tag(" out at ")(input1)?;
+        let (input1, base) = parse_base(input1)?;
+        let (input1, _) = tag(" base.")(input1)?;
+        let (input1, _) = eof(input1)?;
+
+        let (input2, _) = tag(batter_name.as_bytes())(input2)?;
+        let (input2, _) = tag(" reaches on fielder's choice.")(input2)?;
+        let (input2, _) = eof(input2)?;
 
         let out = FieldingOut::FieldersChoice(runner_name, base);
 
-        Ok((input, out))
+        Ok(((input1, input2), out))
     }
 }
 

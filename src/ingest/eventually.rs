@@ -16,7 +16,7 @@ use crate::blaseball_state::{BlaseballState, ChangeType};
 use crate::ingest::{IngestItem, BoxedIngestItem, IngestResult, IngestError};
 use crate::ingest::error::IngestApplyResult;
 use crate::ingest::log::IngestLogger;
-use crate::ingest::text_parser::{FieldingOut, Base, StrikeType, parse_fielding_out, parse_hit, parse_home_run, parse_snowfall, parse_strike, parse_strikeout, parse_stolen_base};
+use crate::ingest::text_parser::{FieldingOut, Base, StrikeType, parse_simple_out, parse_hit, parse_home_run, parse_snowfall, parse_strike, parse_strikeout, parse_stolen_base, parse_complex_out};
 
 pub fn sources(start: &'static str) -> Vec<Box<dyn Iterator<Item=BoxedIngestItem> + Send>> {
     vec![
@@ -474,7 +474,12 @@ async fn apply_fielding_out(state: Arc<bs::BlaseballState>, log: &IngestLogger, 
     let batter_id = state.uuid_at(&bs::json_path!("game", game_id.clone(), prefixed("Batter", top_of_inning))).await?;
     let batter_name = state.string_at(&bs::json_path!("game", game_id.clone(), prefixed("BatterName", top_of_inning))).await?;
     let num_outs = 1 + state.int_at(&bs::json_path!("game", game_id.clone(), "halfInningOuts")).await?;
-    let out = parse_fielding_out(&batter_name, &event.description)?;
+    let siblings = &event.metadata.siblings;
+    let out = match siblings.len() {
+        1 => parse_simple_out(&batter_name, &siblings[0].description),
+        2 => parse_complex_out(&batter_name, &siblings[0].description, &siblings[1].description),
+        more => Err(anyhow!("Unexpected fielding out with {} siblings", more))
+    }?;
 
     let message = match out {
         FieldingOut::GroundOut(fielder_name) => {
