@@ -38,9 +38,22 @@ pub fn events(start: &'static str) -> impl Iterator<Item=EventuallyEvent> {
 
             event.metadata.siblings.sort_by_key(|event| id_order.get(&event.id).unwrap());
 
-            info!("Yielding event {} from {}", event.description, event.created);
+            // Parents don't always end up being the first item
+            let parent_event = if let Some(first_sibling) = event.metadata.siblings.first() {
+                if first_sibling.id != event.id {
+                    let mut parent_event = first_sibling.clone();
+                    parent_event.metadata.siblings = event.metadata.siblings;
+                    parent_event
+                } else {
+                    event
+                }
+            } else {
+                event
+            };
+
+            info!("Yielding event {} from {}", parent_event.description, parent_event.created);
             // Double-option because the outer layer is used by `scan` to terminate the iterator
-            Some(Some(event))
+            Some(Some(parent_event))
         })
         .flatten()
 }

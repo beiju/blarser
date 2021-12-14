@@ -1,7 +1,7 @@
 use std::cmp::min;
 use std::future::Future;
 use std::sync::Arc;
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use rocket::async_trait;
 use chrono::{DateTime, Utc};
 use futures::{stream, StreamExt, TryStreamExt};
@@ -31,7 +31,8 @@ impl IngestItem for EventuallyEvent {
     }
 
     async fn apply(&self, log: &IngestLogger, state: Arc<bs::BlaseballState>) -> IngestApplyResult {
-        log.debug(format!("Applying Feed event {} from {}: \"{}\"", self.id, self.created, self.description)).await?;
+        let apply_log = format!("Applying Feed event {} from {}: \"{}\"", self.id, self.created, self.description);
+        log.debug(apply_log.clone()).await?;
 
         let result = match self.r#type {
             EventType::BigDeal => apply_big_deal(state, log, self).await,
@@ -57,7 +58,7 @@ impl IngestItem for EventuallyEvent {
 
         log.increment_parsed_events().await?;
 
-        result
+        result.context(apply_log)
     }
 }
 
