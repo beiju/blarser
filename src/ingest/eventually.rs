@@ -772,6 +772,26 @@ fn apply_out<'a>(
                     path: bs::json_path!("game", game_id.clone(), "phase"),
                     change: bs::ChangeType::Set(3.into()),
                 },
+                bs::Patch {
+                    path: bs::json_path!("game", game_id.clone(), "baseRunners"),
+                    change: bs::ChangeType::Overwrite(json!([])),
+                },
+                bs::Patch {
+                    path: bs::json_path!("game", game_id.clone(), "baseRunnerNames"),
+                    change: bs::ChangeType::Overwrite(json!([])),
+                },
+                bs::Patch {
+                    path: bs::json_path!("game", game_id.clone(), "baseRunnerMods"),
+                    change: bs::ChangeType::Overwrite(json!([])),
+                },
+                bs::Patch {
+                    path: bs::json_path!("game", game_id.clone(), "basesOccupied"),
+                    change: bs::ChangeType::Overwrite(json!([])),
+                },
+                bs::Patch {
+                    path: bs::json_path!("game", game_id.clone(), "baserunnerCount"),
+                    change: bs::ChangeType::Set(0.into()),
+                },
             ])
         } else {
             diff.chain(vec![
