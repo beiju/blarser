@@ -38,7 +38,7 @@ impl IngestItem for StartSeasonItem {
         let diffs = get_diffs(&state, entity_set).await?;
 
         let caused_by = Arc::new(bs::Event::TimedChange(self.at_time));
-        state.successor(caused_by, diffs).await
+        state.diff_successor(caused_by, diffs).await
     }
 }
 

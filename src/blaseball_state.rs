@@ -1,16 +1,17 @@
 use std::fmt::{Debug, Display, Formatter};
 use std::iter;
+use std::ops::{Deref, DerefMut};
 use std::str::FromStr;
 use im;
 use uuid::Uuid;
 use std::sync::Arc;
 use anyhow::Context;
-use tokio::sync::{RwLock};
+use tokio::sync::RwLock;
 use rocket::futures::stream::{self, StreamExt};
 use chrono::{DateTime, Utc};
 use serde_json::{Map, Value as JsonValue, Value};
 use thiserror::Error;
-use crate::ingest::{IngestError};
+use crate::ingest::IngestError;
 use async_recursion::async_recursion;
 use im::{HashMap, Vector};
 
@@ -29,7 +30,7 @@ pub enum Event {
     FeedEvent(Uuid),
 
     /// Represents a change that automatically happens at a certain time.
-    TimedChange(DateTime<Utc>)
+    TimedChange(DateTime<Utc>),
 }
 
 #[derive(Debug, Clone)]
@@ -51,13 +52,55 @@ pub struct BlaseballState {
 pub type BlaseballData = im::HashMap<&'static str, EntitySet>;
 pub type EntitySet = im::HashMap<Uuid, Node>;
 
-pub type SharedPrimitiveNode = Arc<RwLock<PrimitiveNode>>;
-
 #[derive(Debug, Clone)]
 pub enum Node {
     Object(im::HashMap<String, Node>),
     Array(im::Vector<Node>),
     Primitive(SharedPrimitiveNode),
+}
+
+#[derive(Debug, Clone)]
+pub struct SharedPrimitiveNode(Arc<RwLock<PrimitiveNode>>);
+
+impl SharedPrimitiveNode {
+    pub fn set<T: Into<PrimitiveValue>>(&mut self, value: T, caused_by: Arc<Event>) {
+        *self = self.successor(value, caused_by).into();
+    }
+
+    fn successor<'a, T: Into<PrimitiveValue>>(&self, value: T, caused_by: Arc<Event>) -> PrimitiveNode {
+        let observed_by = if let Event::ImplicitChange(observation) = &*caused_by {
+            Some(observation.clone())
+        } else {
+            None
+        };
+
+        PrimitiveNode {
+            predecessor: Some(self.clone()),
+            caused_by,
+            observed_by,
+            value: value.into(),
+        }
+    }
+}
+
+impl Deref for SharedPrimitiveNode {
+    type Target = Arc<RwLock<PrimitiveNode>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for SharedPrimitiveNode {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl From<PrimitiveNode> for SharedPrimitiveNode {
+    fn from(primitive_node: PrimitiveNode) -> Self {
+        SharedPrimitiveNode(Arc::new(RwLock::new(primitive_node)))
+    }
 }
 
 #[derive(Debug)]
@@ -280,17 +323,51 @@ impl Node {
         }
     }
 
-    pub async fn as_array(&self) -> Result<&im::Vector<Node>, String> {
+    pub fn as_array(&self) -> Result<&im::Vector<Node>, String> {
         match self {
             Node::Array(arr) => { Ok(arr) }
-            _ => { Err(self.to_string().await) }
+            Node::Object(_) => { Err("object".to_string()) }
+            Node::Primitive(_) => { Err("primitive".to_string()) }
         }
     }
 
-    pub async fn as_object(&self) -> Result<&im::HashMap<String, Node>, String> {
+    pub fn as_array_mut(&mut self) -> Result<&mut im::Vector<Node>, String> {
+        match self {
+            Node::Array(arr) => { Ok(arr) }
+            Node::Object(_) => { Err("object".to_string()) }
+            Node::Primitive(_) => { Err("primitive".to_string()) }
+        }
+    }
+
+    pub fn as_object(&self) -> Result<&im::HashMap<String, Node>, String> {
         match self {
             Node::Object(obj) => { Ok(obj) }
-            _ => { Err(self.to_string().await) }
+            Node::Array(_) => { Err("array".to_string()) }
+            Node::Primitive(_) => { Err("primitive".to_string()) }
+        }
+    }
+
+    pub fn as_object_mut(&mut self) -> Result<&mut im::HashMap<String, Node>, String> {
+        match self {
+            Node::Object(obj) => { Ok(obj) }
+            Node::Array(_) => { Err("array".to_string()) }
+            Node::Primitive(_) => { Err("primitive".to_string()) }
+        }
+    }
+
+    pub fn as_primitive(&self) -> Result<&SharedPrimitiveNode, String> {
+        match self {
+            Node::Primitive(p) => { Ok(p) }
+            Node::Object(_) => { Err("object".to_string()) }
+            Node::Array(_) => { Err("array".to_string()) }
+        }
+    }
+
+    pub fn as_primitive_mut(&mut self) -> Result<&mut SharedPrimitiveNode, String> {
+        match self {
+            Node::Primitive(p) => { Ok(p) }
+            Node::Object(_) => { Err("object".to_string()) }
+            Node::Array(_) => { Err("array".to_string()) }
         }
     }
 
@@ -378,29 +455,29 @@ impl Node {
             _ => None
         };
 
-        return Node::Primitive(Arc::new(RwLock::new(PrimitiveNode {
+        return Node::Primitive(PrimitiveNode {
             predecessor: None,
             caused_by,
             observed_by,
             value,
-        })));
+        }.into());
     }
 
-    pub fn primitive_successor(predecessor: Arc<RwLock<PrimitiveNode>>, value: PrimitiveValue, caused_by: Arc<Event>) -> Node {
+    pub fn primitive_successor(predecessor: SharedPrimitiveNode, value: PrimitiveValue, caused_by: Arc<Event>) -> Node {
         let observed_by = match &*caused_by {
             Event::ImplicitChange(observation) => Some(observation.clone()),
             _ => None
         };
 
-        Node::Primitive(Arc::new(RwLock::new(PrimitiveNode {
+        Node::Primitive(PrimitiveNode {
             predecessor: Some(predecessor),
             caused_by,
             observed_by,
             value,
-        })))
+        }.into())
     }
 
-    pub fn successor_from_primitive(predecessor: Arc<RwLock<PrimitiveNode>>, value: JsonValue, caused_by: Arc<Event>) -> Node {
+    pub fn successor_from_primitive(predecessor: SharedPrimitiveNode, value: JsonValue, caused_by: Arc<Event>) -> Node {
         match value {
             Value::Null => {
                 Node::primitive_successor(predecessor, PrimitiveValue::Null, caused_by)
@@ -430,16 +507,14 @@ impl Node {
         }
     }
 
-    pub fn successor(&self, value: PrimitiveValue, caused_by: Arc<Event>) -> Result<Node, ApplyChangeError> {
-        let result = match self {
+    pub fn successor(&self, value: PrimitiveValue, caused_by: Arc<Event>) -> Node {
+        match self {
             Node::Primitive(primitive) => Node::primitive_successor(primitive.clone(), value, caused_by),
             // Composites don't have tracked data, so create as new
             _ => {
                 Node::new_primitive(value, caused_by)
             }
-        };
-
-        Ok(result)
+        }
     }
 
     pub fn new_from_json(value: JsonValue, caused_by: Arc<Event>) -> Node {
@@ -681,7 +756,7 @@ impl BlaseballState {
         }
     }
 
-    pub async fn successor(self: Arc<Self>, caused_by: Arc<Event>, patches: impl IntoIterator<Item=Patch>) -> Result<Arc<BlaseballState>, IngestError> {
+    pub async fn diff_successor(self: Arc<Self>, caused_by: Arc<Event>, patches: impl IntoIterator<Item=Patch>) -> Result<Arc<BlaseballState>, IngestError> {
         let mut new_data = self.data.clone();
 
         for patch in patches {
@@ -690,11 +765,15 @@ impl BlaseballState {
                 .context(context_str)?;
         }
 
-        Ok(Arc::new(BlaseballState {
+        Ok(self.successor(caused_by, new_data))
+    }
+
+    pub fn successor(self: Arc<Self>, caused_by: Arc<Event>, new_data: BlaseballData) -> Arc<BlaseballState> {
+        Arc::new(BlaseballState {
             predecessor: Some(self),
             from_event: caused_by,
             data: new_data,
-        }))
+        })
     }
 
     pub async fn node_at(&self, path: &Path) -> Result<&Node, PathError> {
@@ -758,7 +837,7 @@ impl BlaseballState {
 
     pub async fn array_at(&self, path: &Path) -> Result<&im::Vector<Node>, PathError> {
         self.node_at(path).await?
-            .as_array().await
+            .as_array()
             .map_err(|value| PathError::UnexpectedType {
                 path: path.clone(),
                 expected_type: "array",
@@ -982,7 +1061,7 @@ async fn apply_change_new(path: Path, current_node: Option<&Node>, new_value: Va
 async fn apply_change_set(path: Path, current_node: Option<&mut Node>, new_value: PrimitiveValue, caused_by: Arc<Event>) -> Result<(), ApplyChangeError> {
     match current_node {
         Some(existing_node) => {
-            *existing_node = existing_node.successor(new_value, caused_by)?;
+            *existing_node = existing_node.successor(new_value, caused_by);
             Ok(())
         }
         None => { Err(ApplyChangeError::MissingValue(path)) }

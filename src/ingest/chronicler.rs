@@ -90,7 +90,7 @@ impl IngestItem for ChronUpdate {
             Err(anyhow!("Unexpected observation: {}", approval_msg))
         } else {
             let event = Arc::new(bs::Event::ImplicitChange(observation));
-            state.successor(event, mismatches).await
+            state.diff_successor(event, mismatches).await
         }
     }
 }
