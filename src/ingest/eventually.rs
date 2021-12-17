@@ -368,18 +368,17 @@ async fn apply_strike(state: Arc<bs::BlaseballState>, log: &IngestLogger, event:
 
     log.debug(format!("Recording Strike, {} for game {}, count {}-{}", strike_text, game_id, balls, strikes)).await?;
 
+    let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
+    let mut new_data = state.data.clone();
+    let mut view = DataView::new(&mut new_data, &caused_by);
+    let mut game = view.get_game(game_id);
+
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
     let message = format!("Strike, {}. {}-{}", strike_text, balls, strikes);
-    let diff = common_patches(&event.metadata.siblings, game_id, message, play, true)
-        .chain([
-            bs::Patch {
-                path: bs::json_path!("game", game_id.clone(), "atBatStrikes"),
-                change: bs::ChangeType::Set(strikes.into()),
-            },
-        ]);
+    game_update(&mut game, &event.metadata.siblings, message, play)?;
+    game.get("atBatStrikes").set(strikes)?;
 
-    let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
-    state.diff_successor(caused_by, diff).await
+    Ok(state.successor(caused_by, new_data))
 }
 
 
