@@ -1,4 +1,5 @@
 use std::cmp::min;
+use std::fmt::Display;
 use std::future::Future;
 use std::sync::Arc;
 use anyhow::{anyhow, Context};
@@ -12,9 +13,9 @@ use serde::Deserialize;
 
 use crate::api::{eventually, EventuallyEvent, EventType, Weather};
 use crate::blaseball_state as bs;
-use crate::blaseball_state::BlaseballState;
+use crate::blaseball_state::{BlaseballState, PrimitiveValue};
 use crate::ingest::{IngestItem, BoxedIngestItem, IngestResult, IngestError, IngestApplyResult};
-use crate::ingest::data_views::DataView;
+use crate::ingest::data_views::{DataView, EntityView};
 use crate::ingest::log::IngestLogger;
 use crate::ingest::text_parser::{FieldingOut, Base, StrikeType, parse_simple_out, parse_hit, parse_home_run, parse_snowfall, parse_strike, parse_strikeout, parse_stolen_base, parse_complex_out};
 
@@ -145,31 +146,25 @@ async fn apply_play_ball(state: Arc<bs::BlaseballState>, log: &IngestLogger, eve
     let game_id = get_one_id(&event.game_tags, "gameTags")?;
     log.debug(format!("Applying PlayBall event for game {}", game_id)).await?;
 
-    let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
-    let diff = common_patches(&event.metadata.siblings, game_id, "Play ball!".into(), play, true)
-        .chain(play_ball_team_specific_diffs(game_id, "away"))
-        .chain(play_ball_team_specific_diffs(game_id, "home"))
-        .chain([
-            bs::Patch {
-                path: bs::json_path!("game", game_id.clone(), "gameStartPhase"),
-                change: bs::ChangeType::Set(20.into()),
-            },
-            bs::Patch {
-                path: bs::json_path!("game", game_id.clone(), "inning"),
-                change: bs::ChangeType::Set((-1).into()),
-            },
-            bs::Patch {
-                path: bs::json_path!("game", game_id.clone(), "phase"),
-                change: bs::ChangeType::Set(2.into()),
-            },
-            bs::Patch {
-                path: bs::json_path!("game", game_id.clone(), "topOfInning"),
-                change: bs::ChangeType::Set(false.into()),
-            },
-        ]);
-
     let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
-    state.diff_successor(caused_by, diff).await
+    let mut new_data = state.data.clone();
+    let mut view = DataView::new(&mut new_data, &caused_by);
+    let mut game = view.get_game(game_id);
+
+    let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
+    game_update(&mut game, &event.metadata.siblings, "Play ball!", play)?;
+
+    for prefix in ["home", "away"] {
+        game.get(format!("{}Pitcher", prefix)).set(PrimitiveValue::Null)?;
+        game.get(format!("{}PitcherName", prefix)).set("")?;
+    }
+
+    game.get("gameStartPhase").set(20)?;
+    game.get("inning").set(-1)?;
+    game.get("phase").set(2)?;
+    game.get("topOfInning").set(false)?;
+
+    Ok(state.successor(caused_by, new_data))
 }
 
 fn prefixed(text: &'static str, top_of_inning: bool) -> String {
@@ -182,17 +177,46 @@ fn inning_prefixed(text: &'static str, top_of_inning: bool) -> String {
     format!("{}{}", home_or_away, text)
 }
 
-fn play_ball_team_specific_diffs(game_id: &Uuid, which: &'static str) -> impl Iterator<Item=bs::Patch> {
-    [
-        bs::Patch {
-            path: bs::json_path!("game", game_id.clone(), format!("{}Pitcher", which)),
-            change: bs::ChangeType::Set(bs::PrimitiveValue::Null),
-        },
-        bs::Patch {
-            path: bs::json_path!("game", game_id.clone(), format!("{}PitcherName", which)),
-            change: bs::ChangeType::Set("".into()),
-        },
-    ].into_iter()
+fn game_update<MessageT: Display>(game: &mut EntityView, events: &Vec<EventuallyEvent>, message: MessageT, play: i32) -> IngestResult<()> {
+    game.get("lastUpdate").set(format!("{}\n", message))?;
+    // play and playCount are out of sync by exactly 1
+    game.get("playCount").set(play + 1)?;
+
+    // lastUpdateFull is never logically connected to its previous value. Re-set it each time.
+    game.get("lastUpdateFull").overwrite(Value::Array(events.iter()
+        .map(|event| {
+            let mut result = json!({
+                        "blurb": "",
+                        "category": event.category as i32,
+                        "created": format_blaseball_date(event.created),
+                        "day": event.day,
+                        "description": event.description,
+                        "gameTags": [],
+                        "id": event.id,
+                        "nuts": 0,
+                        "phase": 2,
+                        "playerTags": event.player_tags,
+                        "season": event.season,
+                        "teamTags": [],
+                        "tournament": event.tournament,
+                        "type": event.r#type as i32,
+                    });
+
+            if let Value::Object(obj) = &event.metadata.other {
+                if !obj.is_empty() {
+                    result["metadata"] = event.metadata.other.clone();
+                }
+            }
+
+            result
+        })
+        .collect()))?;
+
+    // TODO Apply scores
+    game.get("scoreLedger").set("")?;
+    game.get("scoreUpdate").set("")?;
+
+    Ok(())
 }
 
 fn common_patches(events: &Vec<EventuallyEvent>, game_id: &Uuid, message: String, play: i32, clear_runs: bool) -> impl Iterator<Item=bs::Patch> {

@@ -1,5 +1,7 @@
 use std::sync::Arc;
 use uuid::Uuid;
+use serde_json::Value as JsonValue;
+
 use crate::blaseball_state::{BlaseballData, PathError, json_path, PrimitiveValue, Event, PathComponent, Path, Node};
 use crate::ingest::IngestResult;
 
@@ -76,6 +78,13 @@ impl<'d, 'e> NodeView<'d, 'e> {
     pub fn set<T: Into<PrimitiveValue>>(&mut self, value: T) -> IngestResult<()> {
         let node = get_node(self.data_view.data, self.entity_type, self.entity_id, &self.path)?;
         *node = node.successor(value.into(), self.data_view.caused_by.clone());
+
+        Ok(())
+    }
+
+    pub fn overwrite<T: Into<JsonValue>>(&mut self, value: T) -> IngestResult<()> {
+        let node = get_node(self.data_view.data, self.entity_type, self.entity_id, &self.path)?;
+        *node = Node::new_from_json(value.into(), self.data_view.caused_by.clone());
 
         Ok(())
     }
