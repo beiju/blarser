@@ -5,7 +5,7 @@ use serde_json::Value as JsonValue;
 use tokio::sync::RwLockReadGuard;
 
 use crate::blaseball_state::{BlaseballData, PathError, json_path, PrimitiveValue, Event, PathComponent, Path, Node, PrimitiveNode};
-use crate::ingest::{IngestError, IngestResult};
+use crate::ingest::{IngestResult};
 
 pub struct DataView<'data> {
     data: &'data mut BlaseballData,

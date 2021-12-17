@@ -337,26 +337,19 @@ async fn apply_batter_up(state: Arc<bs::BlaseballState>, log: &IngestLogger, eve
     let batter_id = state.uuid_at(&bs::json_path!("team", batting_team_id, "lineup", batter_count as usize)).await?;
     let batter_name = state.string_at(&bs::json_path!("player", batter_id, "name")).await?;
 
+    let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
+    let mut new_data = state.data.clone();
+    let mut view = DataView::new(&mut new_data, &caused_by);
+    let mut game = view.get_game(game_id);
+
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
     let message = format!("{} batting for the {}.", batter_name, batting_team_name);
-    let diff = common_patches(&event.metadata.siblings, game_id, message, play, true)
-        .chain([
-            bs::Patch {
-                path: bs::json_path!("game", game_id.clone(), prefixed("Batter", top_of_inning)),
-                change: bs::ChangeType::Set(batter_id.into()),
-            },
-            bs::Patch {
-                path: bs::json_path!("game", game_id.clone(), prefixed("BatterName", top_of_inning)),
-                change: bs::ChangeType::Set(batter_name.into()),
-            },
-            bs::Patch {
-                path: bs::json_path!("game", game_id.clone(), prefixed("TeamBatterCount", top_of_inning)),
-                change: bs::ChangeType::Set(batter_count.into()),
-            },
-        ]);
+    game_update(&mut game, &event.metadata.siblings, message, play)?;
+    game.get(prefixed("Batter", top_of_inning)).set(batter_id)?;
+    game.get(prefixed("BatterName", top_of_inning)).set(batter_name)?;
+    game.get(prefixed("TeamBatterCount", top_of_inning)).set(batter_count)?;
 
-    let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
-    state.diff_successor(caused_by, diff).await
+    Ok(state.successor(caused_by, new_data))
 }
 
 
