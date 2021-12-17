@@ -284,36 +284,32 @@ async fn apply_half_inning(state: Arc<bs::BlaseballState>, log: &IngestLogger, e
     let game_id = get_one_id(&event.game_tags, "gameTags")?;
     log.debug(format!("Applying HalfInning event for game {}", game_id)).await?;
 
-    let inning = state.int_at(&bs::json_path!("game", game_id.clone(), "inning")).await?;
-    let top_of_inning = state.bool_at(&bs::json_path!("game", game_id.clone(), "topOfInning")).await?;
+    let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
+    let mut new_data = state.data.clone();
+    let mut view = DataView::new(&mut new_data, &caused_by);
+    let mut game = view.get_game(game_id);
+
+    let inning = game.get("inning").as_int().await?;
+    let top_of_inning = game.get("topOfInning").as_bool().await?;
 
     let new_inning = if top_of_inning { inning } else { inning + 1 };
     let new_top_of_inning = !top_of_inning;
 
-    let batting_team_id = state.uuid_at(&bs::json_path!("game", game_id.clone(), prefixed("Team", new_top_of_inning))).await?;
-    let batting_team_name = state.string_at(&bs::json_path!("team", batting_team_id, "fullName")).await?;
+    let batting_team_id = game.get(prefixed("Team", new_top_of_inning)).as_uuid().await?;
+    let batting_team_name = view.get_team(&batting_team_id).get("fullName").as_string().await?;
+    // This lets `game`'s lifetime expire, so view.get_team is legal to call, then re-creates `game`
+    let mut game = view.get_game(game_id);
 
     let top_or_bottom = if new_top_of_inning { "Top" } else { "Bottom" };
     let message = format!("{} of {}, {} batting.", top_or_bottom, new_inning + 1, batting_team_name);
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
-    let diff = common_patches(&event.metadata.siblings, game_id, message, play, true)
-        .chain([
-            bs::Patch {
-                path: bs::json_path!("game", game_id.clone(), "phase"),
-                change: bs::ChangeType::Set((6).into()),
-            },
-            bs::Patch {
-                path: bs::json_path!("game", game_id.clone(), "topOfInning"),
-                change: bs::ChangeType::Set(new_top_of_inning.into()),
-            },
-            bs::Patch {
-                path: bs::json_path!("game", game_id.clone(), "inning"),
-                change: bs::ChangeType::Set(new_inning.into()),
-            },
-        ]);
+    game_update(&mut game, &event.metadata.siblings, message, play)?;
+
+    game.get("phase").set(6)?;
+    game.get("topOfInning").set(new_top_of_inning)?;
+    game.get("inning").set(new_inning)?;
 
     // The first halfInning event re-sets the data that PlayBall clears
-    let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
     if inning == -1 {
         let away_team_id = state.uuid_at(&bs::json_path!("game", game_id.clone(), "awayTeam")).await?;
         let away_pitcher = get_active_pitcher(&state, away_team_id, event.day > 0).await?;
@@ -321,29 +317,14 @@ async fn apply_half_inning(state: Arc<bs::BlaseballState>, log: &IngestLogger, e
         let home_team_id = state.uuid_at(&bs::json_path!("game", game_id.clone(), "homeTeam")).await?;
         let home_pitcher = get_active_pitcher(&state, home_team_id, event.day > 0).await?;
 
-        let diff = diff.into_iter()
-            .chain(half_inning_team_specific_diffs(game_id, away_pitcher, "away"))
-            .chain(half_inning_team_specific_diffs(game_id, home_pitcher, "home"));
-
-        state.diff_successor(caused_by, diff).await
-    } else {
-        state.diff_successor(caused_by, diff).await
+        for (pitcher, which) in [(home_pitcher, "home"), (away_pitcher,  "away")] {
+            game.get(format!("{}Pitcher", which)).set(pitcher.pitcher_id)?;
+            game.get(format!("{}PitcherName", which)).set(pitcher.pitcher_name)?;
+        }
     }
-}
 
-fn half_inning_team_specific_diffs(game_id: &Uuid, active_pitcher: ActivePitcher, which: &'static str) -> impl Iterator<Item=bs::Patch> {
-    [
-        bs::Patch {
-            path: bs::json_path!("game", game_id.clone(), format!("{}Pitcher", which)),
-            change: bs::ChangeType::Set(active_pitcher.pitcher_id.into()),
-        },
-        bs::Patch {
-            path: bs::json_path!("game", game_id.clone(), format!("{}PitcherName", which)),
-            change: bs::ChangeType::Set(active_pitcher.pitcher_name.into()),
-        },
-    ].into_iter()
+    Ok(state.successor(caused_by, new_data))
 }
-
 
 async fn apply_batter_up(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &EventuallyEvent) -> IngestApplyResult {
     let game_id = get_one_id(&event.game_tags, "gameTags")?;
