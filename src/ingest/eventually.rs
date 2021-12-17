@@ -386,26 +386,22 @@ async fn apply_ball(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &
     let game_id = get_one_id(&event.game_tags, "gameTags")?;
     log.debug(format!("Applying Ball event for game {}", game_id)).await?;
 
-    // let top_of_inning = state.bool_at(&bs::json_path!("game", game_id.clone(), "topOfInning")).await?;
-    // let max_balls = state.int_at(&bs::json_path!("game", game_id.clone(), prefixed("Balls", top_of_inning))).await?;
-
     let balls = 1 + state.int_at(&bs::json_path!("game", game_id.clone(), "atBatBalls")).await?;
     let strikes = state.int_at(&bs::json_path!("game", game_id.clone(), "atBatStrikes")).await?;
 
     log.debug(format!("Recording Ball for game {}, count {}-{}", game_id, balls, strikes)).await?;
 
+    let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
+    let mut new_data = state.data.clone();
+    let mut view = DataView::new(&mut new_data, &caused_by);
+    let mut game = view.get_game(game_id);
+
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
     let message = format!("Ball. {}-{}", balls, strikes);
-    let diff = common_patches(&event.metadata.siblings, game_id, message, play, true)
-        .chain([
-            bs::Patch {
-                path: bs::json_path!("game", game_id.clone(), "atBatBalls"),
-                change: bs::ChangeType::Set(balls.into()),
-            },
-        ]);
+    game_update(&mut game, &event.metadata.siblings, message, play)?;
+    game.get("atBatBalls").set(balls)?;
 
-    let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
-    state.diff_successor(caused_by, diff).await
+    Ok(state.successor(caused_by, new_data))
 }
 
 
@@ -425,18 +421,17 @@ async fn apply_foul_ball(state: Arc<bs::BlaseballState>, log: &IngestLogger, eve
 
     log.debug(format!("Recording FoulBall for game {}, count {}-{}", game_id, balls, strikes)).await?;
 
+    let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
+    let mut new_data = state.data.clone();
+    let mut view = DataView::new(&mut new_data, &caused_by);
+    let mut game = view.get_game(game_id);
+
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
     let message = format!("Foul Ball. {}-{}", balls, strikes);
-    let diff = common_patches(&event.metadata.siblings, game_id, message, play, true)
-        .chain([
-            bs::Patch {
-                path: bs::json_path!("game", game_id.clone(), "atBatStrikes"),
-                change: bs::ChangeType::Set(strikes.into()),
-            },
-        ]);
+    game_update(&mut game, &event.metadata.siblings, message, play)?;
+    game.get("atBatStrikes").set(strikes)?;
 
-    let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
-    state.diff_successor(caused_by, diff).await
+    Ok(state.successor(caused_by, new_data))
 }
 
 
