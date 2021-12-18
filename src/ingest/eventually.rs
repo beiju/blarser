@@ -397,7 +397,7 @@ fn apply_foul_ball(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event
     let balls = state.int_at(&bs::json_path!("game", game_id.clone(), "atBatBalls"))?;
     let mut strikes = state.int_at(&bs::json_path!("game", game_id.clone(), "atBatStrikes"))?;
 
-    if strikes != max_strikes {
+    if strikes + 1 < max_strikes {
         strikes += 1;
     }
 
