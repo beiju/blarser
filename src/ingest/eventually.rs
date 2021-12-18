@@ -771,6 +771,7 @@ fn apply_out<'a>(
         if !top_of_inning {
             game.get("topInningScore").set(0)?;
             game.get("bottomInningScore").set(0)?;
+            game.get("halfInningScore").set(0)?;
         }
     } else {
         game.get("halfInningOuts").map_int(|outs| outs + 1)?;
