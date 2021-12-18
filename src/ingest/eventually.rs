@@ -57,6 +57,7 @@ impl IngestItem for EventuallyEvent {
             EventType::BatterSkipped => apply_batter_skipped(state, log, self),
             EventType::PeanutFlavorText => apply_peanut_flavor_text(state, log, self),
             EventType::WinCollectedRegular => apply_win_collected_regular(state, log, self),
+            EventType::GameEnd => apply_game_end(state, log, self),
             _ => todo!()
         };
 
@@ -1354,6 +1355,36 @@ fn apply_win_collected_regular(state: Arc<bs::BlaseballState>, log: &IngestLogge
     let _play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
 
     // TODO
+
+    let (new_data, caused_by) = data.into_inner();
+    Ok((state.successor(caused_by, new_data), Vec::new()))
+}
+
+
+fn apply_game_end(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event: &EventuallyEvent) -> IngestApplyResult {
+    let game_id = get_one_id(&event.game_tags, "gameTags")?;
+    log.debug(format!("Applying GameEnd event for game {}", game_id))?;
+
+    let data = DataView::new(state.data.clone(),
+                             bs::Event::FeedEvent(event.id));
+    let game = data.get_game(game_id);
+
+    let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
+
+    game.get("phase").set(7)?;
+    game.get("endPhase").set(3)?;
+
+    let home_team_id = game.get("homeTeam").as_uuid()?;
+    let home_team_name = data.get_team(&home_team_id).get("nickname").as_string()?;
+    let home_team_score = game.get("homeScore").as_int()?;
+    let away_team_id = game.get("awayTeam").as_uuid()?;
+    let away_team_name = data.get_team(&away_team_id).get("nickname").as_string()?;
+    let away_team_score = game.get("awayScore").as_int()?;
+
+    let message = format!("{} {}, {} {}\n", home_team_name, home_team_score, away_team_name, away_team_score);
+    game_update(&game, &event.metadata.siblings, message, play, &[])?;
+    game.get("lastUpdateFull").get(0).get("teamTags").push(home_team_id)?;
+    game.get("lastUpdateFull").get(0).get("teamTags").push(away_team_id)?;
 
     let (new_data, caused_by) = data.into_inner();
     Ok((state.successor(caused_by, new_data), Vec::new()))
