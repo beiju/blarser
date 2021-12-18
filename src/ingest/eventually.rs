@@ -58,6 +58,7 @@ impl IngestItem for EventuallyEvent {
             EventType::PeanutFlavorText => apply_peanut_flavor_text(state, log, self),
             EventType::WinCollectedRegular => apply_win_collected_regular(state, log, self),
             EventType::GameEnd => apply_game_end(state, log, self),
+            EventType::GameOver => apply_game_over(state, log, self),
             _ => todo!()
         };
 
@@ -1395,6 +1396,35 @@ fn apply_game_end(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event:
     game_update(&game, &event.metadata.siblings, message, play, &[])?;
     game.get("lastUpdateFull").get(0).get("teamTags").push(home_team_id)?;
     game.get("lastUpdateFull").get(0).get("teamTags").push(away_team_id)?;
+
+    let (new_data, caused_by) = data.into_inner();
+    Ok((state.successor(caused_by, new_data), Vec::new()))
+}
+
+
+fn apply_game_over(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event: &EventuallyEvent) -> IngestApplyResult {
+    let game_id = get_one_id(&event.game_tags, "gameTags")?;
+    log.debug(format!("Applying GameOver event for game {}", game_id))?;
+
+    let data = DataView::new(state.data.clone(),
+                             bs::Event::FeedEvent(event.id));
+    let game = data.get_game(game_id);
+
+    let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
+
+    game.get("endPhase").set(5)?;
+    game.get("finalized").set(true)?;
+    game.get("gameComplete").set(true)?;
+
+    let home_team_score = game.get("homeScore").as_int()?;
+    let away_team_score = game.get("awayScore").as_int()?;
+
+    let winner_id = game.get(&prefixed("Team", home_team_score < away_team_score)).as_uuid()?;
+    let loser_id = game.get(&prefixed("Team", home_team_score > away_team_score)).as_uuid()?;
+
+    game_update(&game, &event.metadata.siblings, "Game Over.\n", play, &[])?;
+    game.get("winner").set(winner_id)?;
+    game.get("loser").set(loser_id)?;
 
     let (new_data, caused_by) = data.into_inner();
     Ok((state.successor(caused_by, new_data), Vec::new()))
