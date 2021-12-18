@@ -148,7 +148,7 @@ fn apply_play_ball(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event
     let game = data.get_game(game_id);
 
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
-    game_update(&game, &event.metadata.siblings, "Play ball!", play)?;
+    game_update(&game, &event.metadata.siblings, "Play ball!", play, &[])?;
 
     for prefix in ["home", "away"] {
         game.get(&format!("{}Pitcher", prefix)).set(bs::PrimitiveValue::Null)?;
@@ -174,7 +174,7 @@ fn inning_prefixed(text: &'static str, top_of_inning: bool) -> String {
     format!("{}{}", home_or_away, text)
 }
 
-fn game_update<MessageT: Display>(game: &EntityView, events: &Vec<EventuallyEvent>, message: MessageT, play: i64) -> IngestResult<()> {
+fn game_update<MessageT: Display>(game: &EntityView, events: &Vec<EventuallyEvent>, message: MessageT, play: i64, scores: &[Score]) -> IngestResult<()> {
     game.get("lastUpdate").set(format!("{}\n", message))?;
     // play and playCount are out of sync by exactly 1
     game.get("playCount").set(play + 1)?;
@@ -209,9 +209,40 @@ fn game_update<MessageT: Display>(game: &EntityView, events: &Vec<EventuallyEven
         })
         .collect()))?;
 
-    // TODO Apply scores
-    game.get("scoreLedger").set("")?;
-    game.get("scoreUpdate").set("")?;
+    if scores.is_empty() {
+        game.get("scoreLedger").set("")?;
+        game.get("scoreUpdate").set("")?;
+    } else {
+        let score_total = scores.iter().fold(0, |total, score| total + score.runs);
+
+        let score_expression = scores.iter()
+            .map(|score| score.runs.to_string())
+            .join(" + ");
+
+        let mut score_ledger = scores.iter()
+            .map(|score| {
+                let plural = match score.runs {
+                    1 => "",
+                    _ => "s"
+                };
+
+                format!("{}: {} Run{}", score.source, score.runs, plural)
+            })
+            .join("\n");
+
+        if scores.len() > 1 {
+            score_ledger = format!("{}\n{} = {}", score_ledger, score_expression, score_total);
+        }
+
+        game.get("scoreLedger").set(score_ledger)?;
+        game.get("scoreUpdate").set(format!("{} Runs scored!", score_total))?;
+
+        let top_of_inning = game.get("topOfInning").as_bool()?;
+        game.get(&prefixed("Score", top_of_inning)).map_int(|runs| runs + score_total)?;
+        game.get(&inning_prefixed("InningScore", top_of_inning)).map_int(|runs| runs + score_total)?;
+        game.get("halfInningScore").map_int(|runs| runs + score_total)?;
+
+    }
 
     Ok(())
 }
@@ -236,7 +267,7 @@ fn apply_half_inning(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, eve
     let top_or_bottom = if new_top_of_inning { "Top" } else { "Bottom" };
     let message = format!("{} of {}, {} batting.", top_or_bottom, new_inning + 1, batting_team_name);
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
-    game_update(&game, &event.metadata.siblings, message, play)?;
+    game_update(&game, &event.metadata.siblings, message, play, &[])?;
 
     game.get("phase").set(6)?;
     game.get("topOfInning").set(new_top_of_inning)?;
@@ -277,7 +308,7 @@ fn apply_batter_up(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event
 
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
     let message = format!("{} batting for the {}.", batter_name, batting_team_name);
-    game_update(&game, &event.metadata.siblings, message, play)?;
+    game_update(&game, &event.metadata.siblings, message, play, &[])?;
     game.get(&prefixed("Batter", top_of_inning)).set(batter_id)?;
     game.get(&prefixed("BatterName", top_of_inning)).set(batter_name)?;
     game.get(&prefixed("TeamBatterCount", top_of_inning)).set(batter_count)?;
@@ -308,7 +339,7 @@ fn apply_strike(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event: &
 
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
     let message = format!("Strike, {}. {}-{}", strike_text, balls, strikes);
-    game_update(&game, &event.metadata.siblings, message, play)?;
+    game_update(&game, &event.metadata.siblings, message, play, &[])?;
     game.get("atBatStrikes").set(strikes)?;
 
     let (new_data, caused_by) = data.into_inner();
@@ -331,7 +362,7 @@ fn apply_ball(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event: &Ev
 
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
     let message = format!("Ball. {}-{}", balls, strikes);
-    game_update(&game, &event.metadata.siblings, message, play)?;
+    game_update(&game, &event.metadata.siblings, message, play, &[])?;
     game.get("atBatBalls").set(balls)?;
 
     let (new_data, caused_by) = data.into_inner();
@@ -361,7 +392,7 @@ fn apply_foul_ball(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event
 
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
     let message = format!("Foul Ball. {}-{}", balls, strikes);
-    game_update(&game, &event.metadata.siblings, message, play)?;
+    game_update(&game, &event.metadata.siblings, message, play, &[])?;
     game.get("atBatStrikes").set(strikes)?;
 
     let (new_data, caused_by) = data.into_inner();
@@ -433,6 +464,11 @@ fn remove_base_runner(game: &EntityView<'_>, runner_idx: usize) -> IngestResult<
     Ok(())
 }
 
+struct Score {
+    source: &'static str,
+    runs: i64, // falsehoods
+}
+
 
 fn apply_hit(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event: &EventuallyEvent) -> IngestApplyResult {
     let game_id = get_one_id(&event.game_tags, "gameTags")?;
@@ -459,9 +495,32 @@ fn apply_hit(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event: &Eve
     };
 
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
-    let message = format!("{} hits a {}!", batter_name, hit_text);
+    let mut message = format!("{} hits a {}!", batter_name, hit_text);
 
-    game_update(&game, &event.metadata.siblings, message, play)?;
+    let (_, score_events) = event.metadata.siblings.split_first()
+        .ok_or_else(|| anyhow!("Hit event {} had no siblings (not even itself)", event.id))?;
+
+    let mut scores = Vec::new();
+    let mut scoring_team = None;
+    for score_event in score_events {
+        if let Ok(runner_id) = get_one_id(&score_event.player_tags, "playerTags") {
+            // Then this is a runner scores event
+            let score = score_runner(&data, &game, &mut message, runner_id)?;
+            scores.push(score);
+        } else {
+            // Then this is a team scores event
+            let team_id = game.get(&prefixed("Team", top_of_inning)).as_uuid()?;
+            scoring_team = Some(team_id);
+            let team = data.get_team(&team_id);
+            let team_nickname = team.get("nickname").as_string()?;
+            message = format!("{}\nThe {} scored!", message, team_nickname);
+        }
+    }
+
+    game_update(&game, &event.metadata.siblings, message, play, &scores)?;
+    if let Some(team_id) = scoring_team {
+        game.get("lastUpdateFull").get(score_events.len()).get("teamTags").push(team_id)?;
+    }
     advance_runners(&game, hit_type as i64 + 1)?;
     push_base_runner(&game, batter_id, batter_name, hit_type)?;
     end_at_bat(&game, top_of_inning)?;
@@ -470,6 +529,36 @@ fn apply_hit(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event: &Eve
 
     let (new_data, caused_by) = data.into_inner();
     Ok(state.successor(caused_by, new_data))
+}
+
+fn score_runner(data: &DataView, game: &EntityView, message: &mut String, runner_id: &Uuid) -> IngestResult<Score> {
+    let runner = data.get_player(runner_id);
+    let runner_name = runner.get("name").as_string()?;
+
+    *message = format!("{}\n{} scores!", message, runner_name);
+
+    let score = Score {
+        source: "Base Hit",
+        runs: 1
+    };
+
+    let runner_from_state = game.get("baseRunners").pop_front()?
+        .ok_or_else(|| anyhow!("Failed to remove baseRunners item on scoring event"))?
+        .as_uuid()
+        .map_err(|value| anyhow!("Expected baseRunners to have uuid values but found {}", value))?;
+    if runner_from_state != *runner_id {
+        return Err(anyhow!("Got a scoring event for {} but {} was first in the list", runner_id, runner_from_state));
+    }
+    game.get("baseRunnerNames").pop_front()?
+        .ok_or_else(|| anyhow!("Failed to remove baseRunnerNames item on scoring event"))?;
+    game.get("baseRunnerMods").pop_front()?
+        .ok_or_else(|| anyhow!("Failed to remove baseRunnerMods item on scoring event"))?;
+    // TODO Use the fact that they scored to narrow down IntRange possibilities for basesOccupied
+    game.get("basesOccupied").pop_front()?
+        .ok_or_else(|| anyhow!("Failed to remove basesOccupied item on scoring event"))?;
+    game.get("baserunnerCount").map_int(|count| count - 1)?;
+
+    Ok(score)
 }
 
 fn advance_runners(game: &EntityView<'_>, advance_at_least: i64) -> IngestResult<()> {
@@ -591,21 +680,6 @@ fn end_at_bat(game: &EntityView, top_of_inning: bool) -> IngestResult<()> {
     Ok(())
 }
 
-fn score_runs(game: &EntityView<'_>, top_of_inning: bool, num_runs: i64, source_name: &str) -> IngestResult<()> {
-    let runs_plural = match num_runs {
-        1 => "",
-        _ => "s",
-    };
-
-    game.get(&prefixed("Score", top_of_inning)).map_int(|runs| runs + num_runs)?;
-    game.get(&inning_prefixed("InningScore", top_of_inning)).map_int(|runs| runs + num_runs)?;
-    game.get("halfInningScore").map_int(|runs| runs + num_runs)?;
-    game.get("scoreLedger").set(format!("{}: {} Run{}", source_name, num_runs, runs_plural))?;
-    game.get("scoreUpdate").set(format!("{} Runs scored!", num_runs))?;
-
-    Ok(())
-}
-
 fn apply_out<'a>(
     log: &'a IngestLogger<'a>,
     game: &'a EntityView,
@@ -618,7 +692,7 @@ fn apply_out<'a>(
 ) -> IngestResult<()> {
     log.info(format!("Observed out by {}. Zeroing consecutiveHits", batter.get("name").as_string()?))?;
 
-    game_update(game, &event.metadata.siblings, message, play)?;
+    game_update(game, &event.metadata.siblings, message, play, &[])?;
     end_at_bat(game, top_of_inning)?;
     batter.get("consecutiveHits").set(0)?;
 
@@ -676,7 +750,7 @@ fn apply_stolen_base(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, eve
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
     let message = format!("{} steals {} base!", thief_name, which_base.name());
 
-    game_update(&game, &event.metadata.siblings, message, play)?;
+    game_update(&game, &event.metadata.siblings, message, play, &[])?;
     let bases_occupied = game.get("basesOccupied");
     bases_occupied.get(baserunner_index).map_int(|base| base + 1)?;
 
@@ -763,7 +837,7 @@ fn apply_walk(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event: &Ev
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
     let message = format!("{} draws a walk.", batter_name);
 
-    game_update(&game, &event.metadata.siblings, message, play)?;
+    game_update(&game, &event.metadata.siblings, message, play, &[])?;
     push_base_runner(&game,  batter_id, batter_name, Base::First)?;
     end_at_bat(&game, top_of_inning)?;
 
@@ -798,9 +872,12 @@ fn apply_home_run(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event:
 
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
     let message = format!("{} hits a {} home run!\nThe {} scored!", batter_name, home_run_text, team_name);
-    game_update(&game, &event.metadata.siblings, message, play)?;
+    let scores = [
+        Score { source: "Home Run", runs: num_runs }
+    ];
+
+    game_update(&game, &event.metadata.siblings, message, play, &scores)?;
     end_at_bat(&game, top_of_inning)?;
-    score_runs(&game, top_of_inning, num_runs, "Home Run")?;
     let player = data.get_player(&batter_id);
     player.get("consecutiveHits").map_int(|n| n + 1)?;
     game.get("lastUpdateFull").get(1).get("teamTags").push(team_id)?;
@@ -820,7 +897,7 @@ fn apply_storm_warning(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, e
 
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
 
-    game_update(&game, &event.metadata.siblings, "WINTER STORM WARNING", play)?;
+    game_update(&game, &event.metadata.siblings, "WINTER STORM WARNING", play, &[])?;
     game.get("gameStartPhase").set(11)?;
 
     let (new_data, caused_by) = data.into_inner();
@@ -872,7 +949,7 @@ fn apply_snowflakes(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, even
         .try_collect()?;
 
     let message = format!("{} Snowflakes {} the field!{}", num_snowflakes, modified_type, frozen_messages.join(""));
-    game_update(&game, &event.metadata.siblings, message, play)?;
+    game_update(&game, &event.metadata.siblings, message, play, &[])?;
     game.get("gameStartPhase").set(20)?;
     game.get("state").get("snowfallEvents").map_int(|x| x + 1)?;
 

@@ -431,6 +431,12 @@ impl<'view, ParentT: View<'view>> NodeView<'view, ParentT> {
         Ok(())
     }
 
+    pub fn pop_front(&self) -> Result<Option<Node>, PathError> {
+        let mut arr = self.as_array_mut()?;
+
+        Ok(arr.pop_front())
+    }
+
     fn path_error<ValueT: Display>(&self, expected_type: &'static str, value: ValueT) -> PathError {
         PathError::UnexpectedType {
             path: self.get_path(),
