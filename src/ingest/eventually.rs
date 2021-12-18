@@ -832,6 +832,27 @@ fn apply_out<'a, T: Into<String>>(
             game.get("bottomInningScore").set(0)?;
             game.get("halfInningScore").set(0)?;
         }
+
+        // End the game
+        if game.get("inning").as_int()? > 7 {
+            let home_score = game.get("homeScore").as_int()?;
+            let away_score = game.get("awayScore").as_int()?;
+            let end_game = if top_of_inning && home_score > away_score {
+                log.info(format!("Ending game at top of inning"))?;
+                true
+            } else if !top_of_inning && home_score != away_score {
+                log.info(format!("Ending game at bottom of inning"))?;
+                true
+            } else {
+                false
+            };
+
+            if end_game {
+                game.get("topInningScore").set(0)?;
+                game.get("halfInningScore").set(0)?;
+                game.get("phase").set(7)?;
+            }
+        }
     } else {
         game.get("halfInningOuts").set(num_outs)?;
     }
