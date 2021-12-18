@@ -52,6 +52,7 @@ impl IngestItem for EventuallyEvent {
             EventType::StormWarning => apply_storm_warning(state, log, self),
             EventType::Snowflakes => apply_snowflakes(state, log, self),
             EventType::PlayerStatReroll => apply_player_stat_reroll(state, log, self),
+            EventType::InningEnd => apply_inning_end(state, log, self),
             _ => todo!()
         };
 
@@ -271,6 +272,7 @@ fn apply_half_inning(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, eve
     game.get("phase").set(6)?;
     game.get("topOfInning").set(new_top_of_inning)?;
     game.get("inning").set(new_inning)?;
+    game.get("halfInningScore").set(0)?;
 
     // The first halfInning event re-sets the data that PlayBall clears
     if inning == -1 {
@@ -976,6 +978,27 @@ fn apply_player_stat_reroll(state: Arc<bs::BlaseballState>, log: &IngestLogger<'
                              bs::Event::FeedEvent(event.id));
 
     // TODO modify data
+
+    let (new_data, caused_by) = data.into_inner();
+    Ok(state.successor(caused_by, new_data))
+}
+
+
+fn apply_inning_end(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event: &EventuallyEvent) -> IngestApplyResult {
+    let game_id = get_one_id(&event.game_tags, "gameTags")?;
+    log.debug(format!("Applying InningEnd event for game {}", game_id))?;
+
+    let data = DataView::new(state.data.clone(),
+                             bs::Event::FeedEvent(event.id));
+    let game = data.get_game(game_id);
+
+    let inning = game.get("inning").as_int()?;
+
+    let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
+
+    let message = format!("Inning {} is now an Outing.", inning + 1);
+    game_update(&game, &event.metadata.siblings, message, play, &[])?;
+    game.get("phase").set(2)?;
 
     let (new_data, caused_by) = data.into_inner();
     Ok(state.successor(caused_by, new_data))
