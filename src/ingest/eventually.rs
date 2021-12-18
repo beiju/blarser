@@ -1001,8 +1001,12 @@ fn apply_storm_warning(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, e
 fn format_blaseball_date(date: DateTime<Utc>) -> String {
     // For some godforsaken reason, blaseball dates strip trailing millisecond zeros
     let main_date = date.format("%Y-%m-%dT%H:%M:%S");
-    let millis = format!("{:0>3}", date.timestamp_millis() % 1000);
-    let millis_trimmed = millis.trim_end_matches("0");
+    let millis = date.timestamp_millis() % 1000;
+    if millis == 0 {
+        return format!("{}Z", main_date);
+    }
+    let millis_str = format!("{:0>3}", millis);
+    let millis_trimmed = millis_str.trim_end_matches("0");
     let millis_final = if millis_trimmed.is_empty() { "0" } else { millis_trimmed };
     format!("{}.{}Z", main_date, millis_final)
 }
