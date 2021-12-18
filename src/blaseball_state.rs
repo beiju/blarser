@@ -4,15 +4,12 @@ use std::ops::{Deref, DerefMut};
 use std::str::FromStr;
 use im;
 use uuid::Uuid;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use anyhow::Context;
-use tokio::sync::RwLock;
-use rocket::futures::stream::{self, StreamExt};
 use chrono::{DateTime, Utc};
 use serde_json::{Map, Value as JsonValue, Value};
 use thiserror::Error;
 use crate::ingest::IngestError;
-use async_recursion::async_recursion;
 use im::{HashMap, Vector};
 
 /// Describes the event that caused one BlaseballState to change into another BlaseballState
@@ -176,12 +173,6 @@ impl From<i64> for PrimitiveValue {
     }
 }
 
-impl From<i32> for PrimitiveValue {
-    fn from(i: i32) -> Self {
-        PrimitiveValue::Int(i.into())
-    }
-}
-
 impl From<bool> for PrimitiveValue {
     fn from(b: bool) -> Self {
         PrimitiveValue::Bool(b)
@@ -228,23 +219,30 @@ impl PrimitiveValue {
         }
     }
 
-    pub fn as_bool(&self) -> Option<&bool> {
+    pub fn as_bool(&self) -> Option<bool> {
         match self {
-            PrimitiveValue::Bool(b) => { Some(b) }
+            PrimitiveValue::Bool(b) => { Some(*b) }
             _ => { None }
         }
     }
 
-    pub fn as_int(&self) -> Option<&i64> {
+    pub fn as_int(&self) -> Option<i64> {
         match self {
-            PrimitiveValue::Int(i) => { Some(i) }
+            PrimitiveValue::Int(i) => { Some(*i) }
             _ => { None }
         }
     }
 
-    pub fn as_float(&self) -> Option<&f64> {
+    pub fn as_int_range(&self) -> Option<(i64, i64)> {
         match self {
-            PrimitiveValue::Float(f) => { Some(f) }
+            PrimitiveValue::IntRange(lower, upper) => { Some((*lower, *upper)) }
+            _ => { None }
+        }
+    }
+
+    pub fn as_float(&self) -> Option<f64> {
+        match self {
+            PrimitiveValue::Float(f) => { Some(*f) }
             _ => { None }
         }
     }
@@ -293,12 +291,6 @@ pub enum ApplyChangeError {
     #[error("Expected value at {0} but found nothing")]
     MissingValue(Path),
 
-    #[error("Cannot increment value {1} at {0}")]
-    CannotIncrement(Path, String),
-
-    #[error("Cannot push value {1} into non-array {2} at {0}")]
-    CannotPush(Path, String, String),
-
     #[error(transparent)]
     PathError {
         #[from]
@@ -308,17 +300,16 @@ pub enum ApplyChangeError {
 }
 
 impl Node {
-    #[async_recursion]
-    pub async fn to_string(&self) -> String {
+    pub fn to_string(&self) -> String {
         match self {
             Node::Object(obj) => {
-                Self::object_to_string(obj).await
+                Self::object_to_string(obj)
             }
             Node::Array(arr) => {
-                Self::array_to_string(arr).await
+                Self::array_to_string(arr)
             }
             Node::Primitive(primitive) => {
-                Self::primitive_to_string(primitive).await
+                Self::primitive_to_string(primitive)
             }
         }
     }
@@ -371,79 +362,88 @@ impl Node {
         }
     }
 
-    pub async fn as_int(&self) -> Result<i64, String> {
+    pub fn as_int(&self) -> Result<i64, String> {
         match self {
             Node::Primitive(primitive_shared) => {
-                let primitive = primitive_shared.read().await;
-                primitive.value.as_int().cloned()
+                let primitive = primitive_shared.read().unwrap();
+                primitive.value.as_int()
                     .ok_or_else(|| primitive.value.to_string())
             }
-            _ => { Err(self.to_string().await) }
+            _ => { Err(self.to_string()) }
         }
     }
 
-    pub async fn as_bool(&self) -> Result<bool, String> {
+    pub fn as_int_range(&self) -> Result<(i64, i64), String> {
         match self {
             Node::Primitive(primitive_shared) => {
-                let primitive = primitive_shared.read().await;
-                primitive.value.as_bool().cloned()
+                let primitive = primitive_shared.read().unwrap();
+                primitive.value.as_int_range()
                     .ok_or_else(|| primitive.value.to_string())
             }
-            _ => { Err(self.to_string().await) }
+            _ => { Err(self.to_string()) }
         }
     }
 
-    pub async fn as_string(&self) -> Result<String, String> {
+    pub fn as_bool(&self) -> Result<bool, String> {
         match self {
             Node::Primitive(primitive_shared) => {
-                let primitive = primitive_shared.read().await;
+                let primitive = primitive_shared.read().unwrap();
+                primitive.value.as_bool()
+                    .ok_or_else(|| primitive.value.to_string())
+            }
+            _ => { Err(self.to_string()) }
+        }
+    }
+
+    pub fn as_string(&self) -> Result<String, String> {
+        match self {
+            Node::Primitive(primitive_shared) => {
+                let primitive = primitive_shared.read().unwrap();
                 primitive.value.as_str().map(|s| s.to_string())
                     .ok_or_else(|| primitive.value.to_string())
             }
-            _ => { Err(self.to_string().await) }
+            _ => { Err(self.to_string()) }
         }
     }
 
-    pub async fn as_uuid(&self) -> Result<Uuid, String> {
+    pub fn as_uuid(&self) -> Result<Uuid, String> {
         match self {
             Node::Primitive(primitive_shared) => {
-                let primitive = primitive_shared.read().await;
+                let primitive = primitive_shared.read().unwrap();
                 primitive.value.as_uuid()
                     .ok_or_else(|| primitive.value.to_string())
             }
-            _ => { Err(self.to_string().await) }
+            _ => { Err(self.to_string()) }
         }
     }
 
 
-    pub async fn primitive_to_string(primitive: &SharedPrimitiveNode) -> String {
-        let lock = primitive.read().await;
+    pub fn primitive_to_string(primitive: &SharedPrimitiveNode) -> String {
+        let lock = primitive.read().unwrap();
         format!("{}", lock.value)
     }
 
-    pub async fn array_to_string(arr: &Vector<Node>) -> String {
-        let inner = stream::iter(arr)
-            .then(|node| node.to_string())
+    pub fn array_to_string(arr: &Vector<Node>) -> String {
+        let inner = arr.iter()
+            .map(|node| node.to_string())
             .collect::<Vec<_>>()
-            .await
             .join(", ");
 
         format!("[{}]", inner)
     }
 
-    pub async fn object_to_string<T: Clone + std::hash::Hash + std::cmp::Eq + Display>(obj: &HashMap<T, Node>) -> String
+    pub fn object_to_string<T: Clone + std::hash::Hash + std::cmp::Eq + Display>(obj: &HashMap<T, Node>) -> String
         where T: Clone + std::hash::Hash + std::cmp::Eq + Display {
         if obj.is_empty() {
             // Shortcut for two braces without spaces
             return "{}".to_string();
         }
 
-        let inner = stream::iter(obj)
-            .then(|(key, node)| async move {
-                format!("\"{}\": {}", key, node.to_string().await)
+        let inner = obj.iter()
+            .map(|(key, node)| {
+                format!("\"{}\": {}", key, node.to_string())
             })
             .collect::<Vec<_>>()
-            .await
             .join(", ");
 
         format!("{{ {} }}", inner)
@@ -571,25 +571,19 @@ pub struct Patch {
 }
 
 impl Patch {
-    pub async fn description(&self, state: &BlaseballState) -> Result<String, PathError> {
+    pub fn description(&self, state: &BlaseballState) -> Result<String, PathError> {
         let str = match &self.change {
             ChangeType::New(value) => {
                 format!("{}: Add {:#}", self.path, value)
             }
             ChangeType::Remove => {
-                format!("{}: Remove {}", self.path, state.node_at(&self.path).await?.to_string().await)
+                format!("{}: Remove {}", self.path, state.node_at(&self.path)?.to_string())
             }
             ChangeType::Set(value) => {
-                format!("{}: Change {} with {:#}", self.path, state.node_at(&self.path).await?.to_string().await, value)
+                format!("{}: Change {} with {:#}", self.path, state.node_at(&self.path)?.to_string(), value)
             }
             ChangeType::Overwrite(value) => {
-                format!("{}: Overwrite {} with {:#}", self.path, state.node_at(&self.path).await?.to_string().await, value)
-            }
-            ChangeType::AddInt(value) => {
-                format!("{}: Add {} to {}", self.path, value, state.node_at(&self.path).await?.to_string().await)
-            }
-            ChangeType::Push(value) => {
-                format!("{}: Push {:#} onto array {}", self.path, value, state.node_at(&self.path).await?.to_string().await)
+                format!("{}: Overwrite {} with {:#}", self.path, state.node_at(&self.path)?.to_string(), value)
             }
         };
 
@@ -606,10 +600,6 @@ pub enum ChangeType {
     Set(PrimitiveValue),
     // For overwriting a value and not connecting it to history
     Overwrite(JsonValue),
-    // For adding an int to an existing int
-    AddInt(i64),
-    // For pushing a value onto an array
-    Push(JsonValue),
 }
 
 #[derive(Clone, Debug)]
@@ -756,12 +746,12 @@ impl BlaseballState {
         }
     }
 
-    pub async fn diff_successor(self: Arc<Self>, caused_by: Arc<Event>, patches: impl IntoIterator<Item=Patch>) -> Result<Arc<BlaseballState>, IngestError> {
+    pub fn diff_successor(self: Arc<Self>, caused_by: Arc<Event>, patches: impl IntoIterator<Item=Patch>) -> Result<Arc<BlaseballState>, IngestError> {
         let mut new_data = self.data.clone();
 
         for patch in patches {
             let context_str = format!("Error applying change {:?}", patch.change);
-            apply_change(&mut new_data, patch, caused_by.clone()).await
+            apply_change(&mut new_data, patch, caused_by.clone())
                 .context(context_str)?;
         }
 
@@ -776,7 +766,7 @@ impl BlaseballState {
         })
     }
 
-    pub async fn node_at(&self, path: &Path) -> Result<&Node, PathError> {
+    pub fn node_at(&self, path: &Path) -> Result<&Node, PathError> {
         let entity_set = self.data.get(path.entity_type)
             .ok_or_else(|| PathError::EntityTypeDoesNotExist(path.entity_type))?;
         let entity_id = path.entity_id
@@ -793,7 +783,7 @@ impl BlaseballState {
                             Err(PathError::UnexpectedType {
                                 path: path.slice(i),
                                 expected_type: "object",
-                                value: node.to_string().await,
+                                value: node.to_string(),
                             })
                         }
                         PathComponent::Key(key) => {
@@ -812,7 +802,7 @@ impl BlaseballState {
                             Err(PathError::UnexpectedType {
                                 path: path.slice(i),
                                 expected_type: "object",
-                                value: node.to_string().await,
+                                value: node.to_string(),
                             })
                         }
                     }
@@ -826,7 +816,7 @@ impl BlaseballState {
                     Err(PathError::UnexpectedType {
                         path: path.slice(i),
                         expected_type,
-                        value: node.to_string().await,
+                        value: node.to_string(),
                     })
                 }
             }?;
@@ -835,8 +825,8 @@ impl BlaseballState {
         Ok(node)
     }
 
-    pub async fn array_at(&self, path: &Path) -> Result<&im::Vector<Node>, PathError> {
-        self.node_at(path).await?
+    pub fn array_at(&self, path: &Path) -> Result<&im::Vector<Node>, PathError> {
+        self.node_at(path)?
             .as_array()
             .map_err(|value| PathError::UnexpectedType {
                 path: path.clone(),
@@ -845,9 +835,9 @@ impl BlaseballState {
             })
     }
 
-    pub async fn int_at(&self, path: &Path) -> Result<i64, PathError> {
-        self.node_at(path).await?
-            .as_int().await
+    pub fn int_at(&self, path: &Path) -> Result<i64, PathError> {
+        self.node_at(path)?
+            .as_int()
             .map_err(|value| PathError::UnexpectedType {
                 path: path.clone(),
                 expected_type: "int",
@@ -855,9 +845,9 @@ impl BlaseballState {
             })
     }
 
-    pub async fn bool_at(&self, path: &Path) -> Result<bool, PathError> {
-        self.node_at(path).await?
-            .as_bool().await
+    pub fn bool_at(&self, path: &Path) -> Result<bool, PathError> {
+        self.node_at(path)?
+            .as_bool()
             .map_err(|value| PathError::UnexpectedType {
                 path: path.clone(),
                 expected_type: "int",
@@ -865,9 +855,9 @@ impl BlaseballState {
             })
     }
 
-    pub async fn string_at(&self, path: &Path) -> Result<String, PathError> {
-        self.node_at(path).await?
-            .as_string().await
+    pub fn string_at(&self, path: &Path) -> Result<String, PathError> {
+        self.node_at(path)?
+            .as_string()
             .map_err(|value| PathError::UnexpectedType {
                 path: path.clone(),
                 expected_type: "str",
@@ -875,9 +865,9 @@ impl BlaseballState {
             })
     }
 
-    pub async fn uuid_at(&self, path: &Path) -> Result<Uuid, PathError> {
-        self.node_at(path).await?
-            .as_uuid().await
+    pub fn uuid_at(&self, path: &Path) -> Result<Uuid, PathError> {
+        self.node_at(path)?
+            .as_uuid()
             .map_err(|value| PathError::UnexpectedType {
                 path: path.clone(),
                 expected_type: "uuid",
@@ -886,7 +876,7 @@ impl BlaseballState {
     }
 }
 
-async fn apply_change(data: &mut BlaseballData, change: Patch, caused_by: Arc<Event>) -> Result<(), ApplyChangeError> {
+fn apply_change(data: &mut BlaseballData, change: Patch, caused_by: Arc<Event>) -> Result<(), ApplyChangeError> {
     let entity_set = data.get_mut(change.path.entity_type)
         .ok_or_else(|| PathError::EntityTypeDoesNotExist(change.path.entity_type))?;
     let entity_id = change.path.entity_id
@@ -896,7 +886,7 @@ async fn apply_change(data: &mut BlaseballData, change: Patch, caused_by: Arc<Ev
     match change.path.components.clone().split_last() {
         None => {
             // Then we are acting on the entire entity
-            apply_change_to_hashmap(entity_set, &entity_id, change, caused_by).await
+            apply_change_to_hashmap(entity_set, &entity_id, change, caused_by)
         }
         Some((last, rest)) => {
             let mut node = entity_set.get_mut(&entity_id)
@@ -908,7 +898,7 @@ async fn apply_change(data: &mut BlaseballData, change: Patch, caused_by: Arc<Ev
                         Err(PathError::UnexpectedType {
                             path: change.path.slice(i),
                             expected_type: "array",
-                            value: Node::object_to_string(obj).await,
+                            value: Node::object_to_string(obj),
                         })
                     }
                     (Node::Object(obj), PathComponent::Key(key)) => {
@@ -923,7 +913,7 @@ async fn apply_change(data: &mut BlaseballData, change: Patch, caused_by: Arc<Ev
                         Err(PathError::UnexpectedType {
                             path: change.path.slice(i),
                             expected_type: "object",
-                            value: Node::array_to_string(arr).await,
+                            value: Node::array_to_string(arr),
                         })
                     }
                     (Node::Primitive(prim), component) => {
@@ -935,7 +925,7 @@ async fn apply_change(data: &mut BlaseballData, change: Patch, caused_by: Arc<Ev
                         Err(PathError::UnexpectedType {
                             path: change.path.slice(i),
                             expected_type,
-                            value: Node::primitive_to_string(prim).await,
+                            value: Node::primitive_to_string(prim),
                         })
                     }
                 }?;
@@ -948,24 +938,24 @@ async fn apply_change(data: &mut BlaseballData, change: Patch, caused_by: Arc<Ev
                             Err(PathError::UnexpectedType {
                                 path: change.path,
                                 expected_type: "object",
-                                value: node.to_string().await,
+                                value: node.to_string(),
                             }.into())
                         }
                         PathComponent::Key(key) => {
-                            apply_change_to_hashmap(obj, key, change, caused_by).await
+                            apply_change_to_hashmap(obj, key, change, caused_by)
                         }
                     }
                 }
                 Node::Array(arr) => {
                     match last {
                         PathComponent::Index(idx) => {
-                            apply_change_to_vector(arr, *idx, change, caused_by).await
+                            apply_change_to_vector(arr, *idx, change, caused_by)
                         }
                         PathComponent::Key(_) => {
                             Err(PathError::UnexpectedType {
                                 path: change.path,
                                 expected_type: "array",
-                                value: node.to_string().await,
+                                value: node.to_string(),
                             }.into())
                         }
                     }
@@ -979,7 +969,7 @@ async fn apply_change(data: &mut BlaseballData, change: Patch, caused_by: Arc<Ev
                     Err(PathError::UnexpectedType {
                         path: change.path,
                         expected_type,
-                        value: node.to_string().await,
+                        value: node.to_string(),
                     }.into())
                 }
             }
@@ -987,11 +977,11 @@ async fn apply_change(data: &mut BlaseballData, change: Patch, caused_by: Arc<Ev
     }
 }
 
-async fn apply_change_to_hashmap<T>(container: &mut im::HashMap<T, Node>, key: &T, change: Patch, caused_by: Arc<Event>) -> Result<(), ApplyChangeError>
+fn apply_change_to_hashmap<T>(container: &mut im::HashMap<T, Node>, key: &T, change: Patch, caused_by: Arc<Event>) -> Result<(), ApplyChangeError>
     where T: Clone + std::hash::Hash + std::cmp::Eq + Display {
     match change.change {
         ChangeType::New(value) => {
-            let new_node = apply_change_new(change.path, container.get(key), value, caused_by).await?;
+            let new_node = apply_change_new(change.path, container.get(key), value, caused_by)?;
             container.insert(key.clone(), new_node);
         }
         ChangeType::Remove => {
@@ -1001,27 +991,21 @@ async fn apply_change_to_hashmap<T>(container: &mut im::HashMap<T, Node>, key: &
             }
         }
         ChangeType::Set(value) => {
-            apply_change_set(change.path, container.get_mut(key), value, caused_by).await?;
+            apply_change_set(change.path, container.get_mut(key), value, caused_by)?;
         }
         ChangeType::Overwrite(value) => {
-            let new_node = apply_change_overwrite(change.path, container.get(key), value, caused_by).await?;
+            let new_node = apply_change_overwrite(change.path, container.get(key), value, caused_by)?;
             container.insert(key.clone(), new_node);
-        }
-        ChangeType::AddInt(value) => {
-            apply_change_increment(change.path, container.get_mut(key), value, caused_by).await?;
-        }
-        ChangeType::Push(value) => {
-            apply_change_push(change.path, container.get_mut(key), value, caused_by).await?;
         }
     }
 
     Ok(())
 }
 
-async fn apply_change_to_vector(container: &mut im::Vector<Node>, idx: usize, change: Patch, caused_by: Arc<Event>) -> Result<(), ApplyChangeError> {
+fn apply_change_to_vector(container: &mut im::Vector<Node>, idx: usize, change: Patch, caused_by: Arc<Event>) -> Result<(), ApplyChangeError> {
     match change.change {
         ChangeType::New(value) => {
-            let new_node = apply_change_new(change.path, container.get(idx), value, caused_by).await?;
+            let new_node = apply_change_new(change.path, container.get(idx), value, caused_by)?;
             container.insert(idx, new_node);
         }
         ChangeType::Remove => {
@@ -1031,17 +1015,11 @@ async fn apply_change_to_vector(container: &mut im::Vector<Node>, idx: usize, ch
             container.remove(idx);
         }
         ChangeType::Set(value) => {
-            apply_change_set(change.path, container.get_mut(idx), value, caused_by).await?;
+            apply_change_set(change.path, container.get_mut(idx), value, caused_by)?;
         }
         ChangeType::Overwrite(value) => {
-            let new_node = apply_change_overwrite(change.path, container.get(idx), value, caused_by).await?;
+            let new_node = apply_change_overwrite(change.path, container.get(idx), value, caused_by)?;
             container.insert(idx, new_node);
-        }
-        ChangeType::AddInt(value) => {
-            apply_change_increment(change.path, container.get_mut(idx), value, caused_by).await?;
-        }
-        ChangeType::Push(value) => {
-            apply_change_push(change.path, container.get_mut(idx), value, caused_by).await?;
         }
     }
 
@@ -1049,16 +1027,16 @@ async fn apply_change_to_vector(container: &mut im::Vector<Node>, idx: usize, ch
 }
 
 
-async fn apply_change_new(path: Path, current_node: Option<&Node>, new_value: Value, caused_by: Arc<Event>) -> Result<Node, ApplyChangeError> {
+fn apply_change_new(path: Path, current_node: Option<&Node>, new_value: Value, caused_by: Arc<Event>) -> Result<Node, ApplyChangeError> {
     match current_node {
         Some(existing_node) => {
-            Err(ApplyChangeError::UnexpectedValue(path, existing_node.to_string().await))
+            Err(ApplyChangeError::UnexpectedValue(path, existing_node.to_string()))
         }
         None => { Ok(Node::new_from_json(new_value, caused_by)) }
     }
 }
 
-async fn apply_change_set(path: Path, current_node: Option<&mut Node>, new_value: PrimitiveValue, caused_by: Arc<Event>) -> Result<(), ApplyChangeError> {
+fn apply_change_set(path: Path, current_node: Option<&mut Node>, new_value: PrimitiveValue, caused_by: Arc<Event>) -> Result<(), ApplyChangeError> {
     match current_node {
         Some(existing_node) => {
             *existing_node = existing_node.successor(new_value, caused_by);
@@ -1068,59 +1046,10 @@ async fn apply_change_set(path: Path, current_node: Option<&mut Node>, new_value
     }
 }
 
-async fn apply_change_overwrite(path: Path, current_node: Option<&Node>, new_value: Value, caused_by: Arc<Event>) -> Result<Node, ApplyChangeError> {
+fn apply_change_overwrite(path: Path, current_node: Option<&Node>, new_value: Value, caused_by: Arc<Event>) -> Result<Node, ApplyChangeError> {
     match current_node {
         Some(_) => { Ok(Node::new_from_json(new_value, caused_by)) }
         None => { Err(ApplyChangeError::MissingValue(path)) }
-    }
-}
-
-async fn apply_change_increment(path: Path, current_node: Option<&mut Node>, value: i64, caused_by: Arc<Event>) -> Result<(), ApplyChangeError> {
-    match current_node {
-        None => {
-            Err(ApplyChangeError::MissingValue(path))
-        }
-        Some(current_node) => {
-            let new_node = match current_node {
-                Node::Primitive(primitive) => {
-                    let node = primitive.read().await;
-                    let new_node = match &node.value {
-                        PrimitiveValue::Int(i) => Node::primitive_successor(
-                            primitive.clone(),
-                            PrimitiveValue::Int(i + value),
-                            caused_by,
-                        ),
-                        PrimitiveValue::IntRange(upper, lower) => Node::primitive_successor(
-                            primitive.clone(),
-                            PrimitiveValue::IntRange(upper + 1, lower + 1),
-                            caused_by,
-                        ),
-                        value => {
-                            return Err(ApplyChangeError::CannotIncrement(path, value.to_string()));
-                        }
-                    };
-                    Ok(new_node)
-                }
-                _ => {
-                    Err(ApplyChangeError::CannotIncrement(path, current_node.to_string().await))
-                }
-            }?;
-            *current_node = new_node;
-            Ok(())
-        }
-    }
-}
-
-async fn apply_change_push(path: Path, current_node: Option<&mut Node>, new_value: Value, caused_by: Arc<Event>) -> Result<(), ApplyChangeError> {
-    match current_node {
-        None => { Err(ApplyChangeError::MissingValue(path)) }
-        Some(Node::Array(arr)) => {
-            arr.push_back(Node::new_from_json(new_value, caused_by));
-            Ok(())
-        }
-        Some(node) => {
-            Err(ApplyChangeError::CannotPush(path, new_value.to_string(), node.to_string().await))
-        }
     }
 }
 

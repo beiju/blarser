@@ -1,11 +1,9 @@
 use std::cmp::min;
 use std::fmt::Display;
-use std::future::Future;
 use std::sync::Arc;
 use anyhow::{anyhow, Context};
-use rocket::{async_trait, Ignite};
+use rocket::{async_trait};
 use chrono::{DateTime, Utc};
-use futures::{FutureExt, stream, StreamExt, TryStreamExt};
 use itertools::Itertools;
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -13,8 +11,7 @@ use serde::Deserialize;
 
 use crate::api::{eventually, EventuallyEvent, EventType, Weather};
 use crate::blaseball_state as bs;
-use crate::blaseball_state::{BlaseballState, PrimitiveValue};
-use crate::ingest::{IngestItem, BoxedIngestItem, IngestResult, IngestError, IngestApplyResult};
+use crate::ingest::{IngestItem, BoxedIngestItem, IngestResult, IngestApplyResult};
 use crate::ingest::data_views::{DataView, EntityView, View};
 use crate::ingest::log::IngestLogger;
 use crate::ingest::text_parser::{FieldingOut, Base, StrikeType, parse_simple_out, parse_hit, parse_home_run, parse_snowfall, parse_strike, parse_strikeout, parse_stolen_base, parse_complex_out};
@@ -32,33 +29,33 @@ impl IngestItem for EventuallyEvent {
         self.created
     }
 
-    async fn apply(&self, log: &IngestLogger, state: Arc<bs::BlaseballState>) -> IngestApplyResult {
+    fn apply(&self, log: &IngestLogger, state: Arc<bs::BlaseballState>) -> IngestApplyResult {
         let apply_log = format!("Applying Feed event {} from {}: \"{}\"", self.id, self.created, self.description);
-        log.debug(apply_log.clone()).await?;
+        log.debug(apply_log.clone())?;
 
         let result = match self.r#type {
-            EventType::BigDeal => apply_big_deal(state, log, self).await,
-            EventType::LetsGo => apply_lets_go(state, log, self).await,
-            EventType::PlayBall => apply_play_ball(state, log, self).await,
-            EventType::HalfInning => apply_half_inning(state, log, self).await,
-            EventType::BatterUp => apply_batter_up(state, log, self).await,
-            EventType::Strike => apply_strike(state, log, self).await,
-            EventType::Ball => apply_ball(state, log, self).await,
-            EventType::FoulBall => apply_foul_ball(state, log, self).await,
-            EventType::GroundOut => apply_ground_out(state, log, self).await,
-            EventType::Hit => apply_hit(state, log, self).await,
-            EventType::Strikeout => apply_strikeout(state, log, self).await,
-            EventType::FlyOut => apply_fly_out(state, log, self).await,
-            EventType::StolenBase => apply_stolen_base(state, log, self).await,
-            EventType::Walk => apply_walk(state, log, self).await,
-            EventType::HomeRun => apply_home_run(state, log, self).await,
-            EventType::StormWarning => apply_storm_warning(state, log, self).await,
-            EventType::Snowflakes => apply_snowflakes(state, log, self).await,
-            EventType::PlayerStatReroll => apply_player_stat_reroll(state, log, self).await,
+            EventType::BigDeal => apply_big_deal(state, log, self),
+            EventType::LetsGo => apply_lets_go(state, log, self),
+            EventType::PlayBall => apply_play_ball(state, log, self),
+            EventType::HalfInning => apply_half_inning(state, log, self),
+            EventType::BatterUp => apply_batter_up(state, log, self),
+            EventType::Strike => apply_strike(state, log, self),
+            EventType::Ball => apply_ball(state, log, self),
+            EventType::FoulBall => apply_foul_ball(state, log, self),
+            EventType::GroundOut => apply_ground_out(state, log, self),
+            EventType::Hit => apply_hit(state, log, self),
+            EventType::Strikeout => apply_strikeout(state, log, self),
+            EventType::FlyOut => apply_fly_out(state, log, self),
+            EventType::StolenBase => apply_stolen_base(state, log, self),
+            EventType::Walk => apply_walk(state, log, self),
+            EventType::HomeRun => apply_home_run(state, log, self),
+            EventType::StormWarning => apply_storm_warning(state, log, self),
+            EventType::Snowflakes => apply_snowflakes(state, log, self),
+            EventType::PlayerStatReroll => apply_player_stat_reroll(state, log, self),
             _ => todo!()
         };
 
-        log.increment_parsed_events().await?;
+        log.increment_parsed_events()?;
 
         result.context(apply_log)
     }
@@ -71,15 +68,15 @@ pub struct PlayMetadata {
 }
 
 
-async fn apply_big_deal(state: Arc<bs::BlaseballState>, log: &IngestLogger, _: &EventuallyEvent) -> IngestApplyResult {
-    log.debug("Ignoring BigDeal event".to_string()).await?;
+fn apply_big_deal(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, _: &EventuallyEvent) -> IngestApplyResult {
+    log.debug("Ignoring BigDeal event".to_string())?;
     Ok(state)
 }
 
 
-async fn apply_lets_go(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &EventuallyEvent) -> IngestApplyResult {
+fn apply_lets_go(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event: &EventuallyEvent) -> IngestApplyResult {
     let game_id = get_one_id(&event.game_tags, "gameTags")?;
-    log.debug(format!("Applying LetsGo event for game {}", game_id)).await?;
+    log.debug(format!("Applying LetsGo event for game {}", game_id))?;
 
     #[derive(Deserialize, Debug)]
     #[serde(rename_all = "camelCase")]
@@ -96,7 +93,7 @@ async fn apply_lets_go(state: Arc<bs::BlaseballState>, log: &IngestLogger, event
                              bs::Event::FeedEvent(event.id));
 
     for team_id in [metadata.home, metadata.away] {
-        let pitcher = get_active_pitcher(&state, team_id, event.day > 0).await?;
+        let pitcher = get_active_pitcher(&state, team_id, event.day > 0)?;
         let team = data.get_team(&team_id);
 
         team.get("rotationSlot").set(pitcher.rotation_slot)?;
@@ -118,9 +115,9 @@ struct ActivePitcher {
     pitcher_name: String,
 }
 
-async fn get_active_pitcher(state: &Arc<bs::BlaseballState>, team_id: Uuid, advance: bool) -> Result<ActivePitcher, bs::PathError> {
-    let rotation = state.array_at(&bs::json_path!("team", team_id, "rotation")).await?;
-    let rotation_slot = state.int_at(&bs::json_path!("team", team_id, "rotationSlot")).await?;
+fn get_active_pitcher(state: &Arc<bs::BlaseballState>, team_id: Uuid, advance: bool) -> Result<ActivePitcher, bs::PathError> {
+    let rotation = state.array_at(&bs::json_path!("team", team_id, "rotation"))?;
+    let rotation_slot = state.int_at(&bs::json_path!("team", team_id, "rotationSlot"))?;
     let rotation_slot = if advance {
         (rotation_slot + 1) % rotation.len() as i64
     } else {
@@ -130,21 +127,21 @@ async fn get_active_pitcher(state: &Arc<bs::BlaseballState>, team_id: Uuid, adva
     let pitcher_id = rotation.get(rotation_slot as usize)
         .expect("rotation_slot should always be valid here");
 
-    let pitcher_id = pitcher_id.as_uuid().await
+    let pitcher_id = pitcher_id.as_uuid()
         .map_err(|value| bs::PathError::UnexpectedType {
             path: bs::json_path!("team", team_id, "rotation", rotation_slot as usize),
             expected_type: "uuid",
             value,
         })?;
 
-    let pitcher_name = state.string_at(&bs::json_path!("player", pitcher_id, "name")).await?;
+    let pitcher_name = state.string_at(&bs::json_path!("player", pitcher_id, "name"))?;
 
     Ok(ActivePitcher { rotation_slot, pitcher_id, pitcher_name })
 }
 
-async fn apply_play_ball(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &EventuallyEvent) -> IngestApplyResult {
+fn apply_play_ball(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event: &EventuallyEvent) -> IngestApplyResult {
     let game_id = get_one_id(&event.game_tags, "gameTags")?;
-    log.debug(format!("Applying PlayBall event for game {}", game_id)).await?;
+    log.debug(format!("Applying PlayBall event for game {}", game_id))?;
 
     let data = DataView::new(state.data.clone(),
                              bs::Event::FeedEvent(event.id));
@@ -154,7 +151,7 @@ async fn apply_play_ball(state: Arc<bs::BlaseballState>, log: &IngestLogger, eve
     game_update(&game, &event.metadata.siblings, "Play ball!", play)?;
 
     for prefix in ["home", "away"] {
-        game.get(&format!("{}Pitcher", prefix)).set(PrimitiveValue::Null)?;
+        game.get(&format!("{}Pitcher", prefix)).set(bs::PrimitiveValue::Null)?;
         game.get(&format!("{}PitcherName", prefix)).set("")?;
     }
 
@@ -177,7 +174,7 @@ fn inning_prefixed(text: &'static str, top_of_inning: bool) -> String {
     format!("{}{}", home_or_away, text)
 }
 
-fn game_update<MessageT: Display>(game: &EntityView, events: &Vec<EventuallyEvent>, message: MessageT, play: i32) -> IngestResult<()> {
+fn game_update<MessageT: Display>(game: &EntityView, events: &Vec<EventuallyEvent>, message: MessageT, play: i64) -> IngestResult<()> {
     game.get("lastUpdate").set(format!("{}\n", message))?;
     // play and playCount are out of sync by exactly 1
     game.get("playCount").set(play + 1)?;
@@ -219,83 +216,22 @@ fn game_update<MessageT: Display>(game: &EntityView, events: &Vec<EventuallyEven
     Ok(())
 }
 
-fn common_patches(events: &Vec<EventuallyEvent>, game_id: &Uuid, message: String, play: i32, clear_runs: bool) -> impl Iterator<Item=bs::Patch> {
-    let diff = [
-        bs::Patch {
-            path: bs::json_path!("game", game_id.clone(), "lastUpdate"),
-            change: bs::ChangeType::Set(format!("{}\n", message).into()),
-        },
-        bs::Patch {
-            path: bs::json_path!("game", game_id.clone(), "playCount"),
-            // play and playCount are out of sync by exactly 1
-            change: bs::ChangeType::Set((play + 1).into()),
-        },
-        // lastUpdateFull is not logically connected to the previous one. Re-set it each time
-        bs::Patch {
-            path: bs::json_path!("game", game_id.clone(), "lastUpdateFull"),
-            change: bs::ChangeType::Overwrite(Value::Array(events.iter()
-                .map(|event| {
-                    let mut result = json!({
-                        "blurb": "",
-                        "category": event.category as i32,
-                        "created": format_blaseball_date(event.created),
-                        "day": event.day,
-                        "description": event.description,
-                        "gameTags": [],
-                        "id": event.id,
-                        "nuts": 0,
-                        "phase": 2,
-                        "playerTags": event.player_tags,
-                        "season": event.season,
-                        "teamTags": [],
-                        "tournament": event.tournament,
-                        "type": event.r#type as i32,
-                    });
-
-                    if let Value::Object(obj) = &event.metadata.other {
-                        if !obj.is_empty() {
-                            result["metadata"] = event.metadata.other.clone();
-                        }
-                    }
-
-                    result
-                })
-                .collect())),
-        },
-    ].into_iter();
-
-    if clear_runs {
-        diff.chain(vec![
-            bs::Patch {
-                path: bs::json_path!("game", game_id.clone(), "scoreLedger"),
-                change: bs::ChangeType::Set("".into()),
-            },
-            bs::Patch {
-                path: bs::json_path!("game", game_id.clone(), "scoreUpdate"),
-                change: bs::ChangeType::Set("".into()),
-            },
-        ])
-    } else {
-        diff.chain(vec![])
-    }
-}
-
-async fn apply_half_inning(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &EventuallyEvent) -> IngestApplyResult {
+fn apply_half_inning(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event: &EventuallyEvent) -> IngestApplyResult {
     let game_id = get_one_id(&event.game_tags, "gameTags")?;
-    log.debug(format!("Applying HalfInning event for game {}", game_id)).await?;
+    log.debug(format!("Applying HalfInning event for game {}", game_id))?;
 
     let data = DataView::new(state.data.clone(),
                              bs::Event::FeedEvent(event.id));
     let game = data.get_game(game_id);
 
-    let inning = game.get("inning").as_int().await?;
-    let top_of_inning = game.get("topOfInning").as_bool().await?;
+    let inning = game.get("inning").as_int()?;
+    let top_of_inning = game.get("topOfInning").as_bool()?;
 
     let new_inning = if top_of_inning { inning } else { inning + 1 };
     let new_top_of_inning = !top_of_inning;
 
-    let batting_team_id = game.get(&prefixed("Team", new_top_of_inning)).as_uuid().await?;
-    let batting_team_name = data.get_team(&batting_team_id).get("fullName").as_string().await?;
+    let batting_team_id = game.get(&prefixed("Team", new_top_of_inning)).as_uuid()?;
+    let batting_team_name = data.get_team(&batting_team_id).get("fullName").as_string()?;
 
     let top_or_bottom = if new_top_of_inning { "Top" } else { "Bottom" };
     let message = format!("{} of {}, {} batting.", top_or_bottom, new_inning + 1, batting_team_name);
@@ -308,11 +244,11 @@ async fn apply_half_inning(state: Arc<bs::BlaseballState>, log: &IngestLogger, e
 
     // The first halfInning event re-sets the data that PlayBall clears
     if inning == -1 {
-        let away_team_id = state.uuid_at(&bs::json_path!("game", game_id.clone(), "awayTeam")).await?;
-        let away_pitcher = get_active_pitcher(&state, away_team_id, event.day > 0).await?;
+        let away_team_id = state.uuid_at(&bs::json_path!("game", game_id.clone(), "awayTeam"))?;
+        let away_pitcher = get_active_pitcher(&state, away_team_id, event.day > 0)?;
 
-        let home_team_id = state.uuid_at(&bs::json_path!("game", game_id.clone(), "homeTeam")).await?;
-        let home_pitcher = get_active_pitcher(&state, home_team_id, event.day > 0).await?;
+        let home_team_id = state.uuid_at(&bs::json_path!("game", game_id.clone(), "homeTeam"))?;
+        let home_pitcher = get_active_pitcher(&state, home_team_id, event.day > 0)?;
 
         for (pitcher, which) in [(home_pitcher, "home"), (away_pitcher, "away")] {
             game.get(&format!("{}Pitcher", which)).set(pitcher.pitcher_id)?;
@@ -324,16 +260,16 @@ async fn apply_half_inning(state: Arc<bs::BlaseballState>, log: &IngestLogger, e
     Ok(state.successor(caused_by, new_data))
 }
 
-async fn apply_batter_up(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &EventuallyEvent) -> IngestApplyResult {
+fn apply_batter_up(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event: &EventuallyEvent) -> IngestApplyResult {
     let game_id = get_one_id(&event.game_tags, "gameTags")?;
-    log.debug(format!("Applying BatterUp event for game {}", game_id)).await?;
+    log.debug(format!("Applying BatterUp event for game {}", game_id))?;
 
-    let top_of_inning = state.bool_at(&bs::json_path!("game", game_id.clone(), "topOfInning")).await?;
-    let batting_team_id = state.uuid_at(&bs::json_path!("game", game_id.clone(), prefixed("Team", top_of_inning))).await?;
-    let batting_team_name = state.string_at(&bs::json_path!("team", batting_team_id, "nickname")).await?;
-    let batter_count = 1 + state.int_at(&bs::json_path!("game", game_id.clone(), prefixed("TeamBatterCount", top_of_inning))).await?;
-    let batter_id = state.uuid_at(&bs::json_path!("team", batting_team_id, "lineup", batter_count as usize)).await?;
-    let batter_name = state.string_at(&bs::json_path!("player", batter_id, "name")).await?;
+    let top_of_inning = state.bool_at(&bs::json_path!("game", game_id.clone(), "topOfInning"))?;
+    let batting_team_id = state.uuid_at(&bs::json_path!("game", game_id.clone(), prefixed("Team", top_of_inning)))?;
+    let batting_team_name = state.string_at(&bs::json_path!("team", batting_team_id, "nickname"))?;
+    let batter_count = 1 + state.int_at(&bs::json_path!("game", game_id.clone(), prefixed("TeamBatterCount", top_of_inning)))?;
+    let batter_id = state.uuid_at(&bs::json_path!("team", batting_team_id, "lineup", batter_count as usize))?;
+    let batter_name = state.string_at(&bs::json_path!("player", batter_id, "name"))?;
 
     let data = DataView::new(state.data.clone(),
                              bs::Event::FeedEvent(event.id));
@@ -351,12 +287,12 @@ async fn apply_batter_up(state: Arc<bs::BlaseballState>, log: &IngestLogger, eve
 }
 
 
-async fn apply_strike(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &EventuallyEvent) -> IngestApplyResult {
+fn apply_strike(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event: &EventuallyEvent) -> IngestApplyResult {
     let game_id = get_one_id(&event.game_tags, "gameTags")?;
-    log.debug(format!("Applying Strike event for game {}", game_id)).await?;
+    log.debug(format!("Applying Strike event for game {}", game_id))?;
 
-    let balls = state.int_at(&bs::json_path!("game", game_id.clone(), "atBatBalls")).await?;
-    let strikes = 1 + state.int_at(&bs::json_path!("game", game_id.clone(), "atBatStrikes")).await?;
+    let balls = state.int_at(&bs::json_path!("game", game_id.clone(), "atBatBalls"))?;
+    let strikes = 1 + state.int_at(&bs::json_path!("game", game_id.clone(), "atBatStrikes"))?;
 
     let strike_type = parse_strike(&event.description)?;
     let strike_text = match strike_type {
@@ -364,7 +300,7 @@ async fn apply_strike(state: Arc<bs::BlaseballState>, log: &IngestLogger, event:
         StrikeType::Looking => { "looking" }
     };
 
-    log.debug(format!("Recording Strike, {} for game {}, count {}-{}", strike_text, game_id, balls, strikes)).await?;
+    log.debug(format!("Recording Strike, {} for game {}, count {}-{}", strike_text, game_id, balls, strikes))?;
 
     let data = DataView::new(state.data.clone(),
                              bs::Event::FeedEvent(event.id));
@@ -380,14 +316,14 @@ async fn apply_strike(state: Arc<bs::BlaseballState>, log: &IngestLogger, event:
 }
 
 
-async fn apply_ball(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &EventuallyEvent) -> IngestApplyResult {
+fn apply_ball(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event: &EventuallyEvent) -> IngestApplyResult {
     let game_id = get_one_id(&event.game_tags, "gameTags")?;
-    log.debug(format!("Applying Ball event for game {}", game_id)).await?;
+    log.debug(format!("Applying Ball event for game {}", game_id))?;
 
-    let balls = 1 + state.int_at(&bs::json_path!("game", game_id.clone(), "atBatBalls")).await?;
-    let strikes = state.int_at(&bs::json_path!("game", game_id.clone(), "atBatStrikes")).await?;
+    let balls = 1 + state.int_at(&bs::json_path!("game", game_id.clone(), "atBatBalls"))?;
+    let strikes = state.int_at(&bs::json_path!("game", game_id.clone(), "atBatStrikes"))?;
 
-    log.debug(format!("Recording Ball for game {}, count {}-{}", game_id, balls, strikes)).await?;
+    log.debug(format!("Recording Ball for game {}, count {}-{}", game_id, balls, strikes))?;
 
     let data = DataView::new(state.data.clone(),
                              bs::Event::FeedEvent(event.id));
@@ -403,21 +339,21 @@ async fn apply_ball(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &
 }
 
 
-async fn apply_foul_ball(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &EventuallyEvent) -> IngestApplyResult {
+fn apply_foul_ball(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event: &EventuallyEvent) -> IngestApplyResult {
     let game_id = get_one_id(&event.game_tags, "gameTags")?;
-    log.debug(format!("Applying FoulBall event for game {}", game_id)).await?;
+    log.debug(format!("Applying FoulBall event for game {}", game_id))?;
 
-    let top_of_inning = state.bool_at(&bs::json_path!("game", game_id.clone(), "topOfInning")).await?;
-    let max_strikes = state.int_at(&bs::json_path!("game", game_id.clone(), prefixed("Strikes", top_of_inning))).await?;
+    let top_of_inning = state.bool_at(&bs::json_path!("game", game_id.clone(), "topOfInning"))?;
+    let max_strikes = state.int_at(&bs::json_path!("game", game_id.clone(), prefixed("Strikes", top_of_inning)))?;
 
-    let balls = state.int_at(&bs::json_path!("game", game_id.clone(), "atBatBalls")).await?;
-    let mut strikes = state.int_at(&bs::json_path!("game", game_id.clone(), "atBatStrikes")).await?;
+    let balls = state.int_at(&bs::json_path!("game", game_id.clone(), "atBatBalls"))?;
+    let mut strikes = state.int_at(&bs::json_path!("game", game_id.clone(), "atBatStrikes"))?;
 
     if strikes != max_strikes {
         strikes += 1;
     }
 
-    log.debug(format!("Recording FoulBall for game {}, count {}-{}", game_id, balls, strikes)).await?;
+    log.debug(format!("Recording FoulBall for game {}, count {}-{}", game_id, balls, strikes))?;
 
     let data = DataView::new(state.data.clone(),
                              bs::Event::FeedEvent(event.id));
@@ -433,26 +369,24 @@ async fn apply_foul_ball(state: Arc<bs::BlaseballState>, log: &IngestLogger, eve
 }
 
 
-async fn apply_ground_out(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &EventuallyEvent) -> IngestApplyResult {
+fn apply_ground_out(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event: &EventuallyEvent) -> IngestApplyResult {
     let game_id = get_one_id(&event.game_tags, "gameTags")?;
-    log.debug(format!("Applying GroundOut event for game {}", game_id)).await?;
+    log.debug(format!("Applying GroundOut event for game {}", game_id))?;
 
     // Look. I accidentally wrote the parsing logic to tell ground outs and flyouts apart before
     // realizing that they're separate event types, so I'm just using it now.
-    apply_fielding_out(state, log, event, game_id).await
+    apply_fielding_out(state, log, event, game_id)
 }
 
-async fn apply_fielding_out(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &EventuallyEvent, game_id: &Uuid) -> IngestApplyResult {
-    let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
-
+fn apply_fielding_out(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event: &EventuallyEvent, game_id: &Uuid) -> IngestApplyResult {
     let data = DataView::new(state.data.clone(),
                              bs::Event::FeedEvent(event.id));
     let game = data.get_game(game_id);
 
-    let top_of_inning = game.get("topOfInning").as_bool().await?;
-    let batter_id = game.get(&prefixed("Batter", top_of_inning)).as_uuid().await?;
-    let batter_name = game.get(&prefixed("BatterName", top_of_inning)).as_string().await?;
-    let num_outs = 1 + game.get("halfInningOuts").as_int().await?;
+    let top_of_inning = game.get("topOfInning").as_bool()?;
+    let batter_id = game.get(&prefixed("Batter", top_of_inning)).as_uuid()?;
+    let batter_name = game.get(&prefixed("BatterName", top_of_inning)).as_string()?;
+    let num_outs = 1 + game.get("halfInningOuts").as_int()?;
 
     let siblings = &event.metadata.siblings;
     let out = match siblings.len() {
@@ -475,44 +409,43 @@ async fn apply_fielding_out(state: Arc<bs::BlaseballState>, log: &IngestLogger, 
 
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
     let batter = data.get_player(&batter_id);
-    apply_out(log, &game, &batter, event, message, play, top_of_inning, num_outs == 3).await?;
+    apply_out(log, &game, &batter, event, message, play, top_of_inning, num_outs == 3)?;
 
     if let FieldingOut::FieldersChoice(runner_name_parsed, out_at_base) = out {
-        let runner_idx = get_baserunner_with_name(&game, runner_name_parsed, out_at_base).await?;
-        remove_base_runner(&game, runner_idx).await?;
-        advance_runners(&game, 0).await?;
-        push_base_runner(&game, batter_id, batter_name, Base::First).await?;
+        let runner_idx = get_baserunner_with_name(&game, runner_name_parsed, out_at_base)?;
+        remove_base_runner(&game, runner_idx)?;
+        advance_runners(&game, 0)?;
+        push_base_runner(&game, batter_id, batter_name, Base::First)?;
     }
 
     let (new_data, caused_by) = data.into_inner();
     Ok(state.successor(caused_by, new_data))
 }
 
-async fn remove_base_runner(game: &EntityView<'_>, runner_idx: usize) -> IngestResult<()> {
+fn remove_base_runner(game: &EntityView<'_>, runner_idx: usize) -> IngestResult<()> {
     game.get("baseRunners").remove(runner_idx)?;
     game.get("baseRunnerNames").remove(runner_idx)?;
     game.get("baseRunnerMods").remove(runner_idx)?;
     game.get("basesOccupied").remove(runner_idx)?;
 
-    let baserunner_count = game.get("baserunnerCount");
-    baserunner_count.set(baserunner_count.as_int().await? - 1)?;
+    game.get("baserunnerCount").map_int(|count| count - 1)?;
 
     Ok(())
 }
 
 
-async fn apply_hit(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &EventuallyEvent) -> IngestApplyResult {
+fn apply_hit(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event: &EventuallyEvent) -> IngestApplyResult {
     let game_id = get_one_id(&event.game_tags, "gameTags")?;
-    log.debug(format!("Applying Hit event for game {}", game_id)).await?;
+    log.debug(format!("Applying Hit event for game {}", game_id))?;
 
     let data = DataView::new(state.data.clone(),
                              bs::Event::FeedEvent(event.id));
     let game = data.get_game(game_id);
 
     let player_id = get_one_id(&event.player_tags, "playerTags")?;
-    let top_of_inning = game.get("topOfInning").as_bool().await?;
-    let batter_id = game.get(&prefixed("Batter", top_of_inning)).as_uuid().await?;
-    let batter_name = game.get(&prefixed("BatterName", top_of_inning)).as_string().await?;
+    let top_of_inning = game.get("topOfInning").as_bool()?;
+    let batter_id = game.get(&prefixed("Batter", top_of_inning)).as_uuid()?;
+    let batter_name = game.get(&prefixed("BatterName", top_of_inning)).as_string()?;
 
     if player_id != &batter_id {
         return Err(anyhow!("Batter id from state ({}) didn't match batter id from event ({})", batter_id, player_id));
@@ -529,57 +462,85 @@ async fn apply_hit(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &E
     let message = format!("{} hits a {}!", batter_name, hit_text);
 
     game_update(&game, &event.metadata.siblings, message, play)?;
-    push_base_runner(&game, batter_id, batter_name, hit_type).await?;
-    advance_runners(&game, hit_type as i64 + 1).await?;
+    advance_runners(&game, hit_type as i64 + 1)?;
+    push_base_runner(&game, batter_id, batter_name, hit_type)?;
     end_at_bat(&game, top_of_inning)?;
     let player = data.get_player(player_id);
-    let consecutive_hits = player.get("consecutiveHits");
-    consecutive_hits.set(consecutive_hits.as_int().await? + 1)?;
+    player.get("consecutiveHits").map_int(|hits| hits + 1)?;
 
     let (new_data, caused_by) = data.into_inner();
     Ok(state.successor(caused_by, new_data))
 }
 
-async fn advance_runners(game: &EntityView<'_>, advance_at_least: i64) -> IngestResult<()> {
-    for (i, base) in game.get("basesOccupied").as_array_mut()?.iter_mut().enumerate() {
-        let current_base = base.as_int().await
-            .map_err(|value| anyhow!("Expected basesOccupied to have int values but it had {}", value))?;
-        let min_base = current_base + advance_at_least;
-        // I think you can only advance 1 extra base, and you can only advance to third
-        // (otherwise it's a run; I'll deal with fifth base later)
-        let max_base = min(min_base + 1, 2);
+fn advance_runners(game: &EntityView<'_>, advance_at_least: i64) -> IngestResult<()> {
+    for base in game.get("basesOccupied").as_array_mut()?.iter_mut() {
+        let new_range = if let Ok(current_base) = base.as_int() {
+            let min_base = current_base + advance_at_least;
+            // I think you can only advance 1 extra base, and you can only advance to third
+            // (otherwise it's a run; I'll deal with fifth base later)
+            let max_base = min(min_base + 1, 2);
 
-        *base = base.successor(PrimitiveValue::IntRange(min_base, max_base),game.caused_by());
+            Ok(bs::PrimitiveValue::IntRange(min_base, max_base))
+        } else if let Ok((lower, upper)) = base.as_int_range() {
+            let min_base = lower + advance_at_least;
+            let max_base = min(upper + advance_at_least + 1, 2);
+
+            Ok(bs::PrimitiveValue::IntRange(min_base, max_base))
+        } else {
+            Err(anyhow!("Expected basesOccupied to have int or int range values but it had {}", base.to_string()))
+        }?;
+
+        *base = base.successor(new_range,game.caused_by());
     }
 
     Ok(())
 }
 
-async fn push_base_runner(game: &EntityView<'_>, runner_id: Uuid, runner_name: String, to_base: Base) -> IngestResult<()> {
+fn push_base_runner(game: &EntityView<'_>, runner_id: Uuid, runner_name: String, to_base: Base) -> IngestResult<()> {
     game.get("baseRunners").push(runner_id)?;
     game.get("baseRunnerNames").push(runner_name)?;
     game.get("baseRunnerMods").push("")?;
     game.get("basesOccupied").push(to_base as i64)?;
 
-    let baserunner_count = game.get("baserunnerCount");
-    baserunner_count.set(baserunner_count.as_int().await? + 1)?;
+    game.get("baserunnerCount").map_int(|count| count + 1)?;
 
     let mut last_occupied_base = None;
     for base in game.get("basesOccupied").as_array_mut()?.iter_mut().rev() {
-        let base_num = base.as_int().await
-            .map_err(|value| anyhow!("Expected basesOccupied to have int values but it had {}", value))?;
+        if let Ok(base_num) = base.as_int() {
+            if let Some(last_occupied_base_num) = last_occupied_base {
+                if base_num <= last_occupied_base_num {
+                    let last_occupied_base_num = base_num + 1;
 
-        if let Some(last_occupied_base_num) = last_occupied_base {
-            if base_num <= last_occupied_base_num {
-                let last_occupied_base_num = base_num + 1;
-
-                *base = base.successor(last_occupied_base_num.into(), game.caused_by());
-                last_occupied_base = Some(last_occupied_base_num)
+                    *base = base.successor(last_occupied_base_num.into(), game.caused_by());
+                    last_occupied_base = Some(last_occupied_base_num)
+                } else {
+                    last_occupied_base = Some(base_num);
+                }
             } else {
                 last_occupied_base = Some(base_num);
             }
+        } else if let Ok((min_base, max_base)) = base.as_int_range() {
+            if let Some(last_occupied_base_num) = last_occupied_base {
+                if min_base <= last_occupied_base_num {
+                    let last_occupied_base_num = min_base + 1;
+
+                    if last_occupied_base_num == max_base {
+                        // Then this has collapsed the possibilities
+                        *base = base.successor(last_occupied_base_num.into(), game.caused_by())
+                    } else {
+                        // Then this has just narrowed down the range
+                        *base = base.successor(bs::PrimitiveValue::IntRange(last_occupied_base_num, max_base), game.caused_by())
+                    }
+                    last_occupied_base = Some(last_occupied_base_num)
+                } else {
+                    last_occupied_base = Some(min_base);
+                }
+            } else {
+                last_occupied_base = Some(min_base);
+            }
+
         } else {
-            last_occupied_base = Some(base_num);
+            return Err(anyhow!("Expected basesOccupied to have int values but it had {}", base.to_string()));
         }
     }
 
@@ -587,21 +548,20 @@ async fn push_base_runner(game: &EntityView<'_>, runner_id: Uuid, runner_name: S
 }
 
 
-async fn apply_strikeout(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &EventuallyEvent) -> IngestApplyResult {
+fn apply_strikeout(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event: &EventuallyEvent) -> IngestApplyResult {
     let game_id = get_one_id(&event.game_tags, "gameTags")?;
-    log.debug(format!("Applying Strikeout event for game {}", game_id)).await?;
+    log.debug(format!("Applying Strikeout event for game {}", game_id))?;
 
-    let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
     let player_id = get_one_id(&event.player_tags, "playerTags")?;
-    let top_of_inning = state.bool_at(&bs::json_path!("game", game_id.clone(), "topOfInning")).await?;
-    let batter_id = state.uuid_at(&bs::json_path!("game", game_id.clone(), prefixed("Batter", top_of_inning))).await?;
+    let top_of_inning = state.bool_at(&bs::json_path!("game", game_id.clone(), "topOfInning"))?;
+    let batter_id = state.uuid_at(&bs::json_path!("game", game_id.clone(), prefixed("Batter", top_of_inning)))?;
 
     if player_id != &batter_id {
         return Err(anyhow!("Batter id from state ({}) didn't match batter id from event ({})", batter_id, player_id));
     }
 
-    let batter_name = state.string_at(&bs::json_path!("game", game_id.clone(), prefixed("BatterName", top_of_inning))).await?;
-    let num_outs = 1 + state.int_at(&bs::json_path!("game", game_id.clone(), "halfInningOuts")).await?;
+    let batter_name = state.string_at(&bs::json_path!("game", game_id.clone(), prefixed("BatterName", top_of_inning)))?;
+    let num_outs = 1 + state.int_at(&bs::json_path!("game", game_id.clone(), "halfInningOuts"))?;
     let strike_type = parse_strikeout(&batter_name, &event.description)?;
 
     let strike_text = match strike_type {
@@ -616,7 +576,7 @@ async fn apply_strikeout(state: Arc<bs::BlaseballState>, log: &IngestLogger, eve
 
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
     let message = format!("{} strikes out {}.", batter_name, strike_text);
-    apply_out(log, &game, &batter, event, message, play, top_of_inning, num_outs == 3).await?;
+    apply_out(log, &game, &batter, event, message, play, top_of_inning, num_outs == 3)?;
 
     let (new_data, caused_by) = data.into_inner();
     Ok(state.successor(caused_by, new_data))
@@ -631,15 +591,15 @@ fn end_at_bat(game: &EntityView, top_of_inning: bool) -> IngestResult<()> {
     Ok(())
 }
 
-async fn score_runs(game: &EntityView<'_>, top_of_inning: bool, num_runs: i64, source_name: &str) -> IngestResult<()> {
+fn score_runs(game: &EntityView<'_>, top_of_inning: bool, num_runs: i64, source_name: &str) -> IngestResult<()> {
     let runs_plural = match num_runs {
         1 => "",
         _ => "s",
     };
 
-    game.get(&prefixed("Score", top_of_inning)).map_int(|runs| runs + num_runs).await?;
-    game.get(&inning_prefixed("InningScore", top_of_inning)).map_int(|runs| runs + num_runs).await?;
-    game.get("halfInningScore").map_int(|runs| runs + num_runs).await?;
+    game.get(&prefixed("Score", top_of_inning)).map_int(|runs| runs + num_runs)?;
+    game.get(&inning_prefixed("InningScore", top_of_inning)).map_int(|runs| runs + num_runs)?;
+    game.get("halfInningScore").map_int(|runs| runs + num_runs)?;
     game.get("scoreLedger").set(format!("{}: {} Run{}", source_name, num_runs, runs_plural))?;
     game.get("scoreUpdate").set(format!("{} Runs scored!", num_runs))?;
 
@@ -647,37 +607,34 @@ async fn score_runs(game: &EntityView<'_>, top_of_inning: bool, num_runs: i64, s
 }
 
 fn apply_out<'a>(
-    log: &'a IngestLogger,
+    log: &'a IngestLogger<'a>,
     game: &'a EntityView,
     batter: &'a EntityView,
     event: &'a EventuallyEvent,
     message: String,
-    play: i32,
+    play: i64,
     top_of_inning: bool,
     end_of_inning: bool,
-) -> impl Future<Output=IngestResult<()>> + 'a {
-    async move {
-        log.info(format!("Observed out by {}. Zeroing consecutiveHits", batter.get("name").as_string().await?)).await?;
+) -> IngestResult<()> {
+    log.info(format!("Observed out by {}. Zeroing consecutiveHits", batter.get("name").as_string()?))?;
 
-        game_update(game, &event.metadata.siblings, message, play)?;
-        end_at_bat(game, top_of_inning)?;
-        batter.get("consecutiveHits").set(0)?;
+    game_update(game, &event.metadata.siblings, message, play)?;
+    end_at_bat(game, top_of_inning)?;
+    batter.get("consecutiveHits").set(0)?;
 
-        if end_of_inning {
-            game.get("halfInningOuts").set(0)?;
-            game.get("phase").set(3)?;
-            game.get("baseRunners").overwrite(json!([]))?;
-            game.get("baseRunnerNames").overwrite(json!([]))?;
-            game.get("baseRunnerMods").overwrite(json!([]))?;
-            game.get("basesOccupied").overwrite(json!([]))?;
-            game.get("baserunnerCount").set(3)?;
-        } else {
-            let outs = game.get("halfInningOuts");
-            outs.set(outs.as_int().await? + 1)?;
-        }
-
-        Ok(())
+    if end_of_inning {
+        game.get("halfInningOuts").set(0)?;
+        game.get("phase").set(3)?;
+        game.get("baseRunners").overwrite(json!([]))?;
+        game.get("baseRunnerNames").overwrite(json!([]))?;
+        game.get("baseRunnerMods").overwrite(json!([]))?;
+        game.get("basesOccupied").overwrite(json!([]))?;
+        game.get("baserunnerCount").set(0)?;
+    } else {
+        game.get("halfInningOuts").map_int(|outs| outs + 1)?;
     }
+
+    Ok(())
 }
 
 fn get_one_id<'a>(tags: &'a Vec<Uuid>, field_name: &'static str) -> IngestResult<&'a Uuid> {
@@ -690,19 +647,19 @@ fn get_one_id<'a>(tags: &'a Vec<Uuid>, field_name: &'static str) -> IngestResult
 }
 
 
-async fn apply_fly_out(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &EventuallyEvent) -> IngestApplyResult {
+fn apply_fly_out(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event: &EventuallyEvent) -> IngestApplyResult {
     let game_id = get_one_id(&event.game_tags, "gameTags")?;
-    log.debug(format!("Applying FlyOut event for game {}", game_id)).await?;
+    log.debug(format!("Applying FlyOut event for game {}", game_id))?;
 
     // Look. I accidentally wrote the parsing logic to tell ground outs and flyouts apart before
     // realizing that they're separate event types, so I'm just using it now.
-    apply_fielding_out(state, log, event, game_id).await
+    apply_fielding_out(state, log, event, game_id)
 }
 
 
-async fn apply_stolen_base(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &EventuallyEvent) -> IngestApplyResult {
+fn apply_stolen_base(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event: &EventuallyEvent) -> IngestApplyResult {
     let game_id = get_one_id(&event.game_tags, "gameTags")?;
-    log.debug(format!("Applying StolenBase event for game {}", game_id)).await?;
+    log.debug(format!("Applying StolenBase event for game {}", game_id))?;
 
     let data = DataView::new(state.data.clone(),
                              bs::Event::FeedEvent(event.id));
@@ -710,52 +667,51 @@ async fn apply_stolen_base(state: Arc<bs::BlaseballState>, log: &IngestLogger, e
 
     let thief_uuid = get_one_id(&event.player_tags, "playerTags")?;
     let thief = data.get_player(thief_uuid);
-    let thief_name = thief.get("name").as_string().await?;
+    let thief_name = thief.get("name").as_string()?;
 
     let which_base = parse_stolen_base(&thief_name, &event.description)?;
 
-    let baserunner_index = get_baserunner_with_uuid(&game, thief_uuid, which_base).await?;
+    let baserunner_index = get_baserunner_with_uuid(&game, thief_uuid, which_base)?;
 
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
     let message = format!("{} steals {} base!", thief_name, which_base.name());
 
     game_update(&game, &event.metadata.siblings, message, play)?;
     let bases_occupied = game.get("basesOccupied");
-    let base_occupied = bases_occupied.get(baserunner_index);
-    base_occupied.set(base_occupied.as_int().await? + 1)?;
+    bases_occupied.get(baserunner_index).map_int(|base| base + 1)?;
 
     let (new_data, caused_by) = data.into_inner();
     Ok(state.successor(caused_by, new_data))
 }
 
-async fn get_baserunner_with_uuid(game: &EntityView<'_>, expected_uuid: &Uuid, which_base: Base) -> Result<usize, anyhow::Error> {
-    let baserunner_uuids: Vec<_> = stream::iter(game.get("baseRunners").as_array()?.iter())
-        .then(|uuid_node| async {
-            uuid_node.as_uuid().await
+fn get_baserunner_with_uuid(game: &EntityView<'_>, expected_uuid: &Uuid, which_base: Base) -> Result<usize, anyhow::Error> {
+    let baserunner_uuids: Vec<_> = game.get("baseRunners").as_array()?.iter()
+        .map(|uuid_node| {
+            uuid_node.as_uuid()
                 .map_err(|val| anyhow!("Expected uuids in baseRunners array but found {}", val))
         })
-        .try_collect().await?;
+        .try_collect()?;
 
-    get_baserunner_with_property(game, expected_uuid, which_base, baserunner_uuids).await?
+    get_baserunner_with_property(game, expected_uuid, which_base, baserunner_uuids)?
         .ok_or_else(|| anyhow!("Couldn't find baserunner with uuid {} on {} base", expected_uuid, which_base.name()))
 }
 
-async fn get_baserunner_with_name(game: &EntityView<'_>, expected_name: &str, base_plus_one: Base) -> Result<usize, anyhow::Error> {
-    let baserunner_names: Vec<_> = stream::iter(game.get("baseRunnerNames").as_array()?.iter())
-        .then(|uuid_node| async {
-            uuid_node.as_string().await
+fn get_baserunner_with_name(game: &EntityView<'_>, expected_name: &str, base_plus_one: Base) -> Result<usize, anyhow::Error> {
+    let baserunner_names: Vec<_> = game.get("baseRunnerNames").as_array()?.iter()
+        .map(|uuid_node| {
+            uuid_node.as_string()
                 .map_err(|val| anyhow!("Expected string in baseRunnerNames array but found {}", val))
         })
-        .try_collect().await?;
+        .try_collect()?;
 
-    get_baserunner_with_property(game, expected_name, base_plus_one, baserunner_names).await?
+    get_baserunner_with_property(game, expected_name, base_plus_one, baserunner_names)?
         .ok_or_else(|| anyhow!("Couldn't find baserunner with name {} on {} base", expected_name, base_plus_one.name()))
 }
 
-async fn get_baserunner_with_property<T: ?Sized, U: std::cmp::PartialEq<T>>(
+fn get_baserunner_with_property<T: ?Sized, U: std::cmp::PartialEq<T>>(
     game: &EntityView<'_>, expected_property: &T, which_base: Base, baserunner_properties: Vec<U>,
 ) -> IngestResult<Option<usize>> {
-    let baserunner_bases = get_bases_occupied(game).await?;
+    let baserunner_bases = get_bases_occupied(game)?;
 
     let possible_baserunner_indices: Vec<_> = Iterator::zip(baserunner_properties.into_iter(), baserunner_bases.into_iter())
         .enumerate()
@@ -775,30 +731,30 @@ async fn get_baserunner_with_property<T: ?Sized, U: std::cmp::PartialEq<T>>(
     }
 }
 
-async fn get_bases_occupied(game: &EntityView<'_>) -> IngestResult<Vec<i64>> {
-    let baserunner_bases: Vec<_> = stream::iter(game.get("basesOccupied").as_array()?.iter())
-        .then(|base_node| async {
-            base_node.as_int().await
+fn get_bases_occupied(game: &EntityView<'_>) -> IngestResult<Vec<i64>> {
+    let baserunner_bases: Vec<_> = game.get("basesOccupied").as_array()?.iter()
+        .map(|base_node| {
+            base_node.as_int()
                 .map_err(|val| anyhow!("Expected ints in basesOccupied array but found {}", val))
         })
-        .try_collect().await?;
+        .try_collect()?;
 
     Ok(baserunner_bases)
 }
 
 
-async fn apply_walk(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &EventuallyEvent) -> IngestApplyResult {
+fn apply_walk(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event: &EventuallyEvent) -> IngestApplyResult {
     let game_id = get_one_id(&event.game_tags, "gameTags")?;
-    log.debug(format!("Applying Walk event for game {}", game_id)).await?;
+    log.debug(format!("Applying Walk event for game {}", game_id))?;
 
     let data = DataView::new(state.data.clone(),
                              bs::Event::FeedEvent(event.id));
     let game = data.get_game(game_id);
 
     let player_id = get_one_id(&event.player_tags, "playerTags")?;
-    let top_of_inning = game.get("topOfInning").as_bool().await?;
-    let batter_id = game.get(&prefixed("Batter", top_of_inning)).as_uuid().await?;
-    let batter_name = game.get(&prefixed("BatterName", top_of_inning)).as_string().await?;
+    let top_of_inning = game.get("topOfInning").as_bool()?;
+    let batter_id = game.get(&prefixed("Batter", top_of_inning)).as_uuid()?;
+    let batter_name = game.get(&prefixed("BatterName", top_of_inning)).as_string()?;
 
     if player_id != &batter_id {
         return Err(anyhow!("Batter id from state ({}) didn't match batter id from event ({})", batter_id, player_id));
@@ -808,7 +764,7 @@ async fn apply_walk(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &
     let message = format!("{} draws a walk.", batter_name);
 
     game_update(&game, &event.metadata.siblings, message, play)?;
-    push_base_runner(&game,  batter_id, batter_name, Base::First).await?;
+    push_base_runner(&game,  batter_id, batter_name, Base::First)?;
     end_at_bat(&game, top_of_inning)?;
 
     let (new_data, caused_by) = data.into_inner();
@@ -816,20 +772,20 @@ async fn apply_walk(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &
 }
 
 
-async fn apply_home_run(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &EventuallyEvent) -> IngestApplyResult {
+fn apply_home_run(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event: &EventuallyEvent) -> IngestApplyResult {
     let game_id = get_one_id(&event.game_tags, "gameTags")?;
-    log.debug(format!("Applying HomeRun event for game {}", game_id)).await?;
+    log.debug(format!("Applying HomeRun event for game {}", game_id))?;
 
     let data = DataView::new(state.data.clone(),
                              bs::Event::FeedEvent(event.id));
     let game = data.get_game(game_id);
 
     let player_id = get_one_id(&event.player_tags, "playerTags")?;
-    let top_of_inning = state.bool_at(&bs::json_path!("game", game_id.clone(), "topOfInning")).await?;
-    let batter_id = state.uuid_at(&bs::json_path!("game", game_id.clone(), prefixed("Batter", top_of_inning))).await?;
-    let batter_name = state.string_at(&bs::json_path!("game", game_id.clone(), prefixed("BatterName", top_of_inning))).await?;
-    let team_id = state.uuid_at(&bs::json_path!("game", game_id.clone(), prefixed("Team", top_of_inning))).await?;
-    let team_name = state.string_at(&bs::json_path!("game", game_id.clone(), prefixed("TeamNickname", top_of_inning))).await?;
+    let top_of_inning = state.bool_at(&bs::json_path!("game", game_id.clone(), "topOfInning"))?;
+    let batter_id = state.uuid_at(&bs::json_path!("game", game_id.clone(), prefixed("Batter", top_of_inning)))?;
+    let batter_name = state.string_at(&bs::json_path!("game", game_id.clone(), prefixed("BatterName", top_of_inning)))?;
+    let team_id = state.uuid_at(&bs::json_path!("game", game_id.clone(), prefixed("Team", top_of_inning)))?;
+    let team_name = state.string_at(&bs::json_path!("game", game_id.clone(), prefixed("TeamNickname", top_of_inning)))?;
 
     if player_id != &batter_id {
         return Err(anyhow!("Batter id from state ({}) didn't match batter id from event ({})", batter_id, player_id));
@@ -844,9 +800,9 @@ async fn apply_home_run(state: Arc<bs::BlaseballState>, log: &IngestLogger, even
     let message = format!("{} hits a {} home run!\nThe {} scored!", batter_name, home_run_text, team_name);
     game_update(&game, &event.metadata.siblings, message, play)?;
     end_at_bat(&game, top_of_inning)?;
-    score_runs(&game, top_of_inning, num_runs, "Home Run").await?;
+    score_runs(&game, top_of_inning, num_runs, "Home Run")?;
     let player = data.get_player(&batter_id);
-    player.get("consecutiveHits").map_int(|n| n + 1).await?;
+    player.get("consecutiveHits").map_int(|n| n + 1)?;
     game.get("lastUpdateFull").get(1).get("teamTags").push(team_id)?;
 
     let (new_data, caused_by) = data.into_inner();
@@ -854,23 +810,21 @@ async fn apply_home_run(state: Arc<bs::BlaseballState>, log: &IngestLogger, even
 }
 
 
-async fn apply_storm_warning(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &EventuallyEvent) -> IngestApplyResult {
+fn apply_storm_warning(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event: &EventuallyEvent) -> IngestApplyResult {
     let game_id = get_one_id(&event.game_tags, "gameTags")?;
-    log.debug(format!("Applying StormWarning event for game {}", game_id)).await?;
+    log.debug(format!("Applying StormWarning event for game {}", game_id))?;
 
-    let game_id = get_one_id(&event.game_tags, "gameTags")?;
+    let data = DataView::new(state.data.clone(),
+                             bs::Event::FeedEvent(event.id));
+    let game = data.get_game(game_id);
+
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
-    let diff = common_patches(&event.metadata.siblings, game_id, "WINTER STORM WARNING".into(), play, false)
-        .chain([
-            bs::Patch {
-                path: bs::json_path!("game", game_id.clone(), "gameStartPhase"),
-                change: bs::ChangeType::Set(11.into()),
-            },
-        ]);
 
-    let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
-    state.diff_successor(caused_by, diff).await
-}
+    game_update(&game, &event.metadata.siblings, "WINTER STORM WARNING", play)?;
+    game.get("gameStartPhase").set(11)?;
+
+    let (new_data, caused_by) = data.into_inner();
+    Ok(state.successor(caused_by, new_data))}
 
 
 fn format_blaseball_date(date: DateTime<Utc>) -> String {
@@ -883,9 +837,13 @@ fn format_blaseball_date(date: DateTime<Utc>) -> String {
 }
 
 
-async fn apply_snowflakes(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &EventuallyEvent) -> IngestApplyResult {
+fn apply_snowflakes(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event: &EventuallyEvent) -> IngestApplyResult {
     let game_id = get_one_id(&event.game_tags, "gameTags")?;
-    log.debug(format!("Applying Snowflakes event for game {}", game_id)).await?;
+    log.debug(format!("Applying Snowflakes event for game {}", game_id))?;
+
+    let data = DataView::new(state.data.clone(),
+                             bs::Event::FeedEvent(event.id));
+    let game = data.get_game(game_id);
 
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
     let (snow_event, mod_events) = event.metadata.siblings.split_first()
@@ -898,65 +856,49 @@ async fn apply_snowflakes(state: Arc<bs::BlaseballState>, log: &IngestLogger, ev
         })
         .try_collect()?;
 
-    let state_ref = &state;
-
-    let frozen_messages: Vec<String> = stream::iter(frozen_player_ids.iter())
-        .then(|uuid| async move {
-            let name = state_ref.string_at(&bs::json_path!("player", *uuid.clone(), "name")).await?;
-            Ok::<String, anyhow::Error>(format!("\n{} was Frozen!", name))
+    let frozen_messages: Vec<String> = frozen_player_ids.iter()
+        .map(|&uuid| {
+            let player = data.get_player(uuid);
+            Ok::<String, anyhow::Error>(format!("\n{} was Frozen!", player.get("name").as_string()?))
         })
-        .try_collect().await?;
+        .try_collect()?;
 
-    let frozen_player_and_team_ids: Vec<_> = stream::iter(frozen_player_ids.into_iter().cloned())
-        .then(|player_id| async move {
-            let team_id = state_ref.uuid_at(&bs::json_path!("player", player_id.clone(), "leagueTeamId")).await?;
+    let frozen_player_and_team_ids: Vec<_> = frozen_player_ids.into_iter()
+        .map(|player_id| {
+            let player = data.get_player(&player_id);
+            let team_id = player.get("leagueTeamId").as_uuid()?;
             Ok::<_, anyhow::Error>((player_id, team_id))
         })
-        .try_collect().await?;
+        .try_collect()?;
 
     let message = format!("{} Snowflakes {} the field!{}", num_snowflakes, modified_type, frozen_messages.join(""));
-    let diff = common_patches(&event.metadata.siblings, game_id, message, play, true)
-        .chain([
-            bs::Patch {
-                path: bs::json_path!("game", game_id.clone(), "gameStartPhase"),
-                change: bs::ChangeType::Set(20.into()),
-            },
-            bs::Patch {
-                path: bs::json_path!("game", game_id.clone(), "state", "snowfallEvents"),
-                change: bs::ChangeType::AddInt(1),
-            },
-        ])
-        .chain(
-            frozen_player_and_team_ids.into_iter()
-                .enumerate()
-                .map(|(i, (player_id, team_id))| {
-                    [
-                        bs::Patch {
-                            path: bs::json_path!("game", game_id.clone(), "lastUpdateFull", i + 1, "teamTags"),
-                            change: bs::ChangeType::Push(json!(team_id)),
-                        },
-                        bs::Patch {
-                            path: bs::json_path!("player", player_id, "gameAttr"),
-                            change: bs::ChangeType::Push(json!("FROZEN")),
-                        }
-                    ]
-                })
-                .flatten()
-        );
+    game_update(&game, &event.metadata.siblings, message, play)?;
+    game.get("gameStartPhase").set(20)?;
+    game.get("state").get("snowfallEvents").map_int(|x| x + 1)?;
 
-    let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
-    state.diff_successor(caused_by, diff).await
-}
+    frozen_player_and_team_ids.into_iter()
+        .enumerate()
+        .try_for_each(|(i, (player_id, team_id))| {
+            let player = data.get_player(&player_id);
+            game.get("lastUpdateFull").get(i + 1).get("teamTags").push(team_id)?;
+            player.get("gameAttr").push("FROZEN")?;
+
+            Ok::<_, bs::PathError>(())
+        })?;
+
+    let (new_data, caused_by) = data.into_inner();
+    Ok(state.successor(caused_by, new_data))}
 
 
-async fn apply_player_stat_reroll(state: Arc<bs::BlaseballState>, log: &IngestLogger, event: &EventuallyEvent) -> IngestApplyResult {
+fn apply_player_stat_reroll(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event: &EventuallyEvent) -> IngestApplyResult {
     let player_id = get_one_id(&event.player_tags, "playerTags")?;
-    log.debug(format!("Applying PlayerStatReroll event for player {}", player_id)).await?;
+    log.debug(format!("Applying PlayerStatReroll event for player {}", player_id))?;
 
-    let diff = [
-        // TODO
-    ].into_iter();
 
-    let caused_by = Arc::new(bs::Event::FeedEvent(event.id));
-    state.diff_successor(caused_by, diff).await
-}
+    let data = DataView::new(state.data.clone(),
+                             bs::Event::FeedEvent(event.id));
+
+    // TODO modify data
+
+    let (new_data, caused_by) = data.into_inner();
+    Ok(state.successor(caused_by, new_data))}

@@ -1,12 +1,10 @@
 use std::fmt::Display;
-use std::future::Future;
 use std::sync::{Arc, Mutex};
-use owning_ref::{MutexGuardRef, MutexGuardRefMut, OwningHandle, OwningRef};
+use owning_ref::{MutexGuardRef, MutexGuardRefMut};
 use uuid::Uuid;
 use serde_json::Value as JsonValue;
 
 use crate::blaseball_state::{BlaseballData, PathError, PrimitiveValue, Event, PathComponent, Path, Node, SharedPrimitiveNode};
-use crate::ingest::{IngestResult};
 
 pub enum PathComponentRef<'a> {
     Key(&'a str),
@@ -83,12 +81,33 @@ impl DataView {
     pub fn get_player<'short, 'long: 'short>(&'long self, player_id: &'short Uuid) -> EntityView<'short> {
         EntityView { parent: self, entity_type: "player", entity_id: player_id }
     }
+
+    pub fn games<'a>(&'a self) -> Result<impl Iterator<Item=OwningEntityView<'a>> + 'a, PathError> {
+        let game_ids: Vec<Uuid> =  {
+            let data = self.data.lock().unwrap();
+            data.get("game")
+                .ok_or_else(|| PathError::EntityTypeDoesNotExist("game"))?
+                .keys()
+                .cloned()
+                .collect()
+        };
+
+        Ok(game_ids.into_iter().map(|game_id| {
+            OwningEntityView { parent: self, entity_type: "game", entity_id: game_id }
+        }))
+    }
 }
 
 pub struct EntityView<'d> {
     parent: &'d DataView,
     entity_type: &'static str,
     entity_id: &'d Uuid,
+}
+
+pub struct OwningEntityView<'d> {
+    parent: &'d DataView,
+    entity_type: &'static str,
+    entity_id: Uuid,
 }
 
 impl<'a> View<'a> for EntityView<'a> {
@@ -125,7 +144,50 @@ impl<'a> View<'a> for EntityView<'a> {
     }
 }
 
+impl<'a> View<'a> for OwningEntityView<'a> {
+    fn get_ref(&self) -> Result<MutexGuardRef<BlaseballData, Node>, PathError> {
+        self.parent.get_ref()
+            .try_map(|data| {
+                data.get(self.entity_type)
+                    .ok_or_else(|| PathError::EntityTypeDoesNotExist(self.entity_type))?
+                    .get(&self.entity_id)
+                    .ok_or_else(|| PathError::EntityDoesNotExist(self.entity_type, self.entity_id.clone()))
+            })
+    }
+
+    fn get_ref_mut(&self) -> Result<MutexGuardRefMut<BlaseballData, Node>, PathError> {
+        self.parent.get_ref_mut()
+            .try_map_mut(|data| {
+                data.get_mut(self.entity_type)
+                    .ok_or_else(|| PathError::EntityTypeDoesNotExist(self.entity_type))?
+                    .get_mut(&self.entity_id)
+                    .ok_or_else(|| PathError::EntityDoesNotExist(self.entity_type, self.entity_id.clone()))
+            })
+    }
+
+    fn get_path(&self) -> Path {
+        Path {
+            entity_type: self.entity_type,
+            entity_id: Some(self.entity_id.clone()),
+            components: vec![],
+        }
+    }
+
+    fn caused_by(&self) -> Arc<Event> {
+        self.parent.caused_by.clone()
+    }
+}
+
 impl<'e> EntityView<'e> {
+    pub fn get<T: Into<PathComponentRef<'e>>>(&'e self, key: T) -> NodeView<Self> {
+        NodeView {
+            parent: self,
+            key: key.into(),
+        }
+    }
+}
+
+impl<'e> OwningEntityView<'e> {
     pub fn get<T: Into<PathComponentRef<'e>>>(&'e self, key: T) -> NodeView<Self> {
         NodeView {
             parent: self,
@@ -237,6 +299,7 @@ impl<'view, ParentT: View<'view>> NodeView<'view, ParentT> {
             })
     }
 
+    #[allow(dead_code)]
     pub fn as_object(&self) -> Result<MutexGuardRef<BlaseballData, im::HashMap<String, Node>>, PathError> {
         self.get_ref()?
             .try_map(|node| {
@@ -261,29 +324,29 @@ impl<'view, ParentT: View<'view>> NodeView<'view, ParentT> {
             })
     }
 
-    pub async fn as_int(&self) -> Result<i64, PathError> {
+    pub fn as_int(&self) -> Result<i64, PathError> {
         let primitive = self.as_primitive()?.clone();
-        let lock = primitive.read().await;
+        let lock = primitive.read().unwrap();
 
         let value = lock.value.as_int()
             .ok_or_else(|| self.path_error("int", &lock.value))?;
 
-        Ok(*value)
+        Ok(value)
     }
 
-    pub async fn as_bool(&self) -> Result<bool, PathError> {
+    pub fn as_bool(&self) -> Result<bool, PathError> {
         let primitive = self.as_primitive()?.clone();
-        let lock = primitive.read().await;
+        let lock = primitive.read().unwrap();
 
         let value = lock.value.as_bool()
             .ok_or_else(|| self.path_error("bool", &lock.value))?;
 
-        Ok(*value)
+        Ok(value)
     }
 
-    pub async fn as_uuid(&self) -> Result<Uuid, PathError> {
+    pub fn as_uuid(&self) -> Result<Uuid, PathError> {
         let primitive = self.as_primitive()?.clone();
-        let lock = primitive.read().await;
+        let lock = primitive.read().unwrap();
 
         let value = lock.value.as_uuid()
             .ok_or_else(|| self.path_error("uuid", &lock.value))?;
@@ -291,9 +354,9 @@ impl<'view, ParentT: View<'view>> NodeView<'view, ParentT> {
         Ok(value)
     }
 
-    pub async fn as_string(&self) -> Result<String, PathError> {
+    pub fn as_string(&self) -> Result<String, PathError> {
         let primitive = self.as_primitive()?.clone();
-        let lock = primitive.read().await;
+        let lock = primitive.read().unwrap();
 
         let value = lock.value.as_str()
             .ok_or_else(|| self.path_error("string", &lock.value))?;
@@ -320,12 +383,12 @@ impl<'view, ParentT: View<'view>> NodeView<'view, ParentT> {
         Ok(())
     }
 
-    pub async fn map_int<F, T>(&self, func: F) -> Result<(), PathError>
+    pub fn map_int<F, T>(&self, func: F) -> Result<(), PathError>
         where
             F: FnOnce(i64) -> T,
             T: Into<PrimitiveValue>
     {
-        let int = self.as_int().await?;
+        let int = self.as_int()?;
         let mut node = self.get_ref_mut()?;
         *node = node.successor(func(int).into(), self.caused_by().clone());
 

@@ -1,13 +1,11 @@
 use std::sync::Arc;
 use chrono::{DateTime, Utc};
-use futures::{stream, StreamExt, TryStreamExt};
 use rocket::async_trait;
 use serde_json::json;
-use uuid::Uuid;
 
 use crate::blaseball_state as bs;
-use crate::blaseball_state::{EntitySet, Patch};
-use crate::ingest::{IngestError, IngestItem, IngestResult};
+use crate::ingest::IngestItem;
+use crate::ingest::data_views::{DataView, OwningEntityView};
 use crate::ingest::error::IngestApplyResult;
 use crate::ingest::log::IngestLogger;
 
@@ -29,46 +27,30 @@ impl IngestItem for StartSeasonItem {
         self.at_time
     }
 
-    async fn apply(&self, log: &IngestLogger, state: Arc<bs::BlaseballState>) -> IngestApplyResult {
-        log.info("Season started! Adding odds to every game".to_string()).await?;
+    fn apply(&self, log: &IngestLogger, state: Arc<bs::BlaseballState>) -> IngestApplyResult {
+        log.info("Season started! Adding odds to every game".to_string())?;
 
-        let entity_set = state.data.get("game")
-            .ok_or(bs::PathError::EntityTypeDoesNotExist("game"))?;
+        let data = DataView::new(state.data.clone(),
+                                 bs::Event::TimedChange(self.at_time));
 
-        let diffs = get_diffs(&state, entity_set).await?;
+        for game in data.games()? {
+            game.get("lastUpdate").set("")?;
+            game.get("lastUpdateFull").overwrite(json!([]))?;
 
-        let caused_by = Arc::new(bs::Event::TimedChange(self.at_time));
-        state.diff_successor(caused_by, diffs).await
-    }
-}
-
-async fn get_diffs(state: &Arc<bs::BlaseballState>, entity_set: &EntitySet) -> IngestResult<Vec<Patch>> {
-    stream::iter(entity_set.keys().cloned())
-        .then(|game_id| {
-            // I don't know why but passing state as a reference into this closure fails to compile in every variation
-            // I can think of, so I'm just going to copy it. At least it's behind an Arc already.
-            let state = state.clone();
-            async move {
-                let home_pitcher = get_pitcher_for_game(&state, &game_id, "home").await?;
-                let away_pitcher = get_pitcher_for_game(&state, &game_id, "away").await?;
-                let s = [
-                    bs::Patch {
-                        path: bs::json_path!("game", game_id.clone(), "lastUpdate"),
-                        change: bs::ChangeType::Set("".into()),
-                    },
-                    bs::Patch {
-                        path: bs::json_path!("game", game_id.clone(), "lastUpdateFull"),
-                        change: bs::ChangeType::Overwrite(json!([])),
-                    },
-                ].into_iter()
-                    .chain(game_start_team_specific_diffs(&game_id, home_pitcher, "home"))
-                    .chain(game_start_team_specific_diffs(&game_id, away_pitcher, "away"));
-
-                Ok::<_, IngestError>(stream::iter(s).map(|x| Ok::<_, IngestError>(x)))
+            for which in ["home", "away"] {
+                let active_pitcher = get_pitcher_for_game(&data, &game, which)?;
+                game.get(&format!("{}BatterName", which)).set("")?;
+                game.get(&format!("{}Odds", which)).set(bs::PrimitiveValue::FloatRange(0., 1.))?;
+                game.get(&format!("{}Pitcher", which)).set(active_pitcher.pitcher_id)?;
+                game.get(&format!("{}PitcherName", which)).set(active_pitcher.pitcher_name)?;
+                game.get(&format!("{}Score", which)).set(0)?;
+                game.get(&format!("{}Strikes", which)).set(3)?;
             }
-        })
-        .try_flatten()
-        .try_collect().await
+        }
+
+        let (new_data, caused_by) = data.into_inner();
+        Ok(state.successor(caused_by, new_data))
+    }
 }
 
 
@@ -77,54 +59,29 @@ struct Pitcher {
     pitcher_name: String,
 }
 
-async fn get_pitcher_for_game(state: &bs::BlaseballState, game_id: &Uuid, home_or_away: &str) -> Result<Pitcher, bs::PathError> {
-    let team_id = state.uuid_at(&bs::json_path!("game", game_id.clone(), format!("{}Team", home_or_away))).await?;
-    let rotation = state.array_at(&bs::json_path!("team", team_id, "rotation")).await?;
-    let day = state.int_at(&bs::json_path!("game", game_id.clone(), "day")).await?;
+fn get_pitcher_for_game(data: &DataView, game: &OwningEntityView, home_or_away: &str) -> Result<Pitcher, bs::PathError> {
+    let team_id = game.get(&format!("{}Team", home_or_away)).as_uuid()?;
+    let team = data.get_team(&team_id);
+    let rotation_node = team.get("rotation");
+    let day = game.get("day").as_int()?;
+    let rotation = rotation_node.as_array()?;
     let rotation_slot = day % (rotation.len() as i64);
 
     let pitcher_id = rotation.get(rotation_slot as usize)
         .expect("rotation_slot should always be valid here");
 
-    let pitcher_id = pitcher_id.as_uuid().await
+    let pitcher_id = pitcher_id.as_uuid()
         .map_err(|value| bs::PathError::UnexpectedType {
             path: bs::json_path!("team", team_id, "rotation", rotation_slot as usize),
             expected_type: "uuid",
             value,
         })?;
 
-    let pitcher_name = state.string_at(&bs::json_path!("player", pitcher_id, "name")).await?;
+    // Avoid a deadlock when something else wants to read some state
+    drop(rotation);
+
+    let pitcher = data.get_player(&pitcher_id);
+    let pitcher_name = pitcher.get("name").as_string()?;
 
     Ok(Pitcher { pitcher_id, pitcher_name })
 }
-
-
-fn game_start_team_specific_diffs(game_id: &Uuid, active_pitcher: Pitcher, which: &'static str) -> impl Iterator<Item=bs::Patch> {
-    [
-        bs::Patch {
-            path: bs::json_path!("game", game_id.clone(), format!("{}BatterName", which)),
-            change: bs::ChangeType::Set("".to_string().into()),
-        },
-        bs::Patch {
-            path: bs::json_path!("game", game_id.clone(), format!("{}Odds", which)),
-            change: bs::ChangeType::Set(bs::PrimitiveValue::FloatRange(0., 1.)),
-        },
-        bs::Patch {
-            path: bs::json_path!("game", game_id.clone(), format!("{}Pitcher", which)),
-            change: bs::ChangeType::Set(active_pitcher.pitcher_id.to_string().into()),
-        },
-        bs::Patch {
-            path: bs::json_path!("game", game_id.clone(), format!("{}PitcherName", which)),
-            change: bs::ChangeType::Set(active_pitcher.pitcher_name.into()),
-        },
-        bs::Patch {
-            path: bs::json_path!("game", game_id.clone(), format!("{}Score", which)),
-            change: bs::ChangeType::Set(0.into()),
-        },
-        bs::Patch {
-            path: bs::json_path!("game", game_id.clone(), format!("{}Strikes", which)),
-            change: bs::ChangeType::Set(3.into()),
-        },
-    ].into_iter()
-}
-

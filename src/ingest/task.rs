@@ -1,7 +1,6 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc::Sender};
 use log::error;
-use tokio::sync::oneshot::Sender;
 
 use crate::db::BlarserDbConn;
 use crate::ingest::ingest;
@@ -38,15 +37,17 @@ impl IngestTask {
 
     pub fn start(&self, db: BlarserDbConn) {
         let self_clone = self.clone();
-        tokio::spawn(async {
-            let log = IngestLogger::new(db, self_clone).await.unwrap();
-            let result = ingest::run(log).await;
-            match result {
-                Ok(_) => {}
-                Err(e) => {
-                    error!("{:?}", e);
+        tokio::spawn(async move {
+            db.run(|c| {
+                let log = IngestLogger::new(c, self_clone).unwrap();
+                let result = ingest::run(log);
+                match result {
+                    Ok(_) => {}
+                    Err(e) => {
+                        error!("{:?}", e);
+                    }
                 }
-            }
+            }).await
         });
     }
 }

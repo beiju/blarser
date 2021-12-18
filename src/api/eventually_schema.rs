@@ -32,12 +32,12 @@ pub struct EventMetadata {
     #[serde(rename = "_eventually_siblingEvents")]
     pub siblings: Vec<EventuallyEvent>,
     #[serde(rename = "_eventually_ingest_time")]
-    pub ingest_time: i32,
+    pub ingest_time: i64,
     #[serde(rename = "_eventually_ingest_source")]
     pub ingest_source: String,
 
-    pub play: Option<i32>,
-    pub sub_play: Option<i32>,
+    pub play: Option<i64>,
+    pub sub_play: Option<i64>,
     pub sibling_ids: Option<Vec<Uuid>>,
 
     #[serde(flatten)]
