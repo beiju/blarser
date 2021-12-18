@@ -39,7 +39,7 @@ impl IngestItem for ChronUpdate {
     }
 
     fn apply(&self, log: &IngestLogger, state: Arc<bs::BlaseballState>) -> IngestApplyResult {
-        log.info(format!("Applying chron update from {}", self.item.valid_from))?;
+        log.info(format!("Applying chron update from {} for {}/{}", self.item.valid_from, self.endpoint, self.item.entity_id))?;
 
         let observation = bs::Observation {
             entity_type: self.endpoint,
