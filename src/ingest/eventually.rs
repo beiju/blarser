@@ -479,7 +479,7 @@ fn apply_fielding_out(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, ev
             format!("{} hit a flyout to {}.\n", batter_name, fielder_name)
         }
         FieldingOut::FieldersChoice(runner_name, base) => {
-            format!("{} out at {} base.\n{} reaches on fielder's choice.\n", runner_name, base.name(), batter_name)
+            format!("{} out at {} base.\n", runner_name, base.name())
         }
         FieldingOut::DoublePlay => {
             format!("{} hit into a double play!\n", batter_name)
@@ -491,13 +491,24 @@ fn apply_fielding_out(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, ev
 
     let scores: Vec<_> = scoring_runners.iter()
         .map(|&runner_id| {
-            let score = score_runner(&data, &game, runner_id, "Sacrifice")?;
+            // Oh joy! There's different text on a FC.
+            let source = if let FieldingOut::FieldersChoice(_, _) = out { "Base Hit" } else { "Sacrifice" };
+            let score = score_runner(&data, &game, runner_id, source)?;
 
-            message = format!("{}{} advances on the sacrifice.\n", message, score.player_name);
+            if let FieldingOut::FieldersChoice(_, _) = out {
+                message = format!("{}{} scores!\n", message, score.player_name);
+            } else {
+                message = format!("{}{} advances on the sacrifice.\n", message, score.player_name);
+            }
 
             Ok::<_, IngestError>(score)
         })
         .try_collect()?;
+
+    // This text happens after the scoring text
+    if let FieldingOut::FieldersChoice(_, _) = out {
+        message = format!("{}{} reaches on fielder's choice.\n", message, batter_name);
+    }
 
     let scoring_team = score_team(&data, &game, top_of_inning, &mut message, scoring_runners)?;
 
