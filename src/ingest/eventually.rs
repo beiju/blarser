@@ -499,7 +499,9 @@ fn apply_fielding_out(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, ev
 
             if let FieldingOut::FieldersChoice(_, _) = out {
                 message = format!("{}{} scores!\n", message, score.player_name);
-            } else {
+            } else if let FieldingOut::Flyout(_) = out {
+                message = format!("{}{} tags up and scores!\n", message, score.player_name);
+            }else {
                 message = format!("{}{} advances on the sacrifice.\n", message, score.player_name);
             }
 
