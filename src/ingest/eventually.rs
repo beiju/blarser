@@ -503,7 +503,7 @@ fn apply_fielding_out(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, ev
                 message = format!("{}{} scores!\n", message, score.player_name);
             } else if let FieldingOut::Flyout(_) = out {
                 message = format!("{}{} tags up and scores!\n", message, score.player_name);
-            }else {
+            } else {
                 message = format!("{}{} advances on the sacrifice.\n", message, score.player_name);
             }
 
@@ -1392,7 +1392,11 @@ fn apply_game_end(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event:
     let away_team_name = data.get_team(&away_team_id).get("nickname").as_string()?;
     let away_team_score = game.get("awayScore").as_int()?;
 
-    let message = format!("{} {}, {} {}\n", home_team_name, home_team_score, away_team_name, away_team_score);
+    let message = if home_team_score > away_team_score {
+        format!("{} {}, {} {}\n", home_team_name, home_team_score, away_team_name, away_team_score)
+    } else {
+        format!("{} {}, {} {}\n", away_team_name, away_team_score, home_team_name, home_team_score)
+    };
     game_update(&game, &event.metadata.siblings, message, play, &[])?;
     game.get("lastUpdateFull").get(0).get("teamTags").push(home_team_id)?;
     game.get("lastUpdateFull").get(0).get("teamTags").push(away_team_id)?;
@@ -1434,7 +1438,15 @@ fn apply_game_over(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event
     standings.get("wins").get(&winner_id.to_string()).default_map_int(0, |i| i + 1)?;
     standings.get("wins").get(&loser_id.to_string()).default_map_int(0, |i| i)?;
     standings.get("runs").get(&winner_id.to_string()).default_map_int(0, |i| i + max(home_team_score, away_team_score))?;
-    standings.get("runs").get(&loser_id.to_string()).default_map_int(0, |i| i +  min(home_team_score, away_team_score))?;
+    standings.get("runs").get(&loser_id.to_string()).default_map_int(0, |i| i + min(home_team_score, away_team_score))?;
+
+    let winning_team = data.get_team(&winner_id);
+    log.debug(format!("Team {} won, increasing win streak", winner_id))?;
+    winning_team.get("winStreak").map_int(|i| i + 1)?;
+
+    let losing_team = data.get_team(&loser_id);
+    log.debug(format!("Team {} lost, decreasing win streak", loser_id))?;
+    losing_team.get("winStreak").map_int(|i| i - 1)?;
 
     let (new_data, caused_by) = data.into_inner();
     Ok((state.successor(caused_by, new_data), Vec::new()))
