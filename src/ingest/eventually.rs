@@ -868,11 +868,29 @@ fn apply_stolen_base(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, eve
     let baserunner_index = get_baserunner_with_uuid(&game, thief_uuid, which_base)?;
 
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
-    let message = format!("{} steals {} base!\n", thief_name, which_base.name());
+    let mut message = format!("{} steals {} base!\n", thief_name, which_base.name());
 
-    game_update(&game, &event.metadata.siblings, message, play, &[])?;
-    let bases_occupied = game.get("basesOccupied");
-    bases_occupied.get(baserunner_index).map_int(|base| base + 1)?;
+    let top_of_inning = game.get("topOfInning").as_bool()?;
+    let team_id = game.get(&prefixed("Team", top_of_inning)).as_uuid()?;
+
+    let scores = if let Base::Fourth = which_base {
+        let team_name = data.get_team(&team_id).get("nickname").as_string()?;
+        message = format!("{}The {} scored!\n", message, team_name);
+        vec![
+            score_runner(&data, &game, thief_uuid, "Steal Home")?
+        ]
+    } else {
+        let bases_occupied = game.get("basesOccupied");
+        bases_occupied.get(baserunner_index).map_int(|base| base + 1)?;
+
+        Vec::new()
+    };
+
+    game_update(&game, &event.metadata.siblings, message, play, &scores)?;
+
+    if let Base::Fourth = which_base {
+        game.get("lastUpdateFull").get(1).get("teamTags").push(team_id)?;
+    }
 
     let (new_data, caused_by) = data.into_inner();
     Ok((state.successor(caused_by, new_data), Vec::new()))
