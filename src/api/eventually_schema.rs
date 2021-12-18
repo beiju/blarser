@@ -204,6 +204,9 @@ pub enum EventType {
     // At this point I got bored typing them all and only filled in the ones I encountered
     AddedModFromOtherMod = 146,
     RunsScored = 209,
+    WinCollectedRegular = 214,
+    WinCollectedPostseason = 215,
+    GameOver = 216,
     StormWarning = 263,
     Snowflakes = 264,
 }

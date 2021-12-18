@@ -56,6 +56,7 @@ impl IngestItem for EventuallyEvent {
             EventType::InningEnd => apply_inning_end(state, log, self),
             EventType::BatterSkipped => apply_batter_skipped(state, log, self),
             EventType::PeanutFlavorText => apply_peanut_flavor_text(state, log, self),
+            EventType::WinCollectedRegular => apply_win_collected_regular(state, log, self),
             _ => todo!()
         };
 
@@ -1295,6 +1296,23 @@ fn apply_peanut_flavor_text(state: Arc<bs::BlaseballState>, log: &IngestLogger<'
 
     let message = format!("{}\n", event.description);
     game_update(&game, &event.metadata.siblings, message, play, &[])?;
+
+    let (new_data, caused_by) = data.into_inner();
+    Ok((state.successor(caused_by, new_data), Vec::new()))
+}
+
+
+fn apply_win_collected_regular(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event: &EventuallyEvent) -> IngestApplyResult {
+    let game_id = get_one_id(&event.game_tags, "gameTags")?;
+    log.debug(format!("Applying WinCollectedRegular event for game {}", game_id))?;
+
+    let data = DataView::new(state.data.clone(),
+                             bs::Event::FeedEvent(event.id));
+    let _game = data.get_game(game_id);
+
+    let _play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
+
+    // TODO
 
     let (new_data, caused_by) = data.into_inner();
     Ok((state.successor(caused_by, new_data), Vec::new()))
