@@ -334,6 +334,16 @@ impl<'view, ParentT: View<'view>> NodeView<'view, ParentT> {
         Ok(value)
     }
 
+    pub fn as_float(&self) -> Result<f64, PathError> {
+        let primitive = self.as_primitive()?.clone();
+        let lock = primitive.read().unwrap();
+
+        let value = lock.value.as_float()
+            .ok_or_else(|| self.path_error("float", &lock.value))?;
+
+        Ok(value)
+    }
+
     pub fn as_bool(&self) -> Result<bool, PathError> {
         let primitive = self.as_primitive()?.clone();
         let lock = primitive.read().unwrap();
@@ -391,6 +401,18 @@ impl<'view, ParentT: View<'view>> NodeView<'view, ParentT> {
         let int = self.as_int()?;
         let mut node = self.get_ref_mut()?;
         *node = node.successor(func(int).into(), self.caused_by().clone());
+
+        Ok(())
+    }
+
+    pub fn map_float<F, T>(&self, func: F) -> Result<(), PathError>
+        where
+            F: FnOnce(f64) -> T,
+            T: Into<PrimitiveValue>
+    {
+        let float = self.as_float()?;
+        let mut node = self.get_ref_mut()?;
+        *node = node.successor(func(float).into(), self.caused_by().clone());
 
         Ok(())
     }

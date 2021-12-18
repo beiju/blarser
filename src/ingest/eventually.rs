@@ -53,6 +53,7 @@ impl IngestItem for EventuallyEvent {
             EventType::Snowflakes => apply_snowflakes(state, log, self),
             EventType::PlayerStatReroll => apply_player_stat_reroll(state, log, self),
             EventType::InningEnd => apply_inning_end(state, log, self),
+            EventType::BatterSkipped => apply_batter_skipped(state, log, self),
             _ => todo!()
         };
 
@@ -1026,7 +1027,19 @@ fn apply_player_stat_reroll(state: Arc<bs::BlaseballState>, log: &IngestLogger<'
     let data = DataView::new(state.data.clone(),
                              bs::Event::FeedEvent(event.id));
 
-    // TODO modify data
+    let snow_attrs = [
+        "baseThirst", "baserunningRating", "buoyancy", "coldness", "defenseRating", "divinity",
+        "groundFriction", "hittingRating", "indulgence", "laserlikeness", "martyrdom", "moxie",
+        "musclitude", "omniscience", "overpowerment", "patheticism", "pitchingRating",
+        "ruthlessness", "shakespearianism",
+    ];
+
+    let player = data.get_player(player_id);
+    for attr_name in snow_attrs {
+        // +/-0.1 is a placeholder
+        player.get(attr_name).map_float(|value|
+            bs::PrimitiveValue::FloatRange(value - 0.1, value + 0.1))?;
+    }
 
     let (new_data, caused_by) = data.into_inner();
     Ok(state.successor(caused_by, new_data))
@@ -1048,6 +1061,29 @@ fn apply_inning_end(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, even
     let message = format!("Inning {} is now an Outing.", inning + 1);
     game_update(&game, &event.metadata.siblings, message, play, &[])?;
     game.get("phase").set(2)?;
+
+    let (new_data, caused_by) = data.into_inner();
+    Ok(state.successor(caused_by, new_data))
+}
+
+
+fn apply_batter_skipped(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event: &EventuallyEvent) -> IngestApplyResult {
+    let game_id = get_one_id(&event.game_tags, "gameTags")?;
+    log.debug(format!("Applying BatterSkipped event for game {}", game_id))?;
+
+    let data = DataView::new(state.data.clone(),
+                             bs::Event::FeedEvent(event.id));
+    let game = data.get_game(game_id);
+
+    let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
+    let player_id = get_one_id(&event.player_tags, "playerTags")?;
+
+    let top_of_inning = game.get("topOfInning").as_bool()?;
+    let player = data.get_player(player_id);
+    let batter_name = player.get("name").as_string()?;
+    let message = format!("{} is Frozen!", batter_name);
+    game_update(&game, &event.metadata.siblings, message, play, &[])?;
+    game.get(&prefixed("TeamBatterCount", top_of_inning)).map_int(|i| i + 1)?;
 
     let (new_data, caused_by) = data.into_inner();
     Ok(state.successor(caused_by, new_data))
