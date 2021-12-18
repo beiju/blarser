@@ -738,7 +738,7 @@ fn apply_out<'a>(
     play: i64,
     scores: &[Score],
     top_of_inning: bool,
-    end_of_inning: bool,
+    end_of_half_inning: bool,
 ) -> IngestResult<()> {
     log.info(format!("Observed out by {}. Zeroing consecutiveHits", batter.get("name").as_string()?))?;
 
@@ -746,7 +746,7 @@ fn apply_out<'a>(
     end_at_bat(game, top_of_inning)?;
     batter.get("consecutiveHits").set(0)?;
 
-    if end_of_inning {
+    if end_of_half_inning {
         game.get("halfInningOuts").set(0)?;
         game.get("phase").set(3)?;
         game.get("baseRunners").overwrite(json!([]))?;
@@ -754,6 +754,12 @@ fn apply_out<'a>(
         game.get("baseRunnerMods").overwrite(json!([]))?;
         game.get("basesOccupied").overwrite(json!([]))?;
         game.get("baserunnerCount").set(0)?;
+
+        // Reset both top and bottom inning scored only when the bottom half ends
+        if !top_of_inning {
+            game.get("topInningScore").set(0)?;
+            game.get("bottomInningScore").set(0)?;
+        }
     } else {
         game.get("halfInningOuts").map_int(|outs| outs + 1)?;
     }
