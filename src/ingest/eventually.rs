@@ -536,16 +536,16 @@ fn apply_fielding_out(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, ev
 
 fn separate_scoring_events(siblings: &Vec<EventuallyEvent>) -> IngestResult<(Vec<&Uuid>, Vec<&EventuallyEvent>)> {
     // The first event is never a scoring event, and it mixes up the rest of the logic because the
-    // "hit" event type is reused
+    // "hit" or "walk" event type is reused
     let (first, rest) = siblings.split_first()
         .ok_or(anyhow!("Event had no siblings (including itself)"))?;
+    let hitter_id = get_one_id(&first.player_tags, "playerTags").ok();
     let mut scores = Vec::new();
     let mut others = vec![first];
 
-
     for event in rest {
-        if event.r#type == EventType::Hit {
-            scores.push(get_one_id(&event.player_tags, "playerTags")?);
+        if event.r#type == EventType::Hit || event.r#type == EventType::Walk {
+            scores.push(get_one_id_excluding(&event.player_tags, "playerTags", hitter_id)?);
         } else if event.r#type != EventType::RunsScored {
             others.push(event);
         }
@@ -843,12 +843,34 @@ fn clear_bases(game: &EntityView) -> IngestResult<()> {
 }
 
 fn get_one_id<'a>(tags: &'a Vec<Uuid>, field_name: &'static str) -> IngestResult<&'a Uuid> {
-    if tags.len() != 1 {
-        return Err(anyhow!("Expected exactly one element in {} but found {}", field_name, tags.len()));
-    }
+    get_one_id_excluding(tags, field_name, None)
+}
 
-    tags.get(0)
-        .ok_or_else(|| anyhow!("Expected exactly one element in {} but found none", field_name))
+fn get_one_id_excluding<'a>(tags: &'a Vec<Uuid>, field_name: &'static str, excluding: Option<&'a Uuid>) -> IngestResult<&'a Uuid> {
+    match tags.len() {
+        0 => {
+            Err(anyhow!("Expected exactly one element in {} but found none", field_name))
+        }
+        1 => {
+            Ok(&tags[0])
+        }
+        2 => {
+            if let Some(excluding) = excluding {
+                if tags[0] == *excluding {
+                    Ok(&tags[1])
+                } else if tags[1] == *excluding {
+                    Ok(&tags[0])
+                } else {
+                    Err(anyhow!("Expected exactly one element in {}, excluding {}, but found two (neither excluded)", field_name, excluding))
+                }
+            } else {
+                Err(anyhow!("Expected exactly one element in {} but found 2", field_name))
+            }
+        }
+        n => {
+            Err(anyhow!("Expected exactly one element in {} but found {}", field_name, n))
+        }
+    }
 }
 
 
@@ -984,9 +1006,27 @@ fn apply_walk(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event: &Ev
     }
 
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
-    let message = format!("{} draws a walk.\n", batter_name);
+    let mut message = format!("{} draws a walk.\n", batter_name);
 
-    game_update(&game, &event.metadata.siblings, message, play, &[])?;
+    let (scoring_runners, _) = separate_scoring_events(&event.metadata.siblings)?;
+
+    let scores: Vec<_> = scoring_runners.iter()
+        .map(|&runner_id| {
+            let score = score_runner(&data, &game, runner_id, "Walk")?;
+
+            message = format!("{}{} scores!\n", message, score.player_name);
+
+            Ok::<_, IngestError>(score)
+        })
+        .try_collect()?;
+
+    let scoring_team = score_team(&data, &game, top_of_inning, &mut message, scoring_runners)?;
+
+    game_update(&game, &event.metadata.siblings, message, play, &scores)?;
+    if let Some(team_id) = scoring_team {
+        game.get("lastUpdateFull").get(event.metadata.siblings.len() - 1).get("teamTags").push(team_id)?;
+    }
+
     push_base_runner(&game, batter_id, batter_name, Base::First)?;
     end_at_bat(&game, top_of_inning)?;
 
