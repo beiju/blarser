@@ -1,6 +1,7 @@
 use std::fmt::Display;
+use std::future::Future;
 use std::sync::{Arc, Mutex};
-use owning_ref::{MutexGuardRef, MutexGuardRefMut};
+use owning_ref::{MutexGuardRef, MutexGuardRefMut, OwningHandle, OwningRef};
 use uuid::Uuid;
 use serde_json::Value as JsonValue;
 
@@ -78,6 +79,10 @@ impl DataView {
     pub fn get_game<'short, 'long: 'short>(&'long self, game_id: &'short Uuid) -> EntityView<'short> {
         EntityView { parent: self, entity_type: "game", entity_id: game_id }
     }
+
+    pub fn get_player<'short, 'long: 'short>(&'long self, player_id: &'short Uuid) -> EntityView<'short> {
+        EntityView { parent: self, entity_type: "player", entity_id: player_id }
+    }
 }
 
 pub struct EntityView<'d> {
@@ -111,7 +116,7 @@ impl<'a> View<'a> for EntityView<'a> {
         Path {
             entity_type: self.entity_type,
             entity_id: Some(self.entity_id.clone()),
-            components: vec![]
+            components: vec![],
         }
     }
 
@@ -144,7 +149,7 @@ impl<'view, ParentT: View<'view>> View<'view> for NodeView<'view, ParentT> {
                             .map_err(|value| PathError::UnexpectedType {
                                 path: self.get_path(),
                                 expected_type: "object",
-                                value
+                                value,
                             })?
                             .get(key)
                             .ok_or_else(|| PathError::MissingKey(self.get_path()))
@@ -154,11 +159,10 @@ impl<'view, ParentT: View<'view>> View<'view> for NodeView<'view, ParentT> {
                             .map_err(|value| PathError::UnexpectedType {
                                 path: self.get_path(),
                                 expected_type: "object",
-                                value
+                                value,
                             })?
                             .get(idx)
                             .ok_or_else(|| PathError::MissingKey(self.get_path()))
-
                     }
                 }
             })
@@ -173,7 +177,7 @@ impl<'view, ParentT: View<'view>> View<'view> for NodeView<'view, ParentT> {
                             .map_err(|value| PathError::UnexpectedType {
                                 path: self.get_path(),
                                 expected_type: "object",
-                                value
+                                value,
                             })?
                             .get_mut(key)
                             .ok_or_else(|| PathError::MissingKey(self.get_path()))
@@ -183,11 +187,10 @@ impl<'view, ParentT: View<'view>> View<'view> for NodeView<'view, ParentT> {
                             .map_err(|value| PathError::UnexpectedType {
                                 path: self.get_path(),
                                 expected_type: "object",
-                                value
+                                value,
                             })?
                             .get_mut(idx)
                             .ok_or_else(|| PathError::MissingKey(self.get_path()))
-
                     }
                 }
             })
@@ -210,7 +213,55 @@ impl<'view, ParentT: View<'view>> NodeView<'view, ParentT> {
         }
     }
 
-    pub async fn as_int(&self) -> IngestResult<i64> {
+    pub fn as_array(&self) -> Result<MutexGuardRef<BlaseballData, im::Vector<Node>>, PathError> {
+        self.get_ref()?
+            .try_map(|node| {
+                node.as_array()
+                    .map_err(|value| PathError::UnexpectedType {
+                        path: self.get_path(),
+                        expected_type: "array",
+                        value,
+                    })
+            })
+    }
+
+    pub fn as_array_mut(&self) -> Result<MutexGuardRefMut<BlaseballData, im::Vector<Node>>, PathError> {
+        self.get_ref_mut()?
+            .try_map_mut(|node| {
+                node.as_array_mut()
+                    .map_err(|value| PathError::UnexpectedType {
+                        path: self.get_path(),
+                        expected_type: "array",
+                        value,
+                    })
+            })
+    }
+
+    pub fn as_object(&self) -> Result<MutexGuardRef<BlaseballData, im::HashMap<String, Node>>, PathError> {
+        self.get_ref()?
+            .try_map(|node| {
+                node.as_object()
+                    .map_err(|value| PathError::UnexpectedType {
+                        path: self.get_path(),
+                        expected_type: "object",
+                        value,
+                    })
+            })
+    }
+
+    pub fn as_object_mut(&self) -> Result<MutexGuardRefMut<BlaseballData, im::HashMap<String, Node>>, PathError> {
+        self.get_ref_mut()?
+            .try_map_mut(|node| {
+                node.as_object_mut()
+                    .map_err(|value| PathError::UnexpectedType {
+                        path: self.get_path(),
+                        expected_type: "object",
+                        value,
+                    })
+            })
+    }
+
+    pub async fn as_int(&self) -> Result<i64, PathError> {
         let primitive = self.as_primitive()?.clone();
         let lock = primitive.read().await;
 
@@ -220,7 +271,7 @@ impl<'view, ParentT: View<'view>> NodeView<'view, ParentT> {
         Ok(*value)
     }
 
-    pub async fn as_bool(&self) -> IngestResult<bool> {
+    pub async fn as_bool(&self) -> Result<bool, PathError> {
         let primitive = self.as_primitive()?.clone();
         let lock = primitive.read().await;
 
@@ -230,7 +281,7 @@ impl<'view, ParentT: View<'view>> NodeView<'view, ParentT> {
         Ok(*value)
     }
 
-    pub async fn as_uuid(&self) -> IngestResult<Uuid> {
+    pub async fn as_uuid(&self) -> Result<Uuid, PathError> {
         let primitive = self.as_primitive()?.clone();
         let lock = primitive.read().await;
 
@@ -240,7 +291,7 @@ impl<'view, ParentT: View<'view>> NodeView<'view, ParentT> {
         Ok(value)
     }
 
-    pub async fn as_string(&self) -> IngestResult<String> {
+    pub async fn as_string(&self) -> Result<String, PathError> {
         let primitive = self.as_primitive()?.clone();
         let lock = primitive.read().await;
 
@@ -262,16 +313,57 @@ impl<'view, ParentT: View<'view>> NodeView<'view, ParentT> {
             })
     }
 
-    pub fn set<T: Into<PrimitiveValue>>(&mut self, value: T) -> IngestResult<()> {
+    pub fn set<T: Into<PrimitiveValue>>(&self, value: T) -> Result<(), PathError> {
         let mut node = self.get_ref_mut()?;
         *node = node.successor(value.into(), self.caused_by().clone());
 
         Ok(())
     }
 
-    pub fn overwrite<T: Into<JsonValue>>(&mut self, value: T) -> IngestResult<()> {
+    pub async fn map_int<F, T>(&self, func: F) -> Result<(), PathError>
+        where
+            F: FnOnce(i64) -> T,
+            T: Into<PrimitiveValue>
+    {
+        let int = self.as_int().await?;
+        let mut node = self.get_ref_mut()?;
+        *node = node.successor(func(int).into(), self.caused_by().clone());
+
+        Ok(())
+    }
+
+    pub fn overwrite<T: Into<JsonValue>>(&self, value: T) -> Result<(), PathError> {
         let mut node = self.get_ref_mut()?;
         *node = Node::new_from_json(value.into(), self.caused_by());
+
+        Ok(())
+    }
+
+    pub fn remove<'a, T: Into<PathComponentRef<'a>>>(&self, key: T) -> Result<(), PathError> {
+        match key.into() {
+            PathComponentRef::Key(key) => {
+                let mut obj = self.as_object_mut()?;
+                match obj.remove(key) {
+                    None => { Err(PathError::MissingKey(self.get_path())) }
+                    Some(_) => { Ok(()) }
+                }
+            }
+            PathComponentRef::Index(idx) => {
+                let mut arr = self.as_array_mut()?;
+                match arr.get(idx) {
+                    None => { Err(PathError::MissingKey(self.get_path())) }
+                    Some(_) => {
+                        arr.remove(idx);
+                        Ok(())
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn push<'a, T: Into<PrimitiveValue>>(&self, value: T) -> Result<(), PathError> {
+        let mut arr = self.as_array_mut()?;
+        arr.push_back(Node::new_primitive(value.into(), self.caused_by()));
 
         Ok(())
     }
@@ -280,7 +372,7 @@ impl<'view, ParentT: View<'view>> NodeView<'view, ParentT> {
         PathError::UnexpectedType {
             path: self.get_path(),
             expected_type,
-            value: value.to_string()
+            value: value.to_string(),
         }
     }
 }
