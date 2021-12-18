@@ -11,10 +11,11 @@ use serde::Deserialize;
 
 use crate::api::{eventually, EventuallyEvent, EventType, Weather};
 use crate::blaseball_state as bs;
+use crate::blaseball_state::BlaseballState;
 use crate::ingest::{IngestItem, BoxedIngestItem, IngestResult, IngestApplyResult, IngestError};
 use crate::ingest::data_views::{DataView, EntityView, View};
 use crate::ingest::log::IngestLogger;
-use crate::ingest::text_parser::{FieldingOut, Base, StrikeType, parse_simple_out, parse_hit, parse_home_run, parse_snowfall, parse_strike, parse_strikeout, parse_stolen_base, parse_complex_out};
+use crate::ingest::text_parser::{FieldingOut, Base, StrikeType, parse_simple_out, parse_hit, parse_home_run, parse_snowfall, parse_strike, parse_strikeout, parse_stolen_base, parse_complex_out, BaseSteal};
 
 pub fn sources(start: &'static str) -> Vec<Box<dyn Iterator<Item=BoxedIngestItem> + Send>> {
     vec![
@@ -514,7 +515,8 @@ fn apply_fielding_out(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, ev
 
     let outs_added = if let FieldingOut::DoublePlay = out { 2 } else { 1 };
     let num_outs = game.get("halfInningOuts").as_int()? + outs_added;
-    let internal_events = apply_out(log, &game, &batter, event, message, play, &scores, top_of_inning, num_outs)?;
+    let internal_events = apply_out(log, &game, Some(&batter), event, message, play, &scores, top_of_inning, num_outs)?;
+    end_at_bat(&game, top_of_inning)?;
 
     if let Some(team_id) = scoring_team {
         game.get("lastUpdateFull").get(event.metadata.siblings.len() - 1).get("teamTags").push(team_id)?;
@@ -773,7 +775,8 @@ fn apply_strikeout(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event
 
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
     let message = format!("{} strikes out {}.\n", batter_name, strike_text);
-    let internal_events = apply_out(log, &game, &batter, event, message, play, &[], top_of_inning, num_outs)?;
+    let internal_events = apply_out(log, &game, Some(&batter), event, message, play, &[], top_of_inning, num_outs)?;
+    end_at_bat(&game, top_of_inning)?;
 
     let (new_data, caused_by) = data.into_inner();
     Ok((state.successor(caused_by, new_data), internal_events))
@@ -791,7 +794,7 @@ fn end_at_bat(game: &EntityView, top_of_inning: bool) -> IngestResult<()> {
 fn apply_out<'a, T: Into<String>>(
     log: &'a IngestLogger<'a>,
     game: &'a EntityView,
-    batter: &'a EntityView,
+    batter: Option<&'a EntityView>,
     event: &'a EventuallyEvent,
     message: T,
     play: i64,
@@ -799,11 +802,11 @@ fn apply_out<'a, T: Into<String>>(
     top_of_inning: bool,
     num_outs: i64,
 ) -> IngestResult<Vec<Box<dyn IngestItem>>> {
-    log.info(format!("Observed out by {}. Zeroing consecutiveHits", batter.get("name").as_string()?))?;
-
     game_update(game, &event.metadata.siblings, message, play, scores)?;
-    end_at_bat(game, top_of_inning)?;
-    batter.get("consecutiveHits").set(0)?;
+    if let Some(batter) = batter {
+        log.info(format!("Observed out by {}. Zeroing consecutiveHits", batter.get("name").as_string()?))?;
+        batter.get("consecutiveHits").set(0)?;
+    }
 
     let end_of_half_inning = num_outs == 3;
     if end_of_half_inning {
@@ -890,14 +893,25 @@ fn apply_stolen_base(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, eve
 
     let data = DataView::new(state.data.clone(),
                              bs::Event::FeedEvent(event.id));
-    let game = data.get_game(game_id);
 
     let thief_uuid = get_one_id(&event.player_tags, "playerTags")?;
     let thief = data.get_player(thief_uuid);
     let thief_name = thief.get("name").as_string()?;
 
-    let which_base = parse_stolen_base(&thief_name, &event.description)?;
+    let steal = parse_stolen_base(&thief_name, &event.description)?;
 
+    match steal {
+        BaseSteal::Steal(base) => {
+            apply_successful_steal(state, event, data, game_id, thief_uuid, thief_name, base)
+        }
+        BaseSteal::CaughtStealing(base) => {
+            apply_caught_stealing(state, log, event, data, game_id, thief_uuid, thief_name, base)
+        }
+    }
+}
+
+fn apply_successful_steal(state: Arc<BlaseballState>, event: &EventuallyEvent, data: DataView, game_id: &Uuid, thief_uuid: &Uuid, thief_name: String, which_base: Base) -> Result<(Arc<BlaseballState>, Vec<Box<dyn IngestItem>>), IngestError> {
+    let game = data.get_game(game_id);
     let baserunner_index = get_baserunner_with_uuid(&game, thief_uuid, which_base)?;
 
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
@@ -927,6 +941,26 @@ fn apply_stolen_base(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, eve
 
     let (new_data, caused_by) = data.into_inner();
     Ok((state.successor(caused_by, new_data), Vec::new()))
+}
+
+fn apply_caught_stealing(state: Arc<BlaseballState>, log: &IngestLogger<'_>, event: &EventuallyEvent, data: DataView, game_id: &Uuid, thief_uuid: &Uuid, thief_name: String, which_base: Base) -> Result<(Arc<BlaseballState>, Vec<Box<dyn IngestItem>>), IngestError> {
+    let game = data.get_game(game_id);
+    let baserunner_index = get_baserunner_with_uuid(&game, thief_uuid, which_base)?;
+    remove_base_runner(&game, baserunner_index)?;
+
+    let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
+    let message = format!("{} gets caught stealing {} base.\n", thief_name, which_base.name());
+
+    let top_of_inning = game.get("topOfInning").as_bool()?;
+    let num_outs = game.get("halfInningOuts").as_int()? + 1;
+    let internal_events = apply_out(log, &game, None, event, message, play, &[], top_of_inning, num_outs)?;
+    if num_outs == 3 {
+        end_at_bat(&game, top_of_inning)?;
+        game.get(&prefixed("TeamBatterCount", top_of_inning)).map_int(|i| i - 1)?;
+    }
+
+    let (new_data, caused_by) = data.into_inner();
+    Ok((state.successor(caused_by, new_data), internal_events))
 }
 
 fn get_baserunner_with_uuid(game: &EntityView<'_>, expected_uuid: &Uuid, which_base: Base) -> Result<usize, anyhow::Error> {
