@@ -54,6 +54,7 @@ impl IngestItem for EventuallyEvent {
             EventType::PlayerStatReroll => apply_player_stat_reroll(state, log, self),
             EventType::InningEnd => apply_inning_end(state, log, self),
             EventType::BatterSkipped => apply_batter_skipped(state, log, self),
+            EventType::PeanutFlavorText => apply_peanut_flavor_text(state, log, self),
             _ => todo!()
         };
 
@@ -1173,6 +1174,24 @@ fn apply_batter_skipped(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, 
     let message = format!("{} is Frozen!\n", batter_name);
     game_update(&game, &event.metadata.siblings, message, play, &[])?;
     game.get(&prefixed("TeamBatterCount", top_of_inning)).map_int(|i| i + 1)?;
+
+    let (new_data, caused_by) = data.into_inner();
+    Ok((state.successor(caused_by, new_data), Vec::new()))
+}
+
+
+fn apply_peanut_flavor_text(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event: &EventuallyEvent) -> IngestApplyResult {
+    let game_id = get_one_id(&event.game_tags, "gameTags")?;
+    log.debug(format!("Applying PeanutFlavorText event for game {}", game_id))?;
+
+    let data = DataView::new(state.data.clone(),
+                             bs::Event::FeedEvent(event.id));
+    let game = data.get_game(game_id);
+
+    let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
+
+    let message = format!("{}\n", event.description);
+    game_update(&game, &event.metadata.siblings, message, play, &[])?;
 
     let (new_data, caused_by) = data.into_inner();
     Ok((state.successor(caused_by, new_data), Vec::new()))
