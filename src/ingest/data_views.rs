@@ -76,6 +76,17 @@ impl DataView {
         EntityView { parent: self, entity_type: "sim", entity_id: &UUID_NIL }
     }
 
+    pub fn get_standings<'short, 'long: 'short>(&'long self) -> Result<OwningEntityView<'short>, PathError> {
+        let season_id = self.get_sim().get("seasonId").as_uuid()?;
+        let standings_id = self.get_season(&season_id).get("standings").as_uuid()?;
+
+        Ok(OwningEntityView { parent: self, entity_type: "standings", entity_id: standings_id })
+    }
+
+    pub fn get_season<'short, 'long: 'short>(&'long self, season_id: &'short Uuid) -> EntityView<'short> {
+        EntityView { parent: self, entity_type: "season", entity_id: season_id }
+    }
+
     pub fn get_team<'short, 'long: 'short>(&'long self, team_id: &'short Uuid) -> EntityView<'short> {
         EntityView { parent: self, entity_type: "team", entity_id: team_id }
     }
@@ -89,7 +100,7 @@ impl DataView {
     }
 
     pub fn games<'a>(&'a self) -> Result<impl Iterator<Item=OwningEntityView<'a>> + 'a, PathError> {
-        let game_ids: Vec<Uuid> =  {
+        let game_ids: Vec<Uuid> = {
             let data = self.data.lock().unwrap();
             data.get("game")
                 .ok_or_else(|| PathError::EntityTypeDoesNotExist("game"))?
@@ -387,7 +398,7 @@ impl<'view, ParentT: View<'view>> NodeView<'view, ParentT> {
                 node.as_primitive()
                     .map_err(|value| PathError::UnexpectedType {
                         path: self.get_path(),
-                        expected_type: "int",
+                        expected_type: "primitive",
                         value,
                     })
             })
@@ -410,6 +421,42 @@ impl<'view, ParentT: View<'view>> NodeView<'view, ParentT> {
         *node = node.successor(func(int).into(), self.caused_by().clone());
 
         Ok(())
+    }
+
+    pub fn default_map_int<F, T, U>(&self, default: U, func: F) -> Result<(), PathError>
+        where
+            F: FnOnce(i64) -> T,
+            T: Into<PrimitiveValue>,
+            U: Into<i64>,
+    {
+        let int = self.as_int().unwrap_or(default.into());
+        if let Ok(mut node) = self.get_ref_mut() {
+            *node = node.successor(func(int).into(), self.caused_by().clone());
+
+            Ok(())
+        } else {
+            let mut parent = self.parent.get_ref_mut()?;
+            match self.key {
+                PathComponentRef::Key(key) => {
+                    parent.as_object_mut()
+                        .map_err(|value| PathError::UnexpectedType {
+                            path: self.get_path(),
+                            expected_type: "object",
+                            value,
+                        })?
+                        .insert(key.to_owned(), Node::new_primitive(func(int).into(), self.caused_by()));
+
+                    Ok(())
+                }
+                PathComponentRef::Index(_) => {
+                    Err(PathError::UnexpectedType {
+                        path: self.get_path(),
+                        expected_type: "object",
+                        value: parent.to_string(),
+                    })
+                }
+            }
+        }
     }
 
     #[allow(dead_code)]
@@ -440,8 +487,8 @@ impl<'view, ParentT: View<'view>> NodeView<'view, ParentT> {
                 return Err(PathError::UnexpectedType {
                     path: self.get_path(),
                     expected_type: "float or float range",
-                    value: lock.value.to_string()
-                })
+                    value: lock.value.to_string(),
+                });
             }
         };
 

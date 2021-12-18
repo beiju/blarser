@@ -1,4 +1,4 @@
-use std::cmp::min;
+use std::cmp::{max, min};
 use std::iter;
 use std::sync::Arc;
 use anyhow::{anyhow, Context};
@@ -1425,6 +1425,16 @@ fn apply_game_over(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event
     game_update(&game, &event.metadata.siblings, "Game Over.\n", play, &[])?;
     game.get("winner").set(winner_id)?;
     game.get("loser").set(loser_id)?;
+
+    let standings = data.get_standings()?;
+    standings.get("gamesPlayed").get(&winner_id.to_string()).default_map_int(0, |i| i + 1)?;
+    standings.get("gamesPlayed").get(&loser_id.to_string()).default_map_int(0, |i| i + 1)?;
+    standings.get("losses").get(&winner_id.to_string()).default_map_int(0, |i| i)?;
+    standings.get("losses").get(&loser_id.to_string()).default_map_int(0, |i| i + 1)?;
+    standings.get("wins").get(&winner_id.to_string()).default_map_int(0, |i| i + 1)?;
+    standings.get("wins").get(&loser_id.to_string()).default_map_int(0, |i| i)?;
+    standings.get("runs").get(&winner_id.to_string()).default_map_int(0, |i| i + max(home_team_score, away_team_score))?;
+    standings.get("runs").get(&loser_id.to_string()).default_map_int(0, |i| i +  min(home_team_score, away_team_score))?;
 
     let (new_data, caused_by) = data.into_inner();
     Ok((state.successor(caused_by, new_data), Vec::new()))
