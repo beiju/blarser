@@ -461,7 +461,6 @@ fn apply_fielding_out(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, ev
     let top_of_inning = game.get("topOfInning").as_bool()?;
     let batter_id = game.get(&prefixed("Batter", top_of_inning)).as_uuid()?;
     let batter_name = game.get(&prefixed("BatterName", top_of_inning)).as_string()?;
-    let num_outs = 1 + game.get("halfInningOuts").as_int()?;
 
     let (scoring_runners, other_events) = separate_scoring_events(&event.metadata.siblings)?;
 
@@ -501,7 +500,9 @@ fn apply_fielding_out(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, ev
 
     let scoring_team = score_team(&data, &game, top_of_inning, &mut message, scoring_runners)?;
 
-    let internal_events = apply_out(log, &game, &batter, event, message, play, &scores, top_of_inning, num_outs == 3)?;
+    let outs_added = if let FieldingOut::DoublePlay = out { 2 } else { 1 };
+    let num_outs = game.get("halfInningOuts").as_int()? + outs_added;
+    let internal_events = apply_out(log, &game, &batter, event, message, play, &scores, top_of_inning, num_outs)?;
 
     if let Some(team_id) = scoring_team {
         game.get("lastUpdateFull").get(event.metadata.siblings.len() - 1).get("teamTags").push(team_id)?;
@@ -744,7 +745,6 @@ fn apply_strikeout(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event
     }
 
     let batter_name = state.string_at(&bs::json_path!("game", game_id.clone(), prefixed("BatterName", top_of_inning)))?;
-    let num_outs = 1 + state.int_at(&bs::json_path!("game", game_id.clone(), "halfInningOuts"))?;
     let strike_type = parse_strikeout(&batter_name, &event.description)?;
 
     let strike_text = match strike_type {
@@ -757,9 +757,11 @@ fn apply_strikeout(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event
     let game = data.get_game(game_id);
     let batter = data.get_player(&batter_id);
 
+    let num_outs = 1 + state.int_at(&bs::json_path!("game", game_id.clone(), "halfInningOuts"))?;
+
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
     let message = format!("{} strikes out {}.\n", batter_name, strike_text);
-    let internal_events = apply_out(log, &game, &batter, event, message, play, &[], top_of_inning, num_outs == 3)?;
+    let internal_events = apply_out(log, &game, &batter, event, message, play, &[], top_of_inning, num_outs)?;
 
     let (new_data, caused_by) = data.into_inner();
     Ok((state.successor(caused_by, new_data), internal_events))
@@ -783,7 +785,7 @@ fn apply_out<'a, T: Into<String>>(
     play: i64,
     scores: &[Score],
     top_of_inning: bool,
-    end_of_half_inning: bool,
+    num_outs: i64,
 ) -> IngestResult<Vec<Box<dyn IngestItem>>> {
     log.info(format!("Observed out by {}. Zeroing consecutiveHits", batter.get("name").as_string()?))?;
 
@@ -791,6 +793,7 @@ fn apply_out<'a, T: Into<String>>(
     end_at_bat(game, top_of_inning)?;
     batter.get("consecutiveHits").set(0)?;
 
+    let end_of_half_inning = num_outs == 3;
     if end_of_half_inning {
         game.get("halfInningOuts").set(0)?;
         game.get("phase").set(3)?;
@@ -803,15 +806,15 @@ fn apply_out<'a, T: Into<String>>(
             game.get("halfInningScore").set(0)?;
         }
     } else {
-        game.get("halfInningOuts").map_int(|outs| outs + 1)?;
+        game.get("halfInningOuts").set(num_outs)?;
     }
 
-    let mut events : Vec<Box<dyn IngestItem>> = Vec::new();
+    let mut events: Vec<Box<dyn IngestItem>> = Vec::new();
     if top_of_inning && end_of_half_inning {
         events.push(Box::new(TopInningEnd {
             game_id: game.entity_id.clone(),
             play_count: play + 1,
-            at_time: event.created + Duration::seconds(5)
+            at_time: event.created + Duration::seconds(5),
         }))
     }
     Ok(events)
@@ -1002,7 +1005,7 @@ fn apply_home_run(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event:
         .chain(iter::once(Ok(Score {
             player_name: batter_name,
             source: "Home Run",
-            runs: 1
+            runs: 1,
         })))
         .try_collect()?;
 

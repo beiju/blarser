@@ -340,6 +340,7 @@ impl<'view, ParentT: View<'view>> NodeView<'view, ParentT> {
         Ok(value)
     }
 
+    #[allow(dead_code)]
     pub fn as_float(&self) -> Result<f64, PathError> {
         let primitive = self.as_primitive()?.clone();
         let lock = primitive.read().unwrap();
@@ -411,6 +412,7 @@ impl<'view, ParentT: View<'view>> NodeView<'view, ParentT> {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn map_float<F, T>(&self, func: F) -> Result<(), PathError>
         where
             F: FnOnce(f64) -> T,
