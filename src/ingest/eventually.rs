@@ -1,5 +1,6 @@
 use std::cmp::min;
 use std::fmt::Display;
+use std::iter;
 use std::sync::Arc;
 use anyhow::{anyhow, Context};
 use rocket::{async_trait};
@@ -764,11 +765,7 @@ fn apply_out<'a>(
     if end_of_half_inning {
         game.get("halfInningOuts").set(0)?;
         game.get("phase").set(3)?;
-        game.get("baseRunners").overwrite(json!([]))?;
-        game.get("baseRunnerNames").overwrite(json!([]))?;
-        game.get("baseRunnerMods").overwrite(json!([]))?;
-        game.get("basesOccupied").overwrite(json!([]))?;
-        game.get("baserunnerCount").set(0)?;
+        clear_bases(game)?;
 
         // Reset both top and bottom inning scored only when the bottom half ends
         if !top_of_inning {
@@ -778,6 +775,16 @@ fn apply_out<'a>(
     } else {
         game.get("halfInningOuts").map_int(|outs| outs + 1)?;
     }
+
+    Ok(())
+}
+
+fn clear_bases(game: &EntityView) -> IngestResult<()> {
+    game.get("baseRunners").overwrite(json!([]))?;
+    game.get("baseRunnerNames").overwrite(json!([]))?;
+    game.get("baseRunnerMods").overwrite(json!([]))?;
+    game.get("basesOccupied").overwrite(json!([]))?;
+    game.get("baserunnerCount").set(0)?;
 
     Ok(())
 }
@@ -943,9 +950,23 @@ fn apply_home_run(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event:
 
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
     let message = format!("{} hits a {} home run!\nThe {} scored!", batter_name, home_run_text, team_name);
-    let scores = [
-        Score { player_name: batter_name, source: "Home Run", runs: num_runs }
-    ];
+    let scoring_runners: Vec<_> = game.get("baseRunners").as_array()?.iter()
+        .map(|node| {
+            node.as_uuid()
+                .map_err(|value| anyhow!("Expected baseRunners to have uuid values but found {}", value))
+        })
+        .try_collect()?;
+
+    let scores: Vec<_> = scoring_runners.iter()
+        .map(|runner_id| {
+            score_runner(&data, &game, runner_id, "Home Run")
+        })
+        .chain(iter::once(Ok(Score {
+            player_name: batter_name,
+            source: "Home Run",
+            runs: 1
+        })))
+        .try_collect()?;
 
     game_update(&game, &event.metadata.siblings, message, play, &scores)?;
     end_at_bat(&game, top_of_inning)?;
