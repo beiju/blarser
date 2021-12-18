@@ -1115,10 +1115,12 @@ fn apply_player_stat_reroll(state: Arc<bs::BlaseballState>, log: &IngestLogger<'
                              bs::Event::FeedEvent(event.id));
 
     let snow_attrs = [
-        "baseThirst", "baserunningRating", "buoyancy", "coldness", "defenseRating", "divinity",
-        "groundFriction", "hittingRating", "indulgence", "laserlikeness", "martyrdom", "moxie",
-        "musclitude", "omniscience", "overpowerment", "patheticism", "pitchingRating",
-        "ruthlessness", "shakespearianism",
+        "anticapitalism", "chasiness", "continuation", "suppression", "tenaciousness",
+        "thwackability", "tragicness", "unthwackability", "watchfulness", "baseThirst",
+        "baserunningRating", "buoyancy", "coldness", "defenseRating", "divinity", "groundFriction",
+        "hittingRating", "indulgence", "laserlikeness", "martyrdom", "moxie", "musclitude",
+        "omniscience", "overpowerment", "patheticism", "pitchingRating", "ruthlessness",
+        "shakespearianism",
     ];
 
     let player = data.get_player(player_id);
