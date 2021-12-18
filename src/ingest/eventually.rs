@@ -11,7 +11,7 @@ use serde::Deserialize;
 
 use crate::api::{eventually, EventuallyEvent, EventType, Weather};
 use crate::blaseball_state as bs;
-use crate::ingest::{IngestItem, BoxedIngestItem, IngestResult, IngestApplyResult};
+use crate::ingest::{IngestItem, BoxedIngestItem, IngestResult, IngestApplyResult, IngestError};
 use crate::ingest::data_views::{DataView, EntityView, View};
 use crate::ingest::log::IngestLogger;
 use crate::ingest::text_parser::{FieldingOut, Base, StrikeType, parse_simple_out, parse_hit, parse_home_run, parse_snowfall, parse_strike, parse_strikeout, parse_stolen_base, parse_complex_out};
@@ -420,14 +420,15 @@ fn apply_fielding_out(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, ev
     let batter_name = game.get(&prefixed("BatterName", top_of_inning)).as_string()?;
     let num_outs = 1 + game.get("halfInningOuts").as_int()?;
 
-    let siblings = &event.metadata.siblings;
-    let out = match siblings.len() {
-        1 => parse_simple_out(&batter_name, &siblings[0].description),
-        2 => parse_complex_out(&batter_name, &siblings[0].description, &siblings[1].description),
-        more => Err(anyhow!("Unexpected fielding out with {} siblings", more))
+    let (scoring_runners, other_events) = separate_scoring_events(&event.metadata.siblings)?;
+
+    let out = match other_events.len() {
+        1 => parse_simple_out(&batter_name, &other_events[0].description),
+        2 => parse_complex_out(&batter_name, &other_events[0].description, &other_events[1].description),
+        more => Err(anyhow!("Unexpected fielding out with {} non-score siblings", more))
     }?;
 
-    let message = match out {
+    let mut message = match out {
         FieldingOut::GroundOut(fielder_name) => {
             format!("{} hit a ground out to {}.", batter_name, fielder_name)
         }
@@ -441,17 +442,57 @@ fn apply_fielding_out(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, ev
 
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
     let batter = data.get_player(&batter_id);
-    apply_out(log, &game, &batter, event, message, play, top_of_inning, num_outs == 3)?;
+
+    let scores: Vec<_> = scoring_runners.iter()
+        .map(|&runner_id| {
+            let score = score_runner(&data, &game, runner_id, "Sacrifice")?;
+
+            message = format!("{}\n{} advances on the sacrifice.", message, score.player_name);
+
+            Ok::<_, IngestError>(score)
+        })
+        .try_collect()?;
+
+    let scoring_team = score_team(&data, &game, top_of_inning, &mut message, scoring_runners)?;
+
+    apply_out(log, &game, &batter, event, message, play, &scores, top_of_inning, num_outs == 3)?;
+
+    if let Some(team_id) = scoring_team {
+        game.get("lastUpdateFull").get(event.metadata.siblings.len() - 1).get("teamTags").push(team_id)?;
+    }
 
     if let FieldingOut::FieldersChoice(runner_name_parsed, out_at_base) = out {
         let runner_idx = get_baserunner_with_name(&game, runner_name_parsed, out_at_base)?;
         remove_base_runner(&game, runner_idx)?;
+        // The order is very particular
         advance_runners(&game, 0)?;
         push_base_runner(&game, batter_id, batter_name, Base::First)?;
+    } else {
+        advance_runners(&game, 0)?;
     }
 
     let (new_data, caused_by) = data.into_inner();
     Ok(state.successor(caused_by, new_data))
+}
+
+fn separate_scoring_events(siblings: &Vec<EventuallyEvent>) -> IngestResult<(Vec<&Uuid>, Vec<&EventuallyEvent>)> {
+    // The first event is never a scoring event, and it mixes up the rest of the logic because the
+    // "hit" event type is reused
+    let (first, rest) = siblings.split_first()
+        .ok_or(anyhow!("Event had no siblings (including itself)"))?;
+    let mut scores = Vec::new();
+    let mut others = vec![first];
+
+
+    for event in rest {
+        if event.r#type == EventType::Hit {
+            scores.push(get_one_id(&event.player_tags, "playerTags")?);
+        } else if event.r#type != EventType::RunsScored {
+            others.push(event);
+        }
+    }
+
+    Ok((scores, others))
 }
 
 fn remove_base_runner(game: &EntityView<'_>, runner_idx: usize) -> IngestResult<()> {
@@ -466,6 +507,7 @@ fn remove_base_runner(game: &EntityView<'_>, runner_idx: usize) -> IngestResult<
 }
 
 struct Score {
+    player_name: String,
     source: &'static str,
     runs: i64, // falsehoods
 }
@@ -498,29 +540,23 @@ fn apply_hit(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event: &Eve
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
     let mut message = format!("{} hits a {}!", batter_name, hit_text);
 
-    let (_, score_events) = event.metadata.siblings.split_first()
-        .ok_or_else(|| anyhow!("Hit event {} had no siblings (not even itself)", event.id))?;
+    let (scoring_runners, _) = separate_scoring_events(&event.metadata.siblings)?;
 
-    let mut scores = Vec::new();
-    let mut scoring_team = None;
-    for score_event in score_events {
-        if let Ok(runner_id) = get_one_id(&score_event.player_tags, "playerTags") {
-            // Then this is a runner scores event
-            let score = score_runner(&data, &game, &mut message, runner_id)?;
-            scores.push(score);
-        } else {
-            // Then this is a team scores event
-            let team_id = game.get(&prefixed("Team", top_of_inning)).as_uuid()?;
-            scoring_team = Some(team_id);
-            let team = data.get_team(&team_id);
-            let team_nickname = team.get("nickname").as_string()?;
-            message = format!("{}\nThe {} scored!", message, team_nickname);
-        }
-    }
+    let scores: Vec<_> = scoring_runners.iter()
+        .map(|&runner_id| {
+            let score = score_runner(&data, &game, runner_id, "Base Hit")?;
+
+            message = format!("{}\n{} scores!", message, score.player_name);
+
+            Ok::<_, IngestError>(score)
+        })
+        .try_collect()?;
+
+    let scoring_team = score_team(&data, &game, top_of_inning, &mut message, scoring_runners)?;
 
     game_update(&game, &event.metadata.siblings, message, play, &scores)?;
     if let Some(team_id) = scoring_team {
-        game.get("lastUpdateFull").get(score_events.len()).get("teamTags").push(team_id)?;
+        game.get("lastUpdateFull").get(event.metadata.siblings.len() - 1).get("teamTags").push(team_id)?;
     }
     advance_runners(&game, hit_type as i64 + 1)?;
     push_base_runner(&game, batter_id, batter_name, hit_type)?;
@@ -532,14 +568,26 @@ fn apply_hit(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event: &Eve
     Ok(state.successor(caused_by, new_data))
 }
 
-fn score_runner(data: &DataView, game: &EntityView, message: &mut String, runner_id: &Uuid) -> IngestResult<Score> {
+fn score_team(data: &DataView, game: &EntityView, top_of_inning: bool, message: &mut String, scoring_runners: Vec<&Uuid>) -> IngestResult<Option<Uuid>> {
+    if scoring_runners.len() > 0 {
+        let team_id = game.get(&prefixed("Team", top_of_inning)).as_uuid()?;
+        let team = data.get_team(&team_id);
+        let team_nickname = team.get("nickname").as_string()?;
+        *message = format!("{}\nThe {} scored!", message, team_nickname);
+
+        Ok(Some(team_id))
+    } else {
+        Ok(None)
+    }
+}
+
+fn score_runner(data: &DataView, game: &EntityView, runner_id: &Uuid, source: &'static str) -> IngestResult<Score> {
     let runner = data.get_player(runner_id);
     let runner_name = runner.get("name").as_string()?;
 
-    *message = format!("{}\n{} scores!", message, runner_name);
-
     let score = Score {
-        source: "Base Hit",
+        player_name: runner_name,
+        source,
         runs: 1,
     };
 
@@ -665,7 +713,7 @@ fn apply_strikeout(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event
 
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
     let message = format!("{} strikes out {}.", batter_name, strike_text);
-    apply_out(log, &game, &batter, event, message, play, top_of_inning, num_outs == 3)?;
+    apply_out(log, &game, &batter, event, message, play, &[], top_of_inning, num_outs == 3)?;
 
     let (new_data, caused_by) = data.into_inner();
     Ok(state.successor(caused_by, new_data))
@@ -687,12 +735,13 @@ fn apply_out<'a>(
     event: &'a EventuallyEvent,
     message: String,
     play: i64,
+    scores: &[Score],
     top_of_inning: bool,
     end_of_inning: bool,
 ) -> IngestResult<()> {
     log.info(format!("Observed out by {}. Zeroing consecutiveHits", batter.get("name").as_string()?))?;
 
-    game_update(game, &event.metadata.siblings, message, play, &[])?;
+    game_update(game, &event.metadata.siblings, message, play, scores)?;
     end_at_bat(game, top_of_inning)?;
     batter.get("consecutiveHits").set(0)?;
 
@@ -873,7 +922,7 @@ fn apply_home_run(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event:
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
     let message = format!("{} hits a {} home run!\nThe {} scored!", batter_name, home_run_text, team_name);
     let scores = [
-        Score { source: "Home Run", runs: num_runs }
+        Score { player_name: batter_name, source: "Home Run", runs: num_runs }
     ];
 
     game_update(&game, &event.metadata.siblings, message, play, &scores)?;
