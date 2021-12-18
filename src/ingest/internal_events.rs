@@ -4,9 +4,8 @@ use rocket::async_trait;
 use serde_json::json;
 
 use crate::blaseball_state as bs;
-use crate::ingest::IngestItem;
+use crate::ingest::{IngestItem, IngestApplyResult};
 use crate::ingest::data_views::{DataView, OwningEntityView};
-use crate::ingest::error::IngestApplyResult;
 use crate::ingest::log::IngestLogger;
 
 pub struct StartSeasonItem {
@@ -33,6 +32,10 @@ impl IngestItem for StartSeasonItem {
         let data = DataView::new(state.data.clone(),
                                  bs::Event::TimedChange(self.at_time));
 
+        let sim = data.get_sim();
+        sim.get("nextPhaseTime").set(sim.get("earlseasonDate").as_string()?)?;
+        sim.get("phase").set(2)?;
+
         for game in data.games()? {
             game.get("lastUpdate").set("")?;
             game.get("lastUpdateFull").overwrite(json!([]))?;
@@ -49,7 +52,7 @@ impl IngestItem for StartSeasonItem {
         }
 
         let (new_data, caused_by) = data.into_inner();
-        Ok(state.successor(caused_by, new_data))
+        Ok((state.successor(caused_by, new_data), Vec::new()))
     }
 }
 

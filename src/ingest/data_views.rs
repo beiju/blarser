@@ -50,6 +50,8 @@ pub struct DataView {
     caused_by: Arc<Event>,
 }
 
+const UUID_NIL: Uuid = Uuid::nil();
+
 impl DataView {
     pub fn new(data: BlaseballData, caused_by: Event) -> DataView {
         DataView {
@@ -68,6 +70,10 @@ impl DataView {
 
     fn get_ref_mut(&self) -> MutexGuardRefMut<BlaseballData> {
         MutexGuardRefMut::from(self.data.lock().unwrap())
+    }
+
+    pub fn get_sim<'short, 'long: 'short>(&'long self) -> EntityView<'short> {
+        EntityView { parent: self, entity_type: "sim", entity_id: &UUID_NIL }
     }
 
     pub fn get_team<'short, 'long: 'short>(&'long self, team_id: &'short Uuid) -> EntityView<'short> {
@@ -101,7 +107,7 @@ impl DataView {
 pub struct EntityView<'d> {
     parent: &'d DataView,
     entity_type: &'static str,
-    entity_id: &'d Uuid,
+    pub entity_id: &'d Uuid,
 }
 
 pub struct OwningEntityView<'d> {

@@ -1,10 +1,9 @@
 use std::cmp::min;
-use std::fmt::Display;
 use std::iter;
 use std::sync::Arc;
 use anyhow::{anyhow, Context};
 use rocket::{async_trait};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use itertools::Itertools;
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -73,7 +72,7 @@ pub struct PlayMetadata {
 
 fn apply_big_deal(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, _: &EventuallyEvent) -> IngestApplyResult {
     log.debug("Ignoring BigDeal event".to_string())?;
-    Ok(state)
+    Ok((state, Vec::new()))
 }
 
 
@@ -109,7 +108,7 @@ fn apply_lets_go(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event: 
     game.get("awayTeamBatterCount").set(-1)?;
 
     let (new_data, caused_by) = data.into_inner();
-    Ok(state.successor(caused_by, new_data))
+    Ok((state.successor(caused_by, new_data), Vec::new()))
 }
 
 struct ActivePitcher {
@@ -151,7 +150,7 @@ fn apply_play_ball(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event
     let game = data.get_game(game_id);
 
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
-    game_update(&game, &event.metadata.siblings, "Play ball!", play, &[])?;
+    game_update(&game, &event.metadata.siblings, "Play ball!\n", play, &[])?;
 
     for prefix in ["home", "away"] {
         game.get(&format!("{}Pitcher", prefix)).set(bs::PrimitiveValue::Null)?;
@@ -164,7 +163,7 @@ fn apply_play_ball(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event
     game.get("topOfInning").set(false)?;
 
     let (new_data, caused_by) = data.into_inner();
-    Ok(state.successor(caused_by, new_data))
+    Ok((state.successor(caused_by, new_data), Vec::new()))
 }
 
 fn prefixed(text: &'static str, top_of_inning: bool) -> String {
@@ -177,8 +176,8 @@ fn inning_prefixed(text: &'static str, top_of_inning: bool) -> String {
     format!("{}{}", home_or_away, text)
 }
 
-fn game_update<MessageT: Display>(game: &EntityView, events: &Vec<EventuallyEvent>, message: MessageT, play: i64, scores: &[Score]) -> IngestResult<()> {
-    game.get("lastUpdate").set(format!("{}\n", message))?;
+fn game_update<T: Into<String>>(game: &EntityView, events: &[EventuallyEvent], message: T, play: i64, scores: &[Score]) -> IngestResult<()> {
+    game.get("lastUpdate").set(message.into())?;
     // play and playCount are out of sync by exactly 1
     game.get("playCount").set(play + 1)?;
 
@@ -267,8 +266,8 @@ fn apply_half_inning(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, eve
     let batting_team_name = data.get_team(&batting_team_id).get("fullName").as_string()?;
 
     let top_or_bottom = if new_top_of_inning { "Top" } else { "Bottom" };
-    let message = format!("{} of {}, {} batting.", top_or_bottom, new_inning + 1, batting_team_name);
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
+    let message = format!("{} of {}, {} batting.\n", top_or_bottom, new_inning + 1, batting_team_name);
     game_update(&game, &event.metadata.siblings, message, play, &[])?;
 
     game.get("phase").set(6)?;
@@ -291,7 +290,7 @@ fn apply_half_inning(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, eve
     }
 
     let (new_data, caused_by) = data.into_inner();
-    Ok(state.successor(caused_by, new_data))
+    Ok((state.successor(caused_by, new_data), Vec::new()))
 }
 
 fn apply_batter_up(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event: &EventuallyEvent) -> IngestApplyResult {
@@ -310,14 +309,14 @@ fn apply_batter_up(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event
     let (batter_id, batter_name) = get_next_batter(&data, &batting_team, batter_count)?;
 
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
-    let message = format!("{} batting for the {}.", batter_name, batting_team_name);
+    let message = format!("{} batting for the {}.\n", batter_name, batting_team_name);
     game_update(&game, &event.metadata.siblings, message, play, &[])?;
     game.get(&prefixed("Batter", top_of_inning)).set(batter_id)?;
     game.get(&prefixed("BatterName", top_of_inning)).set(batter_name)?;
     game.get(&prefixed("TeamBatterCount", top_of_inning)).set(batter_count)?;
 
     let (new_data, caused_by) = data.into_inner();
-    Ok(state.successor(caused_by, new_data))
+    Ok((state.successor(caused_by, new_data), Vec::new()))
 }
 
 fn get_next_batter(data: &DataView, batting_team: &EntityView, batter_count: i64) -> IngestResult<(Uuid, String)> {
@@ -356,12 +355,12 @@ fn apply_strike(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event: &
     let game = data.get_game(game_id);
 
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
-    let message = format!("Strike, {}. {}-{}", strike_text, balls, strikes);
+    let message = format!("Strike, {}. {}-{}\n", strike_text, balls, strikes);
     game_update(&game, &event.metadata.siblings, message, play, &[])?;
     game.get("atBatStrikes").set(strikes)?;
 
     let (new_data, caused_by) = data.into_inner();
-    Ok(state.successor(caused_by, new_data))
+    Ok((state.successor(caused_by, new_data), Vec::new()))
 }
 
 
@@ -379,12 +378,12 @@ fn apply_ball(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event: &Ev
     let game = data.get_game(game_id);
 
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
-    let message = format!("Ball. {}-{}", balls, strikes);
+    let message = format!("Ball. {}-{}\n", balls, strikes);
     game_update(&game, &event.metadata.siblings, message, play, &[])?;
     game.get("atBatBalls").set(balls)?;
 
     let (new_data, caused_by) = data.into_inner();
-    Ok(state.successor(caused_by, new_data))
+    Ok((state.successor(caused_by, new_data), Vec::new()))
 }
 
 
@@ -409,12 +408,12 @@ fn apply_foul_ball(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event
     let game = data.get_game(game_id);
 
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
-    let message = format!("Foul Ball. {}-{}", balls, strikes);
+    let message = format!("Foul Ball. {}-{}\n", balls, strikes);
     game_update(&game, &event.metadata.siblings, message, play, &[])?;
     game.get("atBatStrikes").set(strikes)?;
 
     let (new_data, caused_by) = data.into_inner();
-    Ok(state.successor(caused_by, new_data))
+    Ok((state.successor(caused_by, new_data), Vec::new()))
 }
 
 
@@ -426,6 +425,33 @@ fn apply_ground_out(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, even
     // realizing that they're separate event types, so I'm just using it now.
     apply_fielding_out(state, log, event, game_id)
 }
+
+pub struct TopInningEnd {
+    game_id: Uuid,
+    play_count: i64,
+    at_time: DateTime<Utc>,
+}
+
+impl IngestItem for TopInningEnd {
+    fn date(&self) -> DateTime<Utc> {
+        self.at_time
+    }
+
+    fn apply(&self, log: &IngestLogger, state: Arc<bs::BlaseballState>) -> IngestApplyResult {
+        log.info(format!("Applying generated TopInningEnd event for game {}", self.game_id))?;
+
+        let data = DataView::new(state.data.clone(),
+                                 bs::Event::TimedChange(self.at_time));
+        let game = data.get_game(&self.game_id);
+
+        game_update(&game, &[], "", self.play_count, &[])?;
+        game.get("phase").set(2)?;
+
+        let (new_data, caused_by) = data.into_inner();
+        Ok((state.successor(caused_by, new_data), Vec::new()))
+    }
+}
+
 
 fn apply_fielding_out(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event: &EventuallyEvent, game_id: &Uuid) -> IngestApplyResult {
     let data = DataView::new(state.data.clone(),
@@ -447,16 +473,16 @@ fn apply_fielding_out(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, ev
 
     let mut message = match out {
         FieldingOut::GroundOut(fielder_name) => {
-            format!("{} hit a ground out to {}.", batter_name, fielder_name)
+            format!("{} hit a ground out to {}.\n", batter_name, fielder_name)
         }
         FieldingOut::Flyout(fielder_name) => {
-            format!("{} hit a flyout to {}.", batter_name, fielder_name)
+            format!("{} hit a flyout to {}.\n", batter_name, fielder_name)
         }
         FieldingOut::FieldersChoice(runner_name, base) => {
-            format!("{} out at {} base.\n{} reaches on fielder's choice.", runner_name, base.name(), batter_name)
+            format!("{} out at {} base.\n{} reaches on fielder's choice.\n", runner_name, base.name(), batter_name)
         }
         FieldingOut::DoublePlay => {
-            format!("{} hit into a double play!", batter_name)
+            format!("{} hit into a double play!\n", batter_name)
         }
     };
 
@@ -467,7 +493,7 @@ fn apply_fielding_out(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, ev
         .map(|&runner_id| {
             let score = score_runner(&data, &game, runner_id, "Sacrifice")?;
 
-            message = format!("{}\n{} advances on the sacrifice.", message, score.player_name);
+            message = format!("{}{} advances on the sacrifice.\n", message, score.player_name);
 
             Ok::<_, IngestError>(score)
         })
@@ -475,7 +501,7 @@ fn apply_fielding_out(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, ev
 
     let scoring_team = score_team(&data, &game, top_of_inning, &mut message, scoring_runners)?;
 
-    apply_out(log, &game, &batter, event, message, play, &scores, top_of_inning, num_outs == 3)?;
+    let internal_events = apply_out(log, &game, &batter, event, message, play, &scores, top_of_inning, num_outs == 3)?;
 
     if let Some(team_id) = scoring_team {
         game.get("lastUpdateFull").get(event.metadata.siblings.len() - 1).get("teamTags").push(team_id)?;
@@ -492,7 +518,7 @@ fn apply_fielding_out(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, ev
     }
 
     let (new_data, caused_by) = data.into_inner();
-    Ok(state.successor(caused_by, new_data))
+    Ok((state.successor(caused_by, new_data), internal_events))
 }
 
 fn separate_scoring_events(siblings: &Vec<EventuallyEvent>) -> IngestResult<(Vec<&Uuid>, Vec<&EventuallyEvent>)> {
@@ -558,7 +584,7 @@ fn apply_hit(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event: &Eve
     };
 
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
-    let mut message = format!("{} hits a {}!", batter_name, hit_text);
+    let mut message = format!("{} hits a {}!\n", batter_name, hit_text);
 
     let (scoring_runners, _) = separate_scoring_events(&event.metadata.siblings)?;
 
@@ -566,7 +592,7 @@ fn apply_hit(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event: &Eve
         .map(|&runner_id| {
             let score = score_runner(&data, &game, runner_id, "Base Hit")?;
 
-            message = format!("{}\n{} scores!", message, score.player_name);
+            message = format!("{}{} scores!\n", message, score.player_name);
 
             Ok::<_, IngestError>(score)
         })
@@ -585,7 +611,7 @@ fn apply_hit(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event: &Eve
     player.get("consecutiveHits").map_int(|hits| hits + 1)?;
 
     let (new_data, caused_by) = data.into_inner();
-    Ok(state.successor(caused_by, new_data))
+    Ok((state.successor(caused_by, new_data), Vec::new()))
 }
 
 fn score_team(data: &DataView, game: &EntityView, top_of_inning: bool, message: &mut String, scoring_runners: Vec<&Uuid>) -> IngestResult<Option<Uuid>> {
@@ -593,7 +619,7 @@ fn score_team(data: &DataView, game: &EntityView, top_of_inning: bool, message: 
         let team_id = game.get(&prefixed("Team", top_of_inning)).as_uuid()?;
         let team = data.get_team(&team_id);
         let team_nickname = team.get("nickname").as_string()?;
-        *message = format!("{}\nThe {} scored!", message, team_nickname);
+        *message = format!("{}The {} scored!\n", message, team_nickname);
 
         Ok(Some(team_id))
     } else {
@@ -732,11 +758,11 @@ fn apply_strikeout(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event
     let batter = data.get_player(&batter_id);
 
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
-    let message = format!("{} strikes out {}.", batter_name, strike_text);
-    apply_out(log, &game, &batter, event, message, play, &[], top_of_inning, num_outs == 3)?;
+    let message = format!("{} strikes out {}.\n", batter_name, strike_text);
+    let internal_events = apply_out(log, &game, &batter, event, message, play, &[], top_of_inning, num_outs == 3)?;
 
     let (new_data, caused_by) = data.into_inner();
-    Ok(state.successor(caused_by, new_data))
+    Ok((state.successor(caused_by, new_data), internal_events))
 }
 
 fn end_at_bat(game: &EntityView, top_of_inning: bool) -> IngestResult<()> {
@@ -748,17 +774,17 @@ fn end_at_bat(game: &EntityView, top_of_inning: bool) -> IngestResult<()> {
     Ok(())
 }
 
-fn apply_out<'a>(
+fn apply_out<'a, T: Into<String>>(
     log: &'a IngestLogger<'a>,
     game: &'a EntityView,
     batter: &'a EntityView,
     event: &'a EventuallyEvent,
-    message: String,
+    message: T,
     play: i64,
     scores: &[Score],
     top_of_inning: bool,
     end_of_half_inning: bool,
-) -> IngestResult<()> {
+) -> IngestResult<Vec<Box<dyn IngestItem>>> {
     log.info(format!("Observed out by {}. Zeroing consecutiveHits", batter.get("name").as_string()?))?;
 
     game_update(game, &event.metadata.siblings, message, play, scores)?;
@@ -780,7 +806,15 @@ fn apply_out<'a>(
         game.get("halfInningOuts").map_int(|outs| outs + 1)?;
     }
 
-    Ok(())
+    let mut events : Vec<Box<dyn IngestItem>> = Vec::new();
+    if top_of_inning && end_of_half_inning {
+        events.push(Box::new(TopInningEnd {
+            game_id: game.entity_id.clone(),
+            play_count: play + 1,
+            at_time: event.created + Duration::seconds(5)
+        }))
+    }
+    Ok(events)
 }
 
 fn clear_bases(game: &EntityView) -> IngestResult<()> {
@@ -830,14 +864,14 @@ fn apply_stolen_base(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, eve
     let baserunner_index = get_baserunner_with_uuid(&game, thief_uuid, which_base)?;
 
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
-    let message = format!("{} steals {} base!", thief_name, which_base.name());
+    let message = format!("{} steals {} base!\n", thief_name, which_base.name());
 
     game_update(&game, &event.metadata.siblings, message, play, &[])?;
     let bases_occupied = game.get("basesOccupied");
     bases_occupied.get(baserunner_index).map_int(|base| base + 1)?;
 
     let (new_data, caused_by) = data.into_inner();
-    Ok(state.successor(caused_by, new_data))
+    Ok((state.successor(caused_by, new_data), Vec::new()))
 }
 
 fn get_baserunner_with_uuid(game: &EntityView<'_>, expected_uuid: &Uuid, which_base: Base) -> Result<usize, anyhow::Error> {
@@ -917,14 +951,14 @@ fn apply_walk(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event: &Ev
     }
 
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
-    let message = format!("{} draws a walk.", batter_name);
+    let message = format!("{} draws a walk.\n", batter_name);
 
     game_update(&game, &event.metadata.siblings, message, play, &[])?;
     push_base_runner(&game, batter_id, batter_name, Base::First)?;
     end_at_bat(&game, top_of_inning)?;
 
     let (new_data, caused_by) = data.into_inner();
-    Ok(state.successor(caused_by, new_data))
+    Ok((state.successor(caused_by, new_data), Vec::new()))
 }
 
 
@@ -953,7 +987,7 @@ fn apply_home_run(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event:
     };
 
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
-    let message = format!("{} hits a {} home run!\nThe {} scored!", batter_name, home_run_text, team_name);
+    let message = format!("{} hits a {} home run!\nThe {} scored!\n", batter_name, home_run_text, team_name);
     let scoring_runners: Vec<_> = game.get("baseRunners").as_array()?.iter()
         .map(|node| {
             node.as_uuid()
@@ -979,7 +1013,7 @@ fn apply_home_run(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event:
     game.get("lastUpdateFull").get(1).get("teamTags").push(team_id)?;
 
     let (new_data, caused_by) = data.into_inner();
-    Ok(state.successor(caused_by, new_data))
+    Ok((state.successor(caused_by, new_data), Vec::new()))
 }
 
 
@@ -993,11 +1027,11 @@ fn apply_storm_warning(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, e
 
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
 
-    game_update(&game, &event.metadata.siblings, "WINTER STORM WARNING", play, &[])?;
+    game_update(&game, &event.metadata.siblings, "WINTER STORM WARNING\n", play, &[])?;
     game.get("gameStartPhase").set(11)?;
 
     let (new_data, caused_by) = data.into_inner();
-    Ok(state.successor(caused_by, new_data))
+    Ok((state.successor(caused_by, new_data), Vec::new()))
 }
 
 
@@ -1049,7 +1083,7 @@ fn apply_snowflakes(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, even
         })
         .try_collect()?;
 
-    let message = format!("{} Snowflakes {} the field!{}", num_snowflakes, modified_type, frozen_messages.join(""));
+    let message = format!("{} Snowflakes {} the field!{}\n", num_snowflakes, modified_type, frozen_messages.join(""));
     game_update(&game, &event.metadata.siblings, message, play, &[])?;
     game.get("gameStartPhase").set(20)?;
     game.get("state").get("snowfallEvents").map_int(|x| x + 1)?;
@@ -1065,7 +1099,7 @@ fn apply_snowflakes(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, even
         })?;
 
     let (new_data, caused_by) = data.into_inner();
-    Ok(state.successor(caused_by, new_data))
+    Ok((state.successor(caused_by, new_data), Vec::new()))
 }
 
 
@@ -1092,7 +1126,7 @@ fn apply_player_stat_reroll(state: Arc<bs::BlaseballState>, log: &IngestLogger<'
     }
 
     let (new_data, caused_by) = data.into_inner();
-    Ok(state.successor(caused_by, new_data))
+    Ok((state.successor(caused_by, new_data), Vec::new()))
 }
 
 
@@ -1108,12 +1142,12 @@ fn apply_inning_end(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, even
 
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
 
-    let message = format!("Inning {} is now an Outing.", inning + 1);
+    let message = format!("Inning {} is now an Outing.\n", inning + 1);
     game_update(&game, &event.metadata.siblings, message, play, &[])?;
     game.get("phase").set(2)?;
 
     let (new_data, caused_by) = data.into_inner();
-    Ok(state.successor(caused_by, new_data))
+    Ok((state.successor(caused_by, new_data), Vec::new()))
 }
 
 
@@ -1131,10 +1165,10 @@ fn apply_batter_skipped(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, 
     let top_of_inning = game.get("topOfInning").as_bool()?;
     let player = data.get_player(player_id);
     let batter_name = player.get("name").as_string()?;
-    let message = format!("{} is Frozen!", batter_name);
+    let message = format!("{} is Frozen!\n", batter_name);
     game_update(&game, &event.metadata.siblings, message, play, &[])?;
     game.get(&prefixed("TeamBatterCount", top_of_inning)).map_int(|i| i + 1)?;
 
     let (new_data, caused_by) = data.into_inner();
-    Ok(state.successor(caused_by, new_data))
+    Ok((state.successor(caused_by, new_data), Vec::new()))
 }

@@ -9,7 +9,7 @@ use rocket::async_trait;
 use crate::api::{chronicler, ChroniclerItem};
 use crate::blaseball_state as bs;
 use crate::blaseball_state::{Node, Observation, Patch, Path, PrimitiveValue};
-use crate::ingest::{IngestItem, BoxedIngestItem, IngestError};
+use crate::ingest::{IngestItem, BoxedIngestItem, IngestApplyResult};
 use crate::ingest::log::IngestLogger;
 
 pub struct ChronUpdate {
@@ -38,7 +38,7 @@ impl IngestItem for ChronUpdate {
         self.item.valid_from
     }
 
-    fn apply(&self, log: &IngestLogger, state: Arc<bs::BlaseballState>) -> Result<Arc<bs::BlaseballState>, IngestError> {
+    fn apply(&self, log: &IngestLogger, state: Arc<bs::BlaseballState>) -> IngestApplyResult {
         log.info(format!("Applying chron update from {}", self.item.valid_from))?;
 
         let observation = bs::Observation {
@@ -57,7 +57,7 @@ impl IngestItem for ChronUpdate {
         // changes needed to be made. Filling in placeholders mutates in place and is not considered
         // a change for this purpose.
         if mismatches.is_empty() {
-            return Ok(state);
+            return Ok((state, Vec::new()));
         }
 
         let approval_msg = mismatches.iter()
@@ -85,7 +85,8 @@ impl IngestItem for ChronUpdate {
             Err(anyhow!("Unexpected observation: {}", approval_msg))
         } else {
             let event = Arc::new(bs::Event::ImplicitChange(observation));
-            state.diff_successor(event, mismatches)
+            let new_state = state.diff_successor(event, mismatches)?;
+            Ok((new_state, Vec::new()))
         }
     }
 }

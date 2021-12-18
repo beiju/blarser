@@ -9,8 +9,8 @@ use anyhow::Context;
 use chrono::{DateTime, Utc};
 use serde_json::{Map, Value as JsonValue, Value};
 use thiserror::Error;
+
 use crate::ingest::IngestError;
-use im::{HashMap, Vector};
 
 /// Describes the event that caused one BlaseballState to change into another BlaseballState
 #[derive(Debug, Clone)]
@@ -423,7 +423,7 @@ impl Node {
         format!("{}", lock.value)
     }
 
-    pub fn array_to_string(arr: &Vector<Node>) -> String {
+    pub fn array_to_string(arr: &im::Vector<Node>) -> String {
         let inner = arr.iter()
             .map(|node| node.to_string())
             .collect::<Vec<_>>()
@@ -432,7 +432,7 @@ impl Node {
         format!("[{}]", inner)
     }
 
-    pub fn object_to_string<T: Clone + std::hash::Hash + std::cmp::Eq + Display>(obj: &HashMap<T, Node>) -> String
+    pub fn object_to_string<T: Clone + std::hash::Hash + std::cmp::Eq + Display>(obj: &im::HashMap<T, Node>) -> String
         where T: Clone + std::hash::Hash + std::cmp::Eq + Display {
         if obj.is_empty() {
             // Shortcut for two braces without spaces

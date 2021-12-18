@@ -1,3 +1,4 @@
+use std::collections::BinaryHeap;
 use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use itertools::Itertools;
@@ -29,38 +30,54 @@ pub fn run(log: IngestLogger<'_>) -> Result<(), IngestError> {
 
     // make the move block move a reference to log instead of the actual object
     let log = &log;
+    let mut internal_events = BinaryHeap::new();
+    for event in get_initial_internal_events(&start_state, BLARSER_START)? {
+        internal_events.push(event);
+    }
+
     all_sources(BLARSER_START)
-        .try_fold((start_state, None), |(state, last_update), ingest_result| {
+        .try_fold(start_state, |mut state, ingest_result| {
             // TODO Why is ingest_item not unwrapped by virtue of being inside a `try_fold`?
             let ingest_item = ingest_result?;
 
-            let state = if let Some(internal_event) = get_internal_event(&state, last_update,ingest_item.date())? {
-                internal_event.apply(log, state)?
-            } else {
-                state
-            };
+            while let Some(internal_item) = internal_events.peek() {
+                if internal_item.date() < ingest_item.date() {
+                    let (new_state, new_internal_events) = internal_events.pop().unwrap().apply(log, state)?;
+                    state = new_state;
+                    for event in new_internal_events {
+                        internal_events.push(event);
+                    }
+                } else {
+                    break
+                }
+            }
 
-            Ok::<_, IngestError>((ingest_item.apply(log, state)?, Some(ingest_item.date())))
+            let (new_state, new_internal_events) = ingest_item.apply(log, state)?;
+            state = new_state;
+            for event in new_internal_events {
+                internal_events.push(event);
+            }
+
+            Ok::<_, IngestError>(state)
         })?;
 
     Ok(())
 }
 
-fn get_internal_event(state: &Arc<BlaseballState>, last_update: Option<DateTime<Utc>>, next_update: DateTime<Utc>) -> IngestResult<Option<impl IngestItem>> {
-    let sim_start_date = state.string_at(&json_path!("sim", uuid::Uuid::nil(), "earlseasonDate"))?;
-    let sim_start_date = DateTime::parse_from_rfc3339(&sim_start_date)?;
-    let sim_start_date = sim_start_date.with_timezone(&Utc);
+fn get_initial_internal_events(state: &Arc<BlaseballState>, date_started: &'static str) -> IngestResult<Vec<Box<dyn IngestItem>>> {
+    let date_started = parse_date(date_started)?;
 
-    let is_after_last_update = if let Some(last_update) = last_update {
-        sim_start_date > last_update
-    } else {
-        true
-    };
+    let earlseason_date = parse_date(&state.string_at(&json_path!("sim", uuid::Uuid::nil(), "earlseasonDate"))?)?;
 
-    if is_after_last_update && sim_start_date < next_update {
-        Ok(Some(StartSeasonItem::new(sim_start_date)))
-    } else {
-        Ok(None)
+    let mut events: Vec<Box<dyn IngestItem>> = Vec::new();
+    if earlseason_date > date_started {
+        events.push(Box::new(StartSeasonItem::new(earlseason_date)));
     }
+
+    Ok(events)
+}
+
+fn parse_date(date_started: &str) -> IngestResult<DateTime<Utc>> {
+    Ok(DateTime::parse_from_rfc3339(date_started)?.with_timezone(&Utc))
 }
 
