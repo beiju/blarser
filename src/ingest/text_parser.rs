@@ -254,7 +254,7 @@ pub fn parse_snowfall(input: &str) -> Result<(i32, &str), anyhow::Error> {
 fn snowfall(input: &str) -> IResult<&str, (i32, &str), VerboseError<&str>> {
     let (input, num_snowflakes) = digit1(input)?;
     let (input, _) = tag(" Snowflakes ")(input)?;
-    let (input, modified_type) = alt((tag("slightly modified"), tag("modified"), tag("heavily modified")))(input)?;
+    let (input, modified_type) = alt((tag("slightly modified"), tag("modified"), tag("greatly modified")))(input)?;
     let (input, _) = tag(" the field!")(input)?;
     let (input, _) = eof(input)?;
 
