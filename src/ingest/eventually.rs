@@ -455,6 +455,9 @@ fn apply_fielding_out(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, ev
         FieldingOut::FieldersChoice(runner_name, base) => {
             format!("{} out at {} base.\n{} reaches on fielder's choice.", runner_name, base.name(), batter_name)
         }
+        FieldingOut::DoublePlay => {
+            format!("{} hit into a double play!", batter_name)
+        }
     };
 
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;

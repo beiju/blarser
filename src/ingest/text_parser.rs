@@ -5,6 +5,7 @@ pub enum FieldingOut<'a> {
     Flyout(&'a str),
     GroundOut(&'a str),
     FieldersChoice(&'a str, Base),
+    DoublePlay,
 }
 
 pub enum StrikeType {
@@ -64,13 +65,13 @@ impl Base {
 }
 
 pub fn parse_simple_out<'input>(batter_name: &'input str, input: &'input str) -> Result<FieldingOut<'input>, anyhow::Error> {
-    simple_out(batter_name)(input)
+    alt((single_batter_out(batter_name), double_play(batter_name)))(input)
         .finish()
         .map_err(|err| anyhow!("Couldn't parse simple fielding out: {}", err))
         .map(|(_, result)| result)
 }
 
-fn simple_out<'i>(batter_name: &'i str) -> impl Fn(&'i str) -> IResult<&'i str, FieldingOut, VerboseError<&'i str>> {
+fn single_batter_out<'i>(batter_name: &'i str) -> impl Fn(&'i str) -> IResult<&'i str, FieldingOut, VerboseError<&'i str>> {
     |input| {
         let (input, _) = tag(batter_name.as_bytes())(input)?;
         let (input, _) = tag(" hit a ")(input)?;
@@ -87,6 +88,16 @@ fn simple_out<'i>(batter_name: &'i str) -> impl Fn(&'i str) -> IResult<&'i str, 
         };
 
         Ok((input, out))
+    }
+}
+
+fn double_play<'i>(batter_name: &'i str) -> impl Fn(&'i str) -> IResult<&'i str, FieldingOut, VerboseError<&'i str>> {
+    |input| {
+        let (input, _) = tag(batter_name.as_bytes())(input)?;
+        let (input, _) = tag(" hit into a double play!")(input)?;
+        let (input, _) = eof(input)?;
+
+        Ok((input, FieldingOut::DoublePlay))
     }
 }
 
