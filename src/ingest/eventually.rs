@@ -531,6 +531,15 @@ fn apply_fielding_out(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, ev
         // The order is very particular
         advance_runners(&game, 0)?;
         push_base_runner(&game, batter_id, batter_name, Base::First)?;
+    } else if let FieldingOut::DoublePlay = out {
+        let runner_indices = get_bases_occupied(&game)?;
+        if runner_indices.len() == 1 {
+            remove_base_runner(&game, runner_indices[0] as usize)?;
+        } else if num_outs < 3 {
+            // Need to figure out how to handle double plays with multiple people on base
+            todo!()
+        }
+        advance_runners(&game, 0)?;
     } else {
         advance_runners(&game, 0)?;
     }
