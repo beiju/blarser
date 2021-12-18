@@ -1350,11 +1350,21 @@ fn apply_win_collected_regular(state: Arc<bs::BlaseballState>, log: &IngestLogge
 
     let data = DataView::new(state.data.clone(),
                              bs::Event::FeedEvent(event.id));
-    let _game = data.get_game(game_id);
+    let game = data.get_game(game_id);
 
-    let _play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
+    let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
 
-    // TODO
+    game.get("endPhase").set(4)?;
+
+    let home_team_score = game.get("homeScore").as_int()?;
+    let away_team_score = game.get("awayScore").as_int()?;
+
+    let winning_team_id = game.get(&prefixed("Team", home_team_score < away_team_score)).as_uuid()?;
+    let winning_team_name = data.get_team(&winning_team_id).get("nickname").as_string()?;
+
+    let message = format!("The {} collected a Win.\n", winning_team_name);
+    game_update(&game, &event.metadata.siblings, message, play, &[])?;
+    game.get("lastUpdateFull").get(0).get("teamTags").push(winning_team_id)?;
 
     let (new_data, caused_by) = data.into_inner();
     Ok((state.successor(caused_by, new_data), Vec::new()))
