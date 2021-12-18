@@ -241,7 +241,6 @@ fn game_update<MessageT: Display>(game: &EntityView, events: &Vec<EventuallyEven
         game.get(&prefixed("Score", top_of_inning)).map_int(|runs| runs + score_total)?;
         game.get(&inning_prefixed("InningScore", top_of_inning)).map_int(|runs| runs + score_total)?;
         game.get("halfInningScore").map_int(|runs| runs + score_total)?;
-
     }
 
     Ok(())
@@ -539,7 +538,7 @@ fn score_runner(data: &DataView, game: &EntityView, message: &mut String, runner
 
     let score = Score {
         source: "Base Hit",
-        runs: 1
+        runs: 1,
     };
 
     let runner_from_state = game.get("baseRunners").pop_front()?
@@ -579,7 +578,7 @@ fn advance_runners(game: &EntityView<'_>, advance_at_least: i64) -> IngestResult
             Err(anyhow!("Expected basesOccupied to have int or int range values but it had {}", base.to_string()))
         }?;
 
-        *base = base.successor(new_range,game.caused_by());
+        *base = base.successor(new_range, game.caused_by());
     }
 
     Ok(())
@@ -627,7 +626,6 @@ fn push_base_runner(game: &EntityView<'_>, runner_id: Uuid, runner_name: String,
             } else {
                 last_occupied_base = Some(min_base);
             }
-
         } else {
             return Err(anyhow!("Expected basesOccupied to have int values but it had {}", base.to_string()));
         }
@@ -838,7 +836,7 @@ fn apply_walk(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event: &Ev
     let message = format!("{} draws a walk.", batter_name);
 
     game_update(&game, &event.metadata.siblings, message, play, &[])?;
-    push_base_runner(&game,  batter_id, batter_name, Base::First)?;
+    push_base_runner(&game, batter_id, batter_name, Base::First)?;
     end_at_bat(&game, top_of_inning)?;
 
     let (new_data, caused_by) = data.into_inner();
@@ -901,7 +899,8 @@ fn apply_storm_warning(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, e
     game.get("gameStartPhase").set(11)?;
 
     let (new_data, caused_by) = data.into_inner();
-    Ok(state.successor(caused_by, new_data))}
+    Ok(state.successor(caused_by, new_data))
+}
 
 
 fn format_blaseball_date(date: DateTime<Utc>) -> String {
@@ -964,7 +963,8 @@ fn apply_snowflakes(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, even
         })?;
 
     let (new_data, caused_by) = data.into_inner();
-    Ok(state.successor(caused_by, new_data))}
+    Ok(state.successor(caused_by, new_data))
+}
 
 
 fn apply_player_stat_reroll(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event: &EventuallyEvent) -> IngestApplyResult {
@@ -978,4 +978,5 @@ fn apply_player_stat_reroll(state: Arc<bs::BlaseballState>, log: &IngestLogger<'
     // TODO modify data
 
     let (new_data, caused_by) = data.into_inner();
-    Ok(state.successor(caused_by, new_data))}
+    Ok(state.successor(caused_by, new_data))
+}
