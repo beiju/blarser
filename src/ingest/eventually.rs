@@ -1198,12 +1198,21 @@ fn apply_snowflakes(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, even
     game.get("gameStartPhase").set(20)?;
     game.get("state").get("snowfallEvents").map_int(|x| x + 1)?;
 
+    let top_of_inning = game.get("topOfInning").as_bool()?;
+    let batter_id = game.get(&prefixed("Batter", top_of_inning)).as_uuid()?;
     frozen_player_and_team_ids.into_iter()
         .enumerate()
         .try_for_each(|(i, (player_id, team_id))| {
             let player = data.get_player(&player_id);
             game.get("lastUpdateFull").get(i + 1).get("teamTags").push(team_id)?;
             player.get("gameAttr").push("FROZEN")?;
+
+            if *player_id == batter_id {
+                // Current batter just got frozen
+                game.get(&prefixed("Batter", top_of_inning)).set(bs::PrimitiveValue::Null)?;
+                game.get(&prefixed("BatterName", top_of_inning)).set("")?;
+            }
+
 
             Ok::<_, bs::PathError>(())
         })?;
