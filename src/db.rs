@@ -83,6 +83,7 @@ pub fn get_latest_ingest(conn: &diesel::PgConnection) -> Result<Option<Ingest>, 
 pub fn get_logs_for(ingest: &Ingest, conn: &diesel::PgConnection) -> Result<Vec<IngestLogAndApproval>, diesel::result::Error> {
     use crate::schema::ingest_approvals::dsl::*;
     let logs: Vec<IngestLog> = IngestLog::belonging_to(ingest)
+        .order_by(crate::schema::ingest_logs::dsl::at)
         .load(conn)?;
 
     let approval_ids = logs.iter().filter_map(|log| log.approval_id).collect::<Vec<_>>();
@@ -110,6 +111,7 @@ pub fn get_pending_approvals(conn: &diesel::PgConnection) -> Result<Vec<IngestAp
     use crate::schema::ingest_approvals::dsl::*;
     ingest_approvals
         .filter(approved.is_null())
+        .order_by(at)
         .load(conn)
 }
 
