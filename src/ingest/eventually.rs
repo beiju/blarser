@@ -297,16 +297,16 @@ fn apply_batter_up(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event
     let game_id = get_one_id(&event.game_tags, "gameTags")?;
     log.debug(format!("Applying BatterUp event for game {}", game_id))?;
 
-    let top_of_inning = state.bool_at(&bs::json_path!("game", game_id.clone(), "topOfInning"))?;
-    let batting_team_id = state.uuid_at(&bs::json_path!("game", game_id.clone(), prefixed("Team", top_of_inning)))?;
-    let batting_team_name = state.string_at(&bs::json_path!("team", batting_team_id, "nickname"))?;
-    let batter_count = 1 + state.int_at(&bs::json_path!("game", game_id.clone(), prefixed("TeamBatterCount", top_of_inning)))?;
-    let batter_id = state.uuid_at(&bs::json_path!("team", batting_team_id, "lineup", batter_count as usize))?;
-    let batter_name = state.string_at(&bs::json_path!("player", batter_id, "name"))?;
-
     let data = DataView::new(state.data.clone(),
                              bs::Event::FeedEvent(event.id));
     let game = data.get_game(game_id);
+
+    let top_of_inning = game.get("topOfInning").as_bool()?;
+    let batting_team_id = game.get(&prefixed("Team", top_of_inning)).as_uuid()?;
+    let batting_team = data.get_team(&batting_team_id);
+    let batting_team_name = batting_team.get("nickname").as_string()?;
+    let batter_count = 1 + game.get(&prefixed("TeamBatterCount", top_of_inning)).as_int()?;
+    let (batter_id, batter_name) = get_next_batter(&data, &batting_team, batter_count)?;
 
     let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
     let message = format!("{} batting for the {}.", batter_name, batting_team_name);
@@ -317,6 +317,21 @@ fn apply_batter_up(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event
 
     let (new_data, caused_by) = data.into_inner();
     Ok(state.successor(caused_by, new_data))
+}
+
+fn get_next_batter(data: &DataView, batting_team: &EntityView, batter_count: i64) -> IngestResult<(Uuid, String)> {
+    let lineup_node = batting_team.get("lineup");
+    // New scope introduced to avoid deadlock
+    let batter_id = {
+        let lineup = lineup_node.as_array()?;
+        lineup.get(batter_count as usize % lineup.len()).unwrap().as_uuid()
+            .map_err(|value| anyhow!("Expected lineup to have uuid values but it had {}", value))?
+    };
+
+    let player = data.get_player(&batter_id);
+    let batter_name = player.get("name").as_string()?;
+
+    Ok((batter_id, batter_name))
 }
 
 
