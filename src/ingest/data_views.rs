@@ -417,6 +417,32 @@ impl<'view, ParentT: View<'view>> NodeView<'view, ParentT> {
         Ok(())
     }
 
+    pub fn map_float_range<F, T>(&self, func: F) -> Result<(), PathError>
+        where
+            F: FnOnce(f64, f64) -> T,
+            T: Into<PrimitiveValue>
+    {
+        let primitive = self.as_primitive()?.clone();
+        let lock = primitive.read().unwrap();
+
+        let value = match lock.value {
+            PrimitiveValue::Float(f) => { func(f, f) }
+            PrimitiveValue::FloatRange(lower, upper) => { func(lower, upper) }
+            _ => {
+                return Err(PathError::UnexpectedType {
+                    path: self.get_path(),
+                    expected_type: "float or float range",
+                    value: lock.value.to_string()
+                })
+            }
+        };
+
+        let mut node = self.get_ref_mut()?;
+        *node = node.successor(value.into(), self.caused_by().clone());
+
+        Ok(())
+    }
+
     pub fn overwrite<T: Into<JsonValue>>(&self, value: T) -> Result<(), PathError> {
         let mut node = self.get_ref_mut()?;
         *node = Node::new_from_json(value.into(), self.caused_by());

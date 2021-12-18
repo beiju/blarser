@@ -1079,8 +1079,8 @@ fn apply_player_stat_reroll(state: Arc<bs::BlaseballState>, log: &IngestLogger<'
     let player = data.get_player(player_id);
     for attr_name in snow_attrs {
         // +/-0.1 is a placeholder
-        player.get(attr_name).map_float(|value|
-            bs::PrimitiveValue::FloatRange(value - 0.1, value + 0.1))?;
+        player.get(attr_name).map_float_range(|lower, upper|
+            bs::PrimitiveValue::FloatRange(lower - 0.1, upper + 0.1))?;
     }
 
     let (new_data, caused_by) = data.into_inner();
