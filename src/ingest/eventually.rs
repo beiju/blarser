@@ -154,7 +154,7 @@ fn apply_play_ball(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, event
                              bs::Event::FeedEvent(event.id));
     let game = data.get_game(game_id);
 
-    let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
+    let play = event.metadata.play.ok_or_else(|| anyhow!("Missing metadata.play"))?;
     game_update(&game, &event.metadata.siblings, "Play ball!\n", play, &[])?;
 
     for prefix in ["home", "away"] {
@@ -271,7 +271,7 @@ fn apply_half_inning(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, eve
     let batting_team_name = data.get_team(&batting_team_id).get("fullName").as_string()?;
 
     let top_or_bottom = if new_top_of_inning { "Top" } else { "Bottom" };
-    let play = event.metadata.play.ok_or(anyhow!("Missing metadata.play"))?;
+    let play = event.metadata.play.ok_or_else(|| anyhow!("Missing metadata.play"))?;
     let message = format!("{} of {}, {} batting.\n", top_or_bottom, new_inning + 1, batting_team_name);
     game_update(&game, &event.metadata.siblings, message, play, &[])?;
 
@@ -282,10 +282,10 @@ fn apply_half_inning(state: Arc<bs::BlaseballState>, log: &IngestLogger<'_>, eve
 
     // The first halfInning event re-sets the data that PlayBall clears
     if inning == -1 {
-        let away_team_id = state.uuid_at(&bs::json_path!("game", game_id.clone(), "awayTeam"))?;
+        let away_team_id = state.uuid_at(&bs::json_path!("game", *game_id, "awayTeam"))?;
         let away_pitcher = get_active_pitcher(&state, away_team_id, event.day > 0)?;
 
-        let home_team_id = state.uuid_at(&bs::json_path!("game", game_id.clone(), "homeTeam"))?;
+        let home_team_id = state.uuid_at(&bs::json_path!("game", *game_id, "homeTeam"))?;
         let home_pitcher = get_active_pitcher(&state, home_team_id, event.day > 0)?;
 
         for (pitcher, which) in [(home_pitcher, "home"), (away_pitcher, "away")] {

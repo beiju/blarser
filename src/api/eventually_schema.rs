@@ -95,6 +95,7 @@ pub enum Weather {
     Night = 29,
 }
 
+//noinspection SpellCheckingInspection
 #[derive(Deserialize_repr, PartialEq, Debug, Copy, Clone)]
 #[repr(i32)]
 pub enum EventType {

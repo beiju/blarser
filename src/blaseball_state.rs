@@ -2,7 +2,6 @@ use std::fmt::{Debug, Display, Formatter};
 use std::iter;
 use std::ops::{Deref, DerefMut};
 use std::str::FromStr;
-use im;
 use uuid::Uuid;
 use std::sync::{Arc, RwLock};
 use anyhow::Context;
@@ -64,7 +63,7 @@ impl SharedPrimitiveNode {
         *self = self.successor(value, caused_by).into();
     }
 
-    fn successor<'a, T: Into<PrimitiveValue>>(&self, value: T, caused_by: Arc<Event>) -> PrimitiveNode {
+    fn successor<T: Into<PrimitiveValue>>(&self, value: T, caused_by: Arc<Event>) -> PrimitiveNode {
         let observed_by = if let Event::ImplicitChange(observation) = &*caused_by {
             Some(observation.clone())
         } else {

@@ -58,7 +58,8 @@ pub fn events(start: &'static str) -> impl Iterator<Item=EventuallyEvent> {
         .flatten()
 }
 
-fn events_thread(sender: mpsc::SyncSender<Vec<EventuallyEvent>>, start: &str) -> () {
+//noinspection SpellCheckingInspection
+fn events_thread(sender: mpsc::SyncSender<Vec<EventuallyEvent>>, start: &str) {
     let client = reqwest::blocking::Client::new();
 
     let mut page = 0;
@@ -114,6 +115,6 @@ fn events_thread(sender: mpsc::SyncSender<Vec<EventuallyEvent>>, start: &str) ->
             break;
         }
 
-        page = page + 1;
+        page += 1;
     }
 }

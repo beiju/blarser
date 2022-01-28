@@ -1,4 +1,3 @@
-use std::pin::Pin;
 use futures::stream::{self, Stream, StreamExt};
 
 #[derive(Clone)]

@@ -99,11 +99,11 @@ impl DataView {
         EntityView { parent: self, entity_type: "player", entity_id: player_id }
     }
 
-    pub fn games<'a>(&'a self) -> Result<impl Iterator<Item=OwningEntityView<'a>> + 'a, PathError> {
+    pub fn games(&self) -> Result<impl Iterator<Item=OwningEntityView> + '_, PathError> {
         let game_ids: Vec<Uuid> = {
             let data = self.data.lock().unwrap();
             data.get("game")
-                .ok_or_else(|| PathError::EntityTypeDoesNotExist("game"))?
+                .ok_or(PathError::EntityTypeDoesNotExist("game"))?
                 .keys()
                 .cloned()
                 .collect()
@@ -132,9 +132,9 @@ impl<'a> View<'a> for EntityView<'a> {
         self.parent.get_ref()
             .try_map(|data| {
                 data.get(self.entity_type)
-                    .ok_or_else(|| PathError::EntityTypeDoesNotExist(self.entity_type))?
+                    .ok_or(PathError::EntityTypeDoesNotExist(self.entity_type))?
                     .get(self.entity_id)
-                    .ok_or_else(|| PathError::EntityDoesNotExist(self.entity_type, self.entity_id.clone()))
+                    .ok_or_else(|| PathError::EntityDoesNotExist(self.entity_type, *self.entity_id))
             })
     }
 
@@ -142,16 +142,16 @@ impl<'a> View<'a> for EntityView<'a> {
         self.parent.get_ref_mut()
             .try_map_mut(|data| {
                 data.get_mut(self.entity_type)
-                    .ok_or_else(|| PathError::EntityTypeDoesNotExist(self.entity_type))?
+                    .ok_or(PathError::EntityTypeDoesNotExist(self.entity_type))?
                     .get_mut(self.entity_id)
-                    .ok_or_else(|| PathError::EntityDoesNotExist(self.entity_type, self.entity_id.clone()))
+                    .ok_or_else(|| PathError::EntityDoesNotExist(self.entity_type, *self.entity_id))
             })
     }
 
     fn get_path(&self) -> Path {
         Path {
             entity_type: self.entity_type,
-            entity_id: Some(self.entity_id.clone()),
+            entity_id: Some(*self.entity_id),
             components: vec![],
         }
     }
@@ -166,9 +166,9 @@ impl<'a> View<'a> for OwningEntityView<'a> {
         self.parent.get_ref()
             .try_map(|data| {
                 data.get(self.entity_type)
-                    .ok_or_else(|| PathError::EntityTypeDoesNotExist(self.entity_type))?
+                    .ok_or(PathError::EntityTypeDoesNotExist(self.entity_type))?
                     .get(&self.entity_id)
-                    .ok_or_else(|| PathError::EntityDoesNotExist(self.entity_type, self.entity_id.clone()))
+                    .ok_or(PathError::EntityDoesNotExist(self.entity_type, self.entity_id))
             })
     }
 
@@ -176,16 +176,16 @@ impl<'a> View<'a> for OwningEntityView<'a> {
         self.parent.get_ref_mut()
             .try_map_mut(|data| {
                 data.get_mut(self.entity_type)
-                    .ok_or_else(|| PathError::EntityTypeDoesNotExist(self.entity_type))?
+                    .ok_or(PathError::EntityTypeDoesNotExist(self.entity_type))?
                     .get_mut(&self.entity_id)
-                    .ok_or_else(|| PathError::EntityDoesNotExist(self.entity_type, self.entity_id.clone()))
+                    .ok_or(PathError::EntityDoesNotExist(self.entity_type, self.entity_id))
             })
     }
 
     fn get_path(&self) -> Path {
         Path {
             entity_type: self.entity_type,
-            entity_id: Some(self.entity_id.clone()),
+            entity_id: Some(self.entity_id),
             components: vec![],
         }
     }
@@ -406,7 +406,7 @@ impl<'view, ParentT: View<'view>> NodeView<'view, ParentT> {
 
     pub fn set<T: Into<PrimitiveValue>>(&self, value: T) -> Result<(), PathError> {
         let mut node = self.get_ref_mut()?;
-        *node = node.successor(value.into(), self.caused_by().clone());
+        *node = node.successor(value.into(), self.caused_by());
 
         Ok(())
     }
@@ -418,7 +418,7 @@ impl<'view, ParentT: View<'view>> NodeView<'view, ParentT> {
     {
         let int = self.as_int()?;
         let mut node = self.get_ref_mut()?;
-        *node = node.successor(func(int).into(), self.caused_by().clone());
+        *node = node.successor(func(int).into(), self.caused_by());
 
         Ok(())
     }
@@ -429,9 +429,9 @@ impl<'view, ParentT: View<'view>> NodeView<'view, ParentT> {
             T: Into<PrimitiveValue>,
             U: Into<i64>,
     {
-        let int = self.as_int().unwrap_or(default.into());
+        let int = self.as_int().unwrap_or_else(|_| default.into());
         if let Ok(mut node) = self.get_ref_mut() {
-            *node = node.successor(func(int).into(), self.caused_by().clone());
+            *node = node.successor(func(int).into(), self.caused_by());
 
             Ok(())
         } else {
@@ -467,7 +467,7 @@ impl<'view, ParentT: View<'view>> NodeView<'view, ParentT> {
     {
         let float = self.as_float()?;
         let mut node = self.get_ref_mut()?;
-        *node = node.successor(func(float).into(), self.caused_by().clone());
+        *node = node.successor(func(float).into(), self.caused_by());
 
         Ok(())
     }
@@ -493,7 +493,7 @@ impl<'view, ParentT: View<'view>> NodeView<'view, ParentT> {
         };
 
         let mut node = self.get_ref_mut()?;
-        *node = node.successor(value.into(), self.caused_by().clone());
+        *node = node.successor(value.into(), self.caused_by());
 
         Ok(())
     }
@@ -527,7 +527,7 @@ impl<'view, ParentT: View<'view>> NodeView<'view, ParentT> {
         }
     }
 
-    pub fn push<'a, T: Into<PrimitiveValue>>(&self, value: T) -> Result<(), PathError> {
+    pub fn push<T: Into<PrimitiveValue>>(&self, value: T) -> Result<(), PathError> {
         let mut arr = self.as_array_mut()?;
         arr.push_back(Node::new_primitive(value.into(), self.caused_by()));
 

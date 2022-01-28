@@ -7,6 +7,7 @@ use crate::api::chronicler_schema::{ChroniclerItem, ChroniclerResponse, Chronicl
 
 // This list comes directly from
 // https://github.com/xSke/Chronicler/blob/main/SIBR.Storage.Data/Models/UpdateType.cs
+//noinspection SpellCheckingInspection
 pub const ENDPOINT_NAMES: [&str; 45] = [
     "player",
     "team",
@@ -114,7 +115,7 @@ pub fn schedule(start: &'static str) -> impl Iterator<Item=ChroniclerItem> {
 fn chron_thread(sender: mpsc::SyncSender<Vec<ChroniclerItem>>,
                 endpoint: &'static str,
                 entity_type: &'static str,
-                start: &'static str) -> () {
+                start: &'static str) {
     let client = reqwest::blocking::Client::new();
 
     let mut page: Option<String> = None;
@@ -174,7 +175,7 @@ fn chron_thread(sender: mpsc::SyncSender<Vec<ChroniclerItem>>,
 
 fn game_updates_thread(sender: mpsc::SyncSender<Vec<ChroniclerGameUpdate>>,
                        schedule: bool,
-                       start: &'static str) -> () {
+                       start: &'static str) {
     let client = reqwest::blocking::Client::new();
 
     let mut page: Option<String> = None;

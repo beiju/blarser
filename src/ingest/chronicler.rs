@@ -102,11 +102,11 @@ fn observe_state<'a>(log: &'a IngestLogger, data: &'a bs::EntitySet, observed: &
         Some(node) => {
             let path = bs::Path {
                 entity_type: observation.entity_type,
-                entity_id: Some(observation.entity_id.clone()),
+                entity_id: Some(observation.entity_id),
                 components: Vec::new(),
             };
 
-            observe_node(log, node, observed, &observation, path)
+            observe_node(log, node, observed, observation, path)
         }
     }
 }
@@ -195,7 +195,7 @@ fn emit_new<'a>(log: &'a IngestLogger, path: Path, value: &'a Value) -> BoxedPat
     }))
 }
 
-fn observe_array<'a>(log: &'a IngestLogger, node: &'a bs::Node, observed: &'a Vec<JsonValue>, observation: &'a bs::Observation, path: bs::Path) -> BoxedPatchIterator<'a> {
+fn observe_array<'a>(log: &'a IngestLogger, node: &'a bs::Node, observed: &'a [serde_json::Value], observation: &'a bs::Observation, path: bs::Path) -> BoxedPatchIterator<'a> {
     if let bs::Node::Array(arr) = node {
         let it = arr.iter()
             .zip_longest(observed.iter())
@@ -231,7 +231,7 @@ fn observe_array<'a>(log: &'a IngestLogger, node: &'a bs::Node, observed: &'a Ve
         Box::new(it)
     } else {
         Box::new(iter::once({
-            let new_value = JsonValue::Array(observed.clone());
+            let new_value = JsonValue::Array(observed.to_vec());
             log.info(format!("Observed an unexpected change at {}: value changed from {} to {}", path, node.to_string(), new_value))
                 .map(|()| bs::Patch {
                     path: path.clone(),
@@ -252,7 +252,7 @@ fn observe_primitive<'a>(log: &'a IngestLogger, node: &'a bs::Node, observed: Pr
             Err(e) => { Some(Err(e)) }
         }
     })
-        .filter_map(|v| v);
+        .flatten();
 
     Box::new(s)
 }
@@ -260,8 +260,8 @@ fn observe_primitive<'a>(log: &'a IngestLogger, node: &'a bs::Node, observed: Pr
 fn observe_primitive_internal(log: &IngestLogger<'_>, node: &Node, observed: &PrimitiveValue, observation: &Observation, path: Path) -> Result<Option<Patch>, diesel::result::Error> {
     if let bs::Node::Primitive(primitive_node) = node {
         let mut primitive = primitive_node.write().unwrap();
-        if match_observation(log, &mut primitive, &observed)? {
-            if let None = primitive.observed_by {
+        if match_observation(log, &mut primitive, observed)? {
+            if primitive.observed_by.is_none() {
                 primitive.observed_by = Some(observation.clone());
                 // log.info(format!("Observed expected value at {}", path)).await?
             }
@@ -287,8 +287,8 @@ fn match_observation(log: &IngestLogger<'_>, node: &mut bs::PrimitiveNode, value
         bs::PrimitiveValue::Null => { value.is_null() }
         bs::PrimitiveValue::Bool(b) => { value.as_bool().map(|value_b| *b == value_b).unwrap_or(false) }
         bs::PrimitiveValue::Int(i) => { value.as_int().map(|value_i| *i == value_i).unwrap_or(false) }
-        bs::PrimitiveValue::Float(f) => { value.as_float().map(|value_f| *f == value_f).unwrap_or(false) }
-        bs::PrimitiveValue::String(s) => { value.as_str().map(|value_s| s == &value_s).unwrap_or(false) }
+        bs::PrimitiveValue::Float(f) => { value.as_float().map(|value_f| (*f - value_f).abs() < f64::EPSILON).unwrap_or(false) }
+        bs::PrimitiveValue::String(s) => { value.as_str().map(|value_s| s == value_s).unwrap_or(false) }
         bs::PrimitiveValue::IntRange(lower, upper) => {
             match value.as_int() {
                 None => { false }
