@@ -454,12 +454,12 @@ impl Node {
             _ => None
         };
 
-        return Node::Primitive(PrimitiveNode {
+        Node::Primitive(PrimitiveNode {
             predecessor: None,
             caused_by,
             observed_by,
             value,
-        }.into());
+        }.into())
     }
 
     pub fn primitive_successor(predecessor: SharedPrimitiveNode, value: PrimitiveValue, caused_by: Arc<Event>) -> Node {
@@ -549,7 +549,7 @@ impl Node {
         Node::Object(
             obj.into_iter()
                 .map(|(key, val)|
-                    (key.clone(), Node::new_from_json(val, caused_by.clone())))
+                    (key, Node::new_from_json(val, caused_by.clone())))
                 .collect()
         )
     }
@@ -716,7 +716,7 @@ use crate::api::ChroniclerItem;
 impl BlaseballState {
     pub fn from_chron_at_time(at_time: &'static str) -> BlaseballState {
         let event = Arc::new(Event::Start);
-        // Start all the endpoints first
+        // Collect into a vec to make sure all the endpoints start and can begin fetching right away
         let endpoints: Vec<_> = (Box::new(crate::api::chronicler::ENDPOINT_NAMES.into_iter()
             .map(|endpoint_name|
                 (endpoint_name, records_from_chron_at_time(endpoint_name, at_time, event.clone()))
@@ -767,11 +767,11 @@ impl BlaseballState {
 
     pub fn node_at(&self, path: &Path) -> Result<&Node, PathError> {
         let entity_set = self.data.get(path.entity_type)
-            .ok_or_else(|| PathError::EntityTypeDoesNotExist(path.entity_type))?;
+            .ok_or(PathError::EntityTypeDoesNotExist(path.entity_type))?;
         let entity_id = path.entity_id
-            .ok_or_else(|| PathError::UnexpectedWildcard(path.entity_type))?;
+            .ok_or(PathError::UnexpectedWildcard(path.entity_type))?;
         let entity = entity_set.get(&entity_id)
-            .ok_or_else(|| PathError::EntityDoesNotExist(path.entity_type, entity_id))?;
+            .ok_or(PathError::EntityDoesNotExist(path.entity_type, entity_id))?;
 
         let mut node = entity;
         for (i, component) in path.components.iter().enumerate() {
@@ -877,9 +877,9 @@ impl BlaseballState {
 
 fn apply_change(data: &mut BlaseballData, change: Patch, caused_by: Arc<Event>) -> Result<(), ApplyChangeError> {
     let entity_set = data.get_mut(change.path.entity_type)
-        .ok_or_else(|| PathError::EntityTypeDoesNotExist(change.path.entity_type))?;
+        .ok_or(PathError::EntityTypeDoesNotExist(change.path.entity_type))?;
     let entity_id = change.path.entity_id
-        .ok_or_else(|| PathError::UnexpectedWildcard(change.path.entity_type))?;
+        .ok_or(PathError::UnexpectedWildcard(change.path.entity_type))?;
 
     // Treat the last path component specially because that's how we modify or delete the value
     match change.path.components.clone().split_last() {
@@ -889,7 +889,7 @@ fn apply_change(data: &mut BlaseballData, change: Patch, caused_by: Arc<Event>) 
         }
         Some((last, rest)) => {
             let mut node = entity_set.get_mut(&entity_id)
-                .ok_or_else(|| PathError::EntityDoesNotExist(change.path.entity_type, entity_id))?;
+                .ok_or(PathError::EntityDoesNotExist(change.path.entity_type, entity_id))?;
 
             for (i, component) in rest.iter().enumerate() {
                 node = match (node, component) {
@@ -985,7 +985,7 @@ fn apply_change_to_hashmap<T>(container: &mut im::HashMap<T, Node>, key: &T, cha
         }
         ChangeType::Remove => {
             let removed = container.remove(key);
-            if let None = removed {
+            if removed.is_none() {
                 return Err(ApplyChangeError::MissingValue(change.path));
             }
         }
@@ -1008,7 +1008,7 @@ fn apply_change_to_vector(container: &mut im::Vector<Node>, idx: usize, change: 
             container.insert(idx, new_node);
         }
         ChangeType::Remove => {
-            if let None = container.get(idx) {
+            if container.get(idx).is_none() {
                 return Err(ApplyChangeError::MissingValue(change.path));
             }
             container.remove(idx);
@@ -1059,7 +1059,7 @@ fn entity_to_hashmap_entry(entity_type: &'static str, item: ChroniclerItem, caus
         observed_at: item.valid_from,
     };
 
-    (obs.entity_id.clone(), Node::new_from_json(item.data, caused_by))
+    (obs.entity_id, Node::new_from_json(item.data, caused_by))
 }
 
 fn records_from_chron_at_time(entity_type: &'static str, at_time: &'static str, caused_by: Arc<Event>) -> Box<dyn Iterator<Item=(Uuid, Node)>> {
