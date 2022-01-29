@@ -21,7 +21,7 @@ fn all_sources(start: &'static str) -> impl Iterator<Item=Result<BoxedIngestItem
         .into_iter()
         .flatten()
         .kmerge_by(|a, b| a.date() < b.date())
-        .map(|k| Ok(k))
+        .map(Ok)
 }
 
 pub fn run(log: IngestLogger<'_>) -> Result<(), IngestError> {

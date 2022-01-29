@@ -697,10 +697,7 @@ macro_rules! json_path {
         }
     }};
     ($entity_type_expr:expr, $entity_id_expr:expr, $($x:expr),*) => {{
-        let mut components: Vec<crate::blaseball_state::PathComponent> = Vec::new();
-        $(
-            components.push($x.into());
-        )*
+        let components: Vec<crate::blaseball_state::PathComponent> = vec![$( $x.into(), )*];
 
         crate::blaseball_state::Path {
             entity_type: $entity_type_expr,
