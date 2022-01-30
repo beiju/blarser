@@ -20,7 +20,7 @@ async fn main() -> Result<(), rocket::Error> {
             let feed_conn = BlarserDbConn::get_one(rocket).await.unwrap();
             let chron_conn = BlarserDbConn::get_one(rocket).await.unwrap();
             let ingest_task: &IngestTask = rocket.state().unwrap();
-            ingest_task.start(feed_conn, chron_conn);
+            ingest_task.start(feed_conn, chron_conn).await;
         })))
         .launch().await
 }

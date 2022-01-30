@@ -1,6 +1,6 @@
 use rocket::info;
-use crate::db::BlarserDbConn;
+use crate::ingest::task::IngestState;
 
-pub async fn ingest_feed(_db: BlarserDbConn) {
+pub async fn ingest_feed(_db: IngestState, _start_at_time: &'static str) {
     info!("Started Feed ingest task");
 }

@@ -2,6 +2,23 @@ table! {
     use diesel::sql_types::*;
     use crate::db_types::*;
 
+    chron_updates (id) {
+        id -> Int4,
+        ingest_id -> Int4,
+        entity_type -> Text,
+        entity_id -> Uuid,
+        perceived_at -> Timestamp,
+        earliest_time -> Timestamp,
+        latest_time -> Timestamp,
+        resolved -> Bool,
+        data -> Jsonb,
+    }
+}
+
+table! {
+    use diesel::sql_types::*;
+    use crate::db_types::*;
+
     ingest_approvals (id) {
         id -> Int4,
         at -> Timestamp,
@@ -41,9 +58,9 @@ table! {
 }
 
 joinable!(ingest_logs -> ingest_approvals (approval_id));
-joinable!(ingest_logs -> ingests (ingest_id));
 
 allow_tables_to_appear_in_same_query!(
+    chron_updates,
     ingest_approvals,
     ingest_logs,
     ingests,
