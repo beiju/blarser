@@ -1,53 +1,32 @@
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex, mpsc::Sender};
-use log::error;
+use std::sync::{Mutex};
+
+use tokio::task::JoinHandle;
 
 use crate::db::BlarserDbConn;
-use crate::ingest::ingest;
-use crate::ingest::log::IngestLogger;
+use crate::ingest::chron::ingest_chron;
+use crate::ingest::feed::ingest_feed;
 
-type CallbackRegistry = Arc<Mutex<HashMap<i32, Sender<()>>>>;
-
-#[derive(Clone)]
 pub struct IngestTask {
-    registry: CallbackRegistry,
-}
-
-impl IngestTask {
-    pub fn register_callback(&self, approval_id: i32, sender: Sender<()>) {
-        self.registry.lock().unwrap().insert(approval_id, sender);
-    }
-
-    pub fn unregister_callback(&self, approval_id: i32) {
-        self.registry.lock().unwrap().remove(&approval_id);
-    }
-
-    pub fn notify_callback(&self, approval_id: i32) {
-        let sender = self.registry.lock().unwrap().remove(&approval_id);
-        if let Some(sender) = sender {
-            sender.send(()).unwrap();
-        }
-    }
+    feed_task: Mutex<Option<JoinHandle<()>>>,
+    chron_task: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl IngestTask {
     pub fn new() -> IngestTask {
-        IngestTask { registry: Arc::new(Mutex::new(HashMap::new())) }
+        IngestTask {
+            feed_task: Mutex::new(None),
+            chron_task: Mutex::new(None)
+        }
     }
 
-    pub fn start(&self, db: BlarserDbConn) {
-        let self_clone = self.clone();
-        tokio::spawn(async move {
-            db.run(|c| {
-                let log = IngestLogger::new(c, self_clone).unwrap();
-                let result = ingest::run(log);
-                match result {
-                    Ok(_) => {}
-                    Err(e) => {
-                        error!("{:?}", e);
-                    }
-                }
-            }).await
-        });
+    pub fn start(&self, feed_db: BlarserDbConn, chron_db: BlarserDbConn) {
+        *self.feed_task.lock().unwrap() = Some(tokio::spawn(ingest_feed(feed_db)));
+        *self.chron_task.lock().unwrap() = Some(tokio::spawn(ingest_chron(chron_db)));
+    }
+}
+
+impl Default for IngestTask {
+    fn default() -> Self {
+        IngestTask::new()
     }
 }

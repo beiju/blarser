@@ -77,7 +77,7 @@ pub fn get_latest_ingest(conn: &diesel::PgConnection) -> Result<Option<Ingest>, 
         .order(started_at.desc())
         .limit(1)
         .load(conn)?;
-    Ok(latest_ingest.into_iter().nth(0))
+    Ok(latest_ingest.into_iter().next())
 }
 
 pub fn get_logs_for(ingest: &Ingest, conn: &diesel::PgConnection) -> Result<Vec<IngestLogAndApproval>, diesel::result::Error> {

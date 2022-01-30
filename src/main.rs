@@ -17,9 +17,10 @@ async fn main() -> Result<(), rocket::Error> {
         .attach(Template::fairing())
         .manage(IngestTask::new())
         .attach(AdHoc::on_liftoff("Blarser Ingest", |rocket| Box::pin(async {
-            let db = BlarserDbConn::get_one(rocket).await.unwrap();
+            let feed_conn = BlarserDbConn::get_one(rocket).await.unwrap();
+            let chron_conn = BlarserDbConn::get_one(rocket).await.unwrap();
             let ingest_task: &IngestTask = rocket.state().unwrap();
-            ingest_task.start(db);
+            ingest_task.start(feed_conn, chron_conn);
         })))
         .launch().await
 }
