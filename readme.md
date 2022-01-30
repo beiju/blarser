@@ -56,6 +56,10 @@ Blarser will have done its job if, among other things, it can be used to:
 Approach
 --------
 
+double disclaimer on top of the following disclaimer: I reworked the plan, 
+again. see "Update: Revised ingest plan" for details. keeping this section 
+because a lot of it still applies.
+
 First, a disclaimer: This is just a plan. Blarser has gone through several 
 prototypes where I learned lessons about what will and will not work. This is 
 what I think will work based on those lessons, but almost nothing been 
@@ -163,3 +167,57 @@ implemented yet.
   The reasoning here is that once you've seen two updates for a given ID, you
   would definitely have seen any update for another ID. Oh wait, unless the 
   iteration order isn't stable. Maybe it should be 3 updates.
+
+### Update: Revised ingest plan
+
+Revised the whole ingest plan because the handling of chron update timestamp 
+fuzziness wasn't robust enough, and the previous plan wasn't database-friendly.
+
+1. One task ingests Feed events. Store feed events in a table and a list of 
+   which entities are (or may be) changed by that event in a linked table. I 
+   will probably limit this task so it stays at most ~1hr ahead of the Chron 
+   task, just so it's not crunching my computer every time I restart during 
+   development, and it doesn't hurt to keep that in prod even though it's not
+   necessary for any functionality.
+3. Another task ingests Chron updates. Each Chron update has a time range that 
+   could be the true time for the update, which should be derived from the 
+   `validFrom` timestamp (which is only an approximation). When each is 
+   ingested, apply this resolution algorithm:
+   1. Wait until the feed ingest task has caught up to the end of the time 
+      range. I requested for Eventually to return the timestamp of its last 
+      successful ingest with every response and allie said they are willing to
+      add it.
+   2. Fetch the latest *resolved* chron update for this entity. *Resolved* 
+      means that the update's order with respect to all feed events that can 
+      affect it is precisely known. The starting state (the state Blarser 
+      fetches when it first starts up) is assumed to be resolved. Use this to 
+      initialize an object that can represent partial information about the 
+      entity. This may be the time to impose the Rust type system onto entity
+      data.
+   3. Walk forward through the relevant events, changing the entity data
+      according to each one. "Events" includes feed events and timed events, 
+      which are events like "start the season" that occur at specific times 
+      which can be mined from the entity data. Once the timestamp of the events 
+      gets into the range for this Chron update, start validating this chron 
+      update's data against the computed entity data we get from walking the
+      events. Record every valid placement in one list and record the mismatched 
+      fields in another list. Stop once the end of the time range for this 
+      update is reached. (If there's an event exactly at the end of the range, 
+      it's important to stop *before* processing that feed event.)
+   4. If there are zero valid placements, this is a validation error. Need to
+      have a think about what to do with a validation error. Presumably it 
+      should be displayed somewhere, and this is where the mismatched fields 
+      list comes in.
+   5. If there are two or more valid placements, then this can't be placed. 
+      It still gets saved to the database (and its time range is one of the 
+      fields that gets stored) but not marked as resolved.
+   6. If there is exactly one valid placement, that is the correct placement.
+      Mark this chron record as *resolved*. Set the beginning of its time range
+      to the timestamp of the last event that caused a change, if that event is
+      inside the existing time range. Set the end of the previous update's time
+      range to the timestamp of the last event that caused a change, if that 
+      event is inside the existing time range. Note that this may not be the 
+      same update as the previous *resolved* update! Finally, if the previous
+      update was not resolved, apply the resolution process again using the 
+      updated end-of-range. Apply this recursively until you fail to resolve an
+      update or until you hit an already-resolved update.
