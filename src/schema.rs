@@ -19,6 +19,30 @@ table! {
     use diesel::sql_types::*;
     use crate::db_types::*;
 
+    feed_event_changes (id) {
+        id -> Int4,
+        feed_event_id -> Int4,
+        entity_type -> Text,
+        entity_id -> Nullable<Uuid>,
+    }
+}
+
+table! {
+    use diesel::sql_types::*;
+    use crate::db_types::*;
+
+    feed_events (id) {
+        id -> Int4,
+        ingest_id -> Int4,
+        created_at -> Timestamp,
+        data -> Jsonb,
+    }
+}
+
+table! {
+    use diesel::sql_types::*;
+    use crate::db_types::*;
+
     ingest_approvals (id) {
         id -> Int4,
         at -> Timestamp,
@@ -57,10 +81,13 @@ table! {
     }
 }
 
+joinable!(feed_event_changes -> feed_events (feed_event_id));
 joinable!(ingest_logs -> ingest_approvals (approval_id));
 
 allow_tables_to_appear_in_same_query!(
     chron_updates,
+    feed_event_changes,
+    feed_events,
     ingest_approvals,
     ingest_logs,
     ingests,

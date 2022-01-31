@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
-use serde::Deserialize;
+use serde::{Serialize, Deserialize};
 use serde_json::Value;
-use serde_repr::Deserialize_repr;
+use serde_repr::{Serialize_repr, Deserialize_repr};
 use uuid::Uuid;
 
 #[derive(Deserialize)]
@@ -23,7 +23,7 @@ impl IntoIterator for EventuallyResponse {
 }
 
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EventMetadata {
     // In addition to collecting useful metadata, this should collect any metadata that isn't used
@@ -44,7 +44,7 @@ pub struct EventMetadata {
     pub other: Value,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EventuallyEvent {
     pub id: Uuid,
@@ -61,7 +61,7 @@ pub struct EventuallyEvent {
     pub tournament: i32,
 }
 
-#[derive(Deserialize_repr, PartialEq, Debug)]
+#[derive(Serialize_repr, Deserialize_repr, PartialEq, Debug)]
 #[repr(i32)]
 pub enum Weather {
     Void = 0,
@@ -96,7 +96,7 @@ pub enum Weather {
 }
 
 //noinspection SpellCheckingInspection
-#[derive(Deserialize_repr, PartialEq, Debug, Copy, Clone)]
+#[derive(Serialize_repr, Deserialize_repr, PartialEq, Debug, Copy, Clone)]
 #[repr(i32)]
 pub enum EventType {
     Undefined = -1,

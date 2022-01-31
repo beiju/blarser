@@ -1,4 +1,4 @@
-use chrono::{DateTime, Duration, NaiveDateTime};
+use chrono::{Duration, NaiveDateTime};
 use diesel::{insert_into, RunQueryDsl};
 use rocket::info;
 use uuid::Uuid;
