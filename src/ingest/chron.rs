@@ -57,14 +57,17 @@ pub async fn ingest_chron(ingest: IngestState, start_at_time: &'static str) {
 
 async fn fetch_initial_state(ingest: IngestState, start_at_time: &'static str) -> IngestState {
     let ingest_id = ingest.ingest_id;
-    let inserts: Vec<_> = stream::iter(chronicler::ENDPOINT_NAMES.into_iter())
+    let streams = chronicler::ENDPOINT_NAMES.into_iter()
         .map(move |entity_type| {
-            chronicler::entities(entity_type, start_at_time.clone())
+            let stream = chronicler::entities(entity_type, start_at_time)
                 .map(move |entity| {
                     InsertChronUpdate::from_chron(ingest_id, entity_type, entity, true)
-                })
-        })
-        .flatten()
+                });
+
+            Box::pin(stream)
+        });
+
+    let inserts: Vec<_> = stream::select_all(streams)
         .collect().await;
 
     ingest.db.run(|c| {
