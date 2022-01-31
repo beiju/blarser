@@ -61,13 +61,14 @@ pub async fn ingest_feed(db: IngestState, start_at_time: &'static str) {
                 if processed_up_to < stop_at {
                     break;
                 }
-                info!("Waiting for Chron thread to progress ({}s)", (processed_up_to - stop_at).num_seconds());
+                info!("Eventually ingest waiting for Chronicler ingest to catch up ({}s)",
+                    (processed_up_to - stop_at).num_seconds());
                 ingest.receive_progress.changed().await
-                    .expect("Communication with Chron thread failed");
+                    .expect("Error communicating with Chronicler ingest");
             }
 
             ingest.notify_progress.send(processed_up_to)
-                .expect("Communication with Chron thread failed");
+                .expect("Error communicating with Chronicler ingest");
 
             ingest
         }).await;
