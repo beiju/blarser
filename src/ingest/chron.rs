@@ -30,7 +30,7 @@ impl InsertChronUpdate {
             earliest_time: (item.valid_from - Duration::seconds(5)).naive_utc(),
             latest_time: (item.valid_from + Duration::seconds(5)).naive_utc(),
             resolved,
-            data: item.data
+            data: item.data,
         }
     }
 }
@@ -38,18 +38,30 @@ impl InsertChronUpdate {
 pub async fn ingest_chron(ingest: IngestState, start_at_time: &'static str) {
     info!("Started Chron ingest task");
 
-    let mut pending_inserts = Vec::new();
-    for entity_type in chronicler::ENDPOINT_NAMES {
-        for entity in chronicler::entities(entity_type, start_at_time) {
-            pending_inserts.push(InsertChronUpdate::from_chron(ingest.ingest_id, entity_type, entity, true))
+    fetch_initial_state(ingest, start_at_time).await;
+
+    info!("Finished populating initial Chron values")
+}
+
+async fn fetch_initial_state(ingest: IngestState, start_at_time: &'static str) {
+// This is a blocking API, so have tokio run it in a separate thread
+    let pending_inserts = tokio::task::spawn_blocking(move || {
+        let mut pending_inserts = Vec::new();
+        for entity_type in chronicler::ENDPOINT_NAMES {
+            for entity in chronicler::entities(entity_type, start_at_time) {
+                pending_inserts.push(InsertChronUpdate::from_chron(
+                    ingest.ingest_id, entity_type, entity, true)
+                )
+            }
         }
-    }
+        pending_inserts
+    }).await.expect("Failed to fetch initial state from chron");
 
     ingest.db.run(|c| {
         use crate::schema::chron_updates::dsl::*;
 
         insert_into(chron_updates).values(pending_inserts).execute(c)
-    }).await.expect("Inserting chron updates failed");
+    }).await.expect("Failed to store initial state from chron");
 
-    info!("Finished fetching initial state from Chron")
+    tokio::time::sleep(core::time::Duration::from_secs(60*60)).await;
 }

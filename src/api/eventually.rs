@@ -1,21 +1,20 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::mpsc;
-use std::thread;
+use futures::{future, Stream, stream, StreamExt};
 use log::{info, warn};
 
 pub use crate::api::eventually_schema::{EventuallyEvent, EventuallyResponse};
 
-pub fn events(start: &'static str) -> impl Iterator<Item=EventuallyEvent> {
-    let (sender, receiver) = mpsc::sync_channel(2);
-    thread::spawn(move || events_thread(sender, start));
-    receiver.into_iter()
-        .flatten()
+const PAGE_SIZE: usize = 100;
+
+pub fn events(start: &'static str) -> impl Stream<Item=EventuallyEvent> {
+    eventually_pages(start)
+        .flat_map(|vec| stream::iter(vec.into_iter()))
         .scan(HashSet::new(), |seen_ids, mut event| {
             // If this event was already seen as a sibling of a processed event, skip it
             if seen_ids.remove(&event.id) {
-                info!("Discarding duplicate event {} from {}", event.description, event.created);
+                // info!("Discarding duplicate event {} from {}", event.description, event.created);
                 // Double-option because the outer layer is used by `scan` to terminate the iterator
-                return Some(None)
+                return future::ready(Some(None));
             }
 
             // seen_ids shouldn't grow very large, since every uuid that's put into it should come
@@ -51,70 +50,84 @@ pub fn events(start: &'static str) -> impl Iterator<Item=EventuallyEvent> {
                 event
             };
 
-            info!("Yielding event {} from {}", parent_event.description, parent_event.created);
+            // info!("Yielding event {} from {}", parent_event.description, parent_event.created);
             // Double-option because the outer layer is used by `scan` to terminate the iterator
-            Some(Some(parent_event))
+            future::ready(Some(Some(parent_event)))
         })
-        .flatten()
+        .flat_map(|maybe_event| stream::iter(maybe_event.into_iter()))
+}
+
+struct EventuallyState {
+    page: usize,
+    stop: bool,
+    cache: sled::Db,
+    client: reqwest::Client,
+}
+
+fn eventually_pages(start: &'static str) -> impl Stream<Item=Vec<EventuallyEvent>> {
+    let start_state = EventuallyState {
+        page: 0,
+        stop: false,
+        cache: sled::open("http_cache/eventually/").unwrap(),
+        client: reqwest::Client::new(),
+    };
+
+    stream::unfold(start_state, move |state| async move {
+        if state.stop {
+            None
+        } else {
+            Some(eventually_page(start, state).await)
+        }
+    })
 }
 
 //noinspection SpellCheckingInspection
-fn events_thread(sender: mpsc::SyncSender<Vec<EventuallyEvent>>, start: &str) {
-    let client = reqwest::blocking::Client::new();
+async fn eventually_page(start: &'static str, state: EventuallyState) -> (Vec<EventuallyEvent>, EventuallyState) {
+    let request = state.client.get("https://api.sibr.dev/eventually/v2/events")
+        .query(&[
+            ("limit", PAGE_SIZE),
+            ("offset", state.page * PAGE_SIZE),
+        ])
+        .query(&[
+            ("expand_siblings", "true"),
+            ("sortby", "{created}"),
+            ("sortorder", "asc"),
+            ("after", start)
+        ]);
 
-    let mut page = 0;
-    const PAGE_SIZE: usize = 100;
-    let cache: sled::Db = sled::open("http_cache/eventually/").unwrap();
+    let request = request.build().unwrap();
 
-    loop {
-        let request = client.get("https://api.sibr.dev/eventually/v2/events")
-            .query(&[
-                ("limit", PAGE_SIZE),
-                ("offset", page * PAGE_SIZE),
-            ])
-            .query(&[
-                ("expand_siblings", "true"),
-                ("sortby", "{created}"),
-                ("sortorder", "asc"),
-                ("after", start)
-            ]);
+    let cache_key = request.url().to_string();
 
-        let request = request.build().unwrap();
+    let response = match state.cache.get(&cache_key).unwrap() {
+        Some(text) => bincode::deserialize(&text).unwrap(),
+        None => {
+            info!("Fetching page {} of feed events from network", state.page);
 
-        let cache_key = request.url().to_string();
+            let text = state.client
+                .execute(request).await
+                .expect("Eventually API call failed")
+                .text().await
+                .expect("Failed to decode Eventually API response");
 
-        let response = match cache.get(&cache_key).unwrap() {
-            Some(text) => bincode::deserialize(&text).unwrap(),
-            None => {
-                info!("Fetching page of feed events from network");
+            state.cache.insert(&cache_key, bincode::serialize(&text).unwrap()).unwrap();
 
-                let text = client
-                    .execute(request).expect("Eventually API call failed")
-                    .text().unwrap();
-
-                cache.insert(&cache_key, bincode::serialize(&text).unwrap()).unwrap();
-
-                text
-            }
-        };
-
-        let response: EventuallyResponse = serde_json::from_str(&response).unwrap();
-
-
-        let len = response.len();
-
-
-        match sender.send(response.0) {
-            Ok(_) => { },
-            Err(err) => {
-                warn!("Exiting eventually thread due to {:?}", err);
-                return;
-            }
+            text
         }
-        if len < PAGE_SIZE {
-            break;
-        }
+    };
 
-        page += 1;
-    }
+    let response: EventuallyResponse = serde_json::from_str(&response).unwrap();
+
+
+    let len = response.len();
+
+    (
+        response.0,
+        EventuallyState {
+            page: state.page + 1,
+            stop: len < PAGE_SIZE,
+            cache: state.cache,
+            client: state.client,
+        }
+    )
 }

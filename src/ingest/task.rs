@@ -1,6 +1,8 @@
-use std::sync::{Mutex};
+use std::sync::Mutex;
+use chrono::{DateTime, Utc};
 use diesel::{insert_into, RunQueryDsl};
 use rocket::info;
+use tokio::sync::mpsc;
 
 use tokio::task::JoinHandle;
 
@@ -19,6 +21,8 @@ pub struct IngestTask {
 pub struct IngestState {
     pub ingest_id: i32,
     pub db: BlarserDbConn,
+    pub notify_progress: mpsc::Sender<DateTime<Utc>>,
+    pub receive_progress: mpsc::Receiver<DateTime<Utc>>,
 }
 
 impl IngestTask {
@@ -37,14 +41,21 @@ impl IngestTask {
             insert_into(ingests).default_values().returning(id).get_result(c)
         }).await.expect("Failed to create new ingest record");
 
+        let (send_feed_progress, recv_feed_progress) = mpsc::channel(1);
+        let (send_chron_progress, recv_chron_progress) = mpsc::channel(1);
+
         let feed_ingest = IngestState {
             ingest_id,
             db: feed_db,
+            notify_progress: send_feed_progress,
+            receive_progress: recv_chron_progress,
         };
 
         let chron_ingest = IngestState {
             ingest_id,
             db: chron_db,
+            notify_progress: send_chron_progress,
+            receive_progress: recv_feed_progress,
         };
 
         *self.feed_task.lock().unwrap() = Some(tokio::spawn(ingest_feed(feed_ingest, BLARSER_START)));
