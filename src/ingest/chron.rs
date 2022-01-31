@@ -1,4 +1,4 @@
-use chrono::{Duration, NaiveDateTime};
+use chrono::{DateTime, Duration, NaiveDateTime};
 use diesel::{insert_into, RunQueryDsl};
 use rocket::info;
 use uuid::Uuid;
@@ -38,14 +38,25 @@ impl InsertChronUpdate {
 pub async fn ingest_chron(ingest: IngestState, start_at_time: &'static str) {
     info!("Started Chron ingest task");
 
-    fetch_initial_state(ingest, start_at_time).await;
+    // Have to move ingest in and back out even though that's the whole point of borrows
+    let ingest = fetch_initial_state(ingest, start_at_time).await;
 
-    info!("Finished populating initial Chron values")
+    info!("Finished populating initial Chron values");
+
+    loop {
+        tokio::time::sleep(core::time::Duration::from_secs(5)).await;
+        info!("Pretending to advance chron 1 minute");
+        let t = *ingest.notify_progress.borrow() + Duration::minutes(1);
+        info!("Got t");
+        ingest.notify_progress.send(t)
+            .expect("Communication with Eventually thread failed");
+        info!("Sent t");
+    }
 }
 
-async fn fetch_initial_state(ingest: IngestState, start_at_time: &'static str) {
+async fn fetch_initial_state(ingest: IngestState, start_at_time: &'static str) -> IngestState {
 // This is a blocking API, so have tokio run it in a separate thread
-    let pending_inserts = tokio::task::spawn_blocking(move || {
+    let (pending_inserts, ingest) = tokio::task::spawn_blocking(move || {
         let mut pending_inserts = Vec::new();
         for entity_type in chronicler::ENDPOINT_NAMES {
             for entity in chronicler::entities(entity_type, start_at_time) {
@@ -54,7 +65,7 @@ async fn fetch_initial_state(ingest: IngestState, start_at_time: &'static str) {
                 )
             }
         }
-        pending_inserts
+        (pending_inserts, ingest)
     }).await.expect("Failed to fetch initial state from chron");
 
     ingest.db.run(|c| {
@@ -63,5 +74,5 @@ async fn fetch_initial_state(ingest: IngestState, start_at_time: &'static str) {
         insert_into(chron_updates).values(pending_inserts).execute(c)
     }).await.expect("Failed to store initial state from chron");
 
-    tokio::time::sleep(core::time::Duration::from_secs(60*60)).await;
+    ingest
 }

@@ -8,21 +8,25 @@ use crate::ingest::task::IngestState;
 pub async fn ingest_feed(db: IngestState, start_at_time: &'static str) {
     info!("Started Feed ingest task");
 
-    let start_time_parsed = DateTime::parse_from_rfc3339(start_at_time)
-        .expect("Couldn't parse Blarser start time")
-        .with_timezone(&Utc) + Duration::hours(1);
-
     eventually::events(start_at_time)
         .ready_chunks(50)
-        .fold((start_time_parsed, db), |(mut pause_at, mut ingest), events| async move {
+        .fold(db, |mut ingest, events| async move {
             let processed_up_to = save_feed_events(&ingest, events).await;
 
-            // while processed_up_to > pause_at {
-            //     pause_at = ingest.receive_progress.recv().await
-            //         .expect("Communication with Chron thread failed") + Duration::hours(1);
-            // }
+            loop {
+                let stop_at = *ingest.receive_progress.borrow() + Duration::minutes(1);
+                if processed_up_to < stop_at {
+                    break
+                }
+                info!("Waiting for Chron thread to progress ({}s)", (processed_up_to - stop_at).num_seconds());
+                ingest.receive_progress.changed().await
+                    .expect("Communication with Chron thread failed");
+            }
 
-            (processed_up_to, ingest)
+            ingest.notify_progress.send(processed_up_to)
+                .expect("Communication with Chron thread failed");
+
+            ingest
         }).await;
 }
 
