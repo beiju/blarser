@@ -1,6 +1,8 @@
+use std::iter;
+use std::pin::Pin;
 use chrono::{DateTime, Duration, NaiveDateTime, Utc};
-use diesel::{insert_into, RunQueryDsl};
-use futures::{stream, StreamExt};
+use diesel::{Connection, insert_into, RunQueryDsl};
+use futures::{stream, Stream, StreamExt};
 use rocket::info;
 use uuid::Uuid;
 use crate::api::{chronicler, ChroniclerItem};
@@ -34,6 +36,46 @@ impl InsertChronUpdate {
             data: item.data,
         }
     }
+}
+
+async fn fetch_initial_state(ingest: IngestState, start_at_time: &'static str) -> IngestState {
+    let ingest_id = ingest.ingest_id;
+    // So much of this is just making the type system happy
+    let streams = chronicler::ENDPOINT_NAMES.into_iter()
+        .map(move |entity_type| {
+            let stream = chronicler::entities(entity_type, start_at_time)
+                .map(move |entity| {
+                    InsertChronUpdate::from_chron(ingest_id, entity_type, entity, true)
+                });
+
+            Box::pin(stream) as Pin<Box<dyn Stream<Item=InsertChronUpdate> + Send>>
+        })
+        .chain(iter::once(
+            Box::pin(chronicler::schedule(start_at_time)
+                .map(move |entity| {
+                    InsertChronUpdate::from_chron(ingest_id, "game", entity, true)
+                })
+            ) as Pin<Box<dyn Stream<Item=InsertChronUpdate> + Send>>
+        ));
+
+    // There are so many objects that Diesel can't insert them all in one operation
+    let inserts_chunked: Vec<_> = stream::select_all(streams)
+        .chunks(1000)
+        .collect().await;
+
+    ingest.db.run(|c| {
+        c.transaction(|| {
+            use crate::schema::chron_updates::dsl::*;
+
+            for insert_chunk in inserts_chunked {
+                insert_into(chron_updates).values(insert_chunk).execute(c)?;
+            }
+
+            Ok::<_, diesel::result::Error>(())
+        })
+    }).await.expect("Failed to store initial state from chron");
+
+    ingest
 }
 
 // This differs from InsertChronUpdate just on the type of the time fields
@@ -78,8 +120,15 @@ pub async fn ingest_chron(ingest: IngestState, start_at_time: &'static str) {
                     PendingChronUpdate::from_chron(ingest.ingest_id, entity_type, entity, true)
                 });
 
-            Box::pin(stream)
-        });
+            Box::pin(stream) as Pin<Box<dyn Stream<Item=PendingChronUpdate> + Send>>
+        })
+        .chain(iter::once(
+            Box::pin(chronicler::game_updates(start_at_time)
+                .map(move |entity| {
+                    PendingChronUpdate::from_chron(ingest.ingest_id, "game", entity, true)
+                })
+            ) as Pin<Box<dyn Stream<Item=PendingChronUpdate> + Send>>
+        ));
 
     stream::select_all(streams)
         .fold(ingest, |mut ingest, update| async {
@@ -94,38 +143,14 @@ pub async fn ingest_chron(ingest: IngestState, start_at_time: &'static str) {
         }).await;
 }
 
-async fn fetch_initial_state(ingest: IngestState, start_at_time: &'static str) -> IngestState {
-    let ingest_id = ingest.ingest_id;
-    let streams = chronicler::ENDPOINT_NAMES.into_iter()
-        .map(move |entity_type| {
-            let stream = chronicler::entities(entity_type, start_at_time)
-                .map(move |entity| {
-                    InsertChronUpdate::from_chron(ingest_id, entity_type, entity, true)
-                });
-
-            Box::pin(stream)
-        });
-
-    let inserts: Vec<_> = stream::select_all(streams)
-        .collect().await;
-
-    ingest.db.run(|c| {
-        use crate::schema::chron_updates::dsl::*;
-
-        insert_into(chron_updates).values(inserts).execute(c)
-    }).await.expect("Failed to store initial state from chron");
-
-    ingest
-}
-
-async fn wait_for_feed_ingest(ingest: &mut IngestState, update_time: DateTime<Utc>) {
+async fn wait_for_feed_ingest(ingest: &mut IngestState, wait_until_time: DateTime<Utc>) {
     loop {
         let feed_time = *ingest.receive_progress.borrow();
-        if feed_time > update_time {
+        if feed_time < wait_until_time {
             break;
         }
         info!("Chronicler ingest waiting for Eventually ingest to catch up ({}s)",
-            (feed_time - update_time).num_seconds());
+            (wait_until_time - feed_time).num_seconds());
         ingest.receive_progress.changed().await
             .expect("Error communicating with Eventually ingest");
     }

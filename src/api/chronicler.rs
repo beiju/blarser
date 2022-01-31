@@ -1,8 +1,6 @@
-use std::sync::mpsc;
-use std::thread;
 use bincode;
 use futures::{Stream, stream, StreamExt};
-use log::{info, warn};
+use log::info;
 
 use crate::api::chronicler_schema::{ChroniclerItem, ChroniclerResponse, ChroniclerGameUpdate, ChroniclerGameUpdatesResponse, ChroniclerGamesResponse};
 
@@ -85,12 +83,9 @@ pub fn entities(entity_type: &'static str, start: &'static str) -> impl Stream<I
         .flat_map(|vec| stream::iter(vec.into_iter()))
 }
 
-pub fn game_updates_or_schedule(schedule: bool, start: &'static str) -> impl Iterator<Item=ChroniclerItem> {
-    let (sender, receiver) = mpsc::sync_channel(32);
-    thread::spawn(move || game_updates_thread(sender, schedule, start));
-    receiver
-        .into_iter()
-        .flatten()
+pub fn game_updates_or_schedule(schedule: bool, start: &'static str) -> impl Stream<Item=ChroniclerItem> {
+    game_update_pages(schedule, start)
+        .flat_map(|vec| stream::iter(vec.into_iter()))
         .map(|game| {
             ChroniclerItem {
                 entity_id: game.game_id,
@@ -101,11 +96,11 @@ pub fn game_updates_or_schedule(schedule: bool, start: &'static str) -> impl Ite
         })
 }
 
-pub fn game_updates(start: &'static str) -> impl Iterator<Item=ChroniclerItem> {
+pub fn game_updates(start: &'static str) -> impl Stream<Item=ChroniclerItem> {
     game_updates_or_schedule(false, start)
 }
 
-pub fn schedule(start: &'static str) -> impl Iterator<Item=ChroniclerItem> {
+pub fn schedule(start: &'static str) -> impl Stream<Item=ChroniclerItem> {
     game_updates_or_schedule(true, start)
 }
 
@@ -188,95 +183,108 @@ async fn chronicler_page(start: &'static str,
     )
 }
 
-fn game_updates_thread(sender: mpsc::SyncSender<Vec<ChroniclerGameUpdate>>,
-                       schedule: bool,
-                       start: &'static str) {
-    let client = reqwest::blocking::Client::new();
-
-    let mut page: Option<String> = None;
-
+fn game_update_pages(schedule: bool, start: &'static str) -> impl Stream<Item=Vec<ChroniclerGameUpdate>> {
     let request_type = if schedule { "schedule" } else { "updates" };
 
-    let cache: sled::Db = sled::open("http_cache/game/".to_string() + request_type).unwrap();
+    let start_state = ChronState {
+        page: None,
+        stop: false,
+        cache: sled::open("http_cache/game/".to_string() + request_type).unwrap(),
+        client: reqwest::Client::new(),
+    };
 
-    loop {
-        let request = client
-            .get("https://api.sibr.dev/chronicler/v1/games".to_string() + if schedule { "" } else { "/updates" })
-            .query(&[("after", &start)]);
 
-        let request = match page {
-            Some(page) => request.query(&[("page", &page)]),
-            None => request
-        };
-
-        let request = request.build().unwrap();
-
-        let cache_key = request.url().to_string();
-        let response = match cache.get(&cache_key).unwrap() {
-            Some(text) => bincode::deserialize(&text).unwrap(),
-            None => {
-                info!("Fetching game {} page from network", request_type);
-
-                let text = client
-                    .execute(request).expect("Chronicler API call failed")
-                    .text().expect("Chronicler text decode failed");
-
-                cache.insert(&cache_key, bincode::serialize(&text).unwrap()).unwrap();
-
-                text
-            }
-        };
-
-        let (response_data, next_page) = if schedule {
-            let games_response: ChroniclerGamesResponse = serde_json::from_str(&response).unwrap();
-            let games: Vec<_> = games_response.data.into_iter()
-                .map(|item| {
-                    let request = client
-                        .get("https://api.sibr.dev/chronicler/v1/games/updates")
-                        .query(&[("game", item.game_id.to_string())])
-                        .query(&[("order", "asc")])
-                        .query(&[("count", 1)])
-                        .build().unwrap();
-
-                    let cache_key = request.url().to_string();
-                    let response = match cache.get(&cache_key).unwrap() {
-                        Some(text) => bincode::deserialize(&text).unwrap(),
-                        None => {
-                            info!("Fetching latest update for game {} from network", item.game_id);
-
-                            let text = client
-                                .execute(request).expect("Chronicler API call failed")
-                                .text().expect("Chronicler text decode failed");
-
-                            cache.insert(&cache_key, bincode::serialize(&text).unwrap()).unwrap();
-
-                            text
-                        }
-                    };
-
-                    let response: ChroniclerGameUpdatesResponse = serde_json::from_str(&response).unwrap();
-
-                    response.data.into_iter().next().unwrap()
-                })
-                .collect();
-
-            (games, games_response.next_page)
+    stream::unfold(start_state, move |state| async move {
+        if state.stop {
+            None
         } else {
-            let response: ChroniclerGameUpdatesResponse = serde_json::from_str(&response).unwrap();
-            (response.data, response.next_page)
-        };
-
-        match sender.send(response_data) {
-            Ok(_) => {}
-            Err(err) => {
-                warn!("Exiting game {} thread due to {:?}", request_type, err);
-                return;
-            }
+            Some(game_update_page(schedule, start, state).await)
         }
+    })
+}
 
-        page = match next_page {
-            Some(p) => Some(p),
-            None => return
+async fn game_update_page(schedule: bool, start: &'static str, state: ChronState) -> (Vec<ChroniclerGameUpdate>, ChronState) {
+    let request_type = if schedule { "schedule" } else { "updates" };
+
+    let request = state.client
+        .get("https://api.sibr.dev/chronicler/v1/games".to_string() + if schedule { "" } else { "/updates" })
+        .query(&[("after", &start)]);
+
+    info!("Getting page {}", match &state.page { Some(page) => page, None => "<first page>"});
+
+    let request = match state.page {
+        Some(page) => request.query(&[("page", &page)]),
+        None => request
+    };
+
+    let request = request.build().unwrap();
+
+    let cache_key = request.url().to_string();
+    let response = match state.cache.get(&cache_key).unwrap() {
+        Some(text) => bincode::deserialize(&text).unwrap(),
+        None => {
+            info!("Fetching game {} page from network", request_type);
+
+            let text = state.client
+                .execute(request).await
+                .expect("Chronicler API call failed")
+                .text().await
+                .expect("Chronicler text decode failed");
+
+            state.cache.insert(&cache_key, bincode::serialize(&text).unwrap()).unwrap();
+
+            text
         }
-    }
+    };
+
+    let client = &state.client;
+    let cache = &state.cache;
+    let (response_data, next_page) = if schedule {
+        let games_response: ChroniclerGamesResponse = serde_json::from_str(&response).unwrap();
+        let games: Vec<_> = stream::iter(games_response.data.into_iter())
+            .then(move |item| async move {
+                let request = client
+                    .get("https://api.sibr.dev/chronicler/v1/games/updates")
+                    .query(&[("game", item.game_id.to_string())])
+                    .query(&[("order", "asc")])
+                    .query(&[("count", 1)])
+                    .build().unwrap();
+
+                let cache_key = request.url().to_string();
+                let response = match cache.get(&cache_key).unwrap() {
+                    Some(text) => bincode::deserialize(&text).unwrap(),
+                    None => {
+                        info!("Fetching latest update for game {} from network", item.game_id);
+
+                        let text = client
+                            .execute(request).await
+                            .expect("Chronicler API call failed")
+                            .text().await
+                            .expect("Chronicler text decode failed");
+
+                        cache.insert(&cache_key, bincode::serialize(&text).unwrap()).unwrap();
+
+                        text
+                    }
+                };
+
+                let response: ChroniclerGameUpdatesResponse = serde_json::from_str(&response).unwrap();
+
+                response.data.into_iter().next().unwrap()
+            })
+            .collect().await;
+
+        (games, games_response.next_page)
+    } else {
+        let response: ChroniclerGameUpdatesResponse = serde_json::from_str(&response).unwrap();
+        (response.data, response.next_page)
+    };
+
+    let stop = next_page.is_none();
+    (response_data, ChronState {
+        page: next_page,
+        stop,
+        cache: state.cache,
+        client: state.client
+    })
 }
