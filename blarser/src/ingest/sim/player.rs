@@ -6,13 +6,13 @@ use partial_information_derive::PartialInformationCompare;
 use crate::api::{EventType, EventuallyEvent};
 use crate::ingest::sim::{Entity, FeedEventChangeResult};
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]
 pub struct Item {
 
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]
 pub struct PlayerState {
 
@@ -99,10 +99,6 @@ impl Entity for Player {
                 panic!("{:?} event does not apply to Player", other)
             }
         }
-    }
-
-    fn get_conflicts(&self, other: &Self) -> Option<String> {
-        todo!()
     }
 }
 

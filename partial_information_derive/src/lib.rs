@@ -1,50 +1,64 @@
+// Modified from https://users.rust-lang.org/t/syn-how-do-i-iterate-on-the-fields-of-a-struct/42600/5
+#![allow(unused_imports)]
 extern crate proc_macro;
 
-use proc_macro::TokenStream;
-use quote::quote;
-use syn;
-use syn::Data;
-
+use ::proc_macro::TokenStream;
+use ::proc_macro2::{Span, TokenStream as TokenStream2};
+use ::quote::{quote, quote_spanned, ToTokens};
+use ::syn::{*, parse::{Parse, Parser, ParseStream}, punctuated::Punctuated, spanned::Spanned, Result};
 
 #[proc_macro_derive(PartialInformationCompare)]
 pub fn partial_information_compare_derive(input: TokenStream) -> TokenStream {
-    // Construct a representation of Rust code as a syntax tree
-    // that we can manipulate
-    let ast = syn::parse(input).unwrap();
-
-    // Build the trait implementation
-    impl_partial_information_compare(&ast)
+    let ast = parse_macro_input!(input as _);
+    TokenStream::from(match impl_partial_information_compare(ast) {
+        | Ok(it) => it,
+        | Err(err) => err.to_compile_error(),
+    })
 }
 
-fn impl_partial_information_compare(ast: &syn::DeriveInput) -> TokenStream {
-    let name = &ast.ident;
-    let fields_to_compare = match &ast.data {
-        Data::Struct(st) => {
-            st.fields.iter().map(|field| {
-                match &field.ident {
-                    None => panic!("PartialInformationCompare only supports named fields"),
-                    Some(ident) => {
-                        quote! {
-                            match ::partial_information::PartialInformationFieldCompare(self.#ident, other.#ident) {
-                                Some(message) => msg_vec.push(message),
-                                None => {}
-                            }
-                        }
-                    }
-                }
-            })
+fn impl_partial_information_compare(ast: DeriveInput) -> Result<TokenStream2> {
+    Ok({
+        let name = ast.ident;
+        let fields = match ast.data {
+            | Data::Enum(DataEnum { enum_token: token::Enum { span }, .. })
+            | Data::Union(DataUnion { union_token: token::Union { span }, .. })
+            => {
+                return Err(Error::new(
+                    span,
+                    "Expected a `struct`",
+                ));
+            }
+
+            | Data::Struct(DataStruct { fields: Fields::Named(it), .. })
+            => it,
+
+            | Data::Struct(_)
+            => {
+                return Err(Error::new(
+                    Span::call_site(),
+                    "Expected a `struct` with named fields",
+                ));
+            }
+        };
+
+        let get_conflicts = fields.named.into_iter().map(|field| {
+            let field_name = field.ident.expect("Unreachable");
+            let span = field_name.span();
+            let field_name_stringified = LitStr::new(&field_name.to_string(), span);
+            quote_spanned! { span=>
+            ::partial_information::PartialInformationFieldCompare::get_conflicts(
+                    #field_name_stringified.to_string(), &self.#field_name, &other.#field_name).into_iter()
         }
-        _ => {
-            panic!("PartialInformationCompare only supports Struct items");
-        }
-    };
-    let gen = quote! {
+        }).fold(quote!{ ::std::iter::empty() }, |lhs, rhs| {
+            quote!{ #lhs.chain(#rhs) }
+        });
+
+        quote! {
         impl PartialInformationCompare for #name {
             fn get_conflicts(&self, other: &Self) -> Vec<String> {
-
-                println!("Hello, Macro! My name is {}!", stringify!(#name));
+                #get_conflicts.collect()
             }
         }
-    };
-    gen.into()
+    }
+    })
 }

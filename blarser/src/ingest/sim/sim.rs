@@ -1,17 +1,19 @@
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use uuid::Uuid;
+use partial_information::PartialInformationCompare;
+use partial_information_derive::PartialInformationCompare;
 
 use crate::api::{EventuallyEvent};
 use crate::ingest::sim::{Entity, FeedEventChangeResult};
 
-#[derive(Deserialize)]
+#[derive(Deserialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
 pub struct SimState {}
 
-#[derive(Deserialize)]
+#[derive(Deserialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
@@ -28,7 +30,7 @@ pub struct Sim {
     sim_end: DateTime<Utc>,
     era_color: String,
     era_title: String,
-    playoffs: Option<()>, // TODO what's the type when it's not null?
+    playoffs: Option<i32>, // TODO what's the type when it's not null?
     season_id: Uuid,
     sim_start: DateTime<Utc>,
     agitations: i32, // what
@@ -60,9 +62,5 @@ impl Entity for Sim {
                 panic!("{:?} event does not apply to Sim", other)
             }
         }
-    }
-
-    fn get_conflicts(&self, other: &Self) -> Option<String> {
-        todo!()
     }
 }

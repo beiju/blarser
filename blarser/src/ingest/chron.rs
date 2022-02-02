@@ -265,6 +265,14 @@ fn find_placement<FeedIterT>(this_update: InsertChronUpdate, prev_update: ChronU
     }
 }
 
+fn to_bulleted_list(vec: Vec<String>) -> Option<String> {
+    if vec.is_empty() {
+        return None;
+    }
+
+    Some(format!("- {}", vec.join("\n- ")))
+}
+
 fn find_placement_typed<'a, EntityT, FeedIterT>(this_update: InsertChronUpdate, prev_update: ChronUpdate, feed_events: FeedIterT)
     where EntityT: sim::Entity, FeedIterT: Iterator<Item=EventuallyEvent> {
     let expected_entity = EntityT::new(this_update.data);
@@ -279,7 +287,7 @@ fn find_placement_typed<'a, EntityT, FeedIterT>(this_update: InsertChronUpdate, 
                 }
                 FeedEventChangeResult::Incompatible(_error) => todo!(),
                 FeedEventChangeResult::Ok => {
-                    match entity.get_conflicts(&expected_entity) {
+                    match to_bulleted_list(entity.get_conflicts(&expected_entity)) {
                         None => {
                             info!("Change could be placed after {:?} event", event.r#type);
                             Some(Ok(event.created))
@@ -300,7 +308,7 @@ fn find_placement_typed<'a, EntityT, FeedIterT>(this_update: InsertChronUpdate, 
         });
     match (oks.len(), fails.len()) {
         (0, 0) => {
-            match starting_conflicts {
+            match to_bulleted_list(starting_conflicts) {
                 None => {
                     panic!("Expected two consecutive Chron records for {} {} to differ, but they did not", this_update.entity_type, this_update.entity_id);
                 }
