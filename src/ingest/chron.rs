@@ -260,6 +260,7 @@ fn find_placement<FeedIterT>(this_update: InsertChronUpdate, prev_update: ChronU
     where FeedIterT: Iterator<Item=EventuallyEvent> {
     match this_update.entity_type {
         "player" => find_placement_typed::<sim::Player, _>(this_update, prev_update, feed_events),
+        "sim" => find_placement_typed::<sim::Sim, _>(this_update, prev_update, feed_events),
         other => panic!("Unknown entity type {}", other)
     }
 }
