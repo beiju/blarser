@@ -280,7 +280,7 @@ fn find_placement_typed<'a, EntityT, FeedIterT>(this_update: InsertChronUpdate, 
     let starting_conflicts = entity.get_conflicts(&expected_entity);
     let (oks, fails): (Vec<_>, Vec<_>) = feed_events
         .flat_map(|event| {
-            match entity.apply_event(&event) {
+            match entity.apply_feed_event(&event) {
                 FeedEventChangeResult::DidNotApply => {
                     info!("{:?} event did not apply", event.r#type);
                     None

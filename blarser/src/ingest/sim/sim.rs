@@ -56,7 +56,7 @@ pub struct Sim {
 }
 
 impl Entity for Sim {
-    fn apply_event(&mut self, event: &EventuallyEvent) -> FeedEventChangeResult {
+    fn apply_feed_event(&mut self, event: &EventuallyEvent) -> FeedEventChangeResult {
         match event.r#type {
             other => {
                 panic!("{:?} event does not apply to Sim", other)

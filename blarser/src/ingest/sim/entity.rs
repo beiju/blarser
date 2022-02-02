@@ -14,5 +14,5 @@ pub trait Entity: for<'de> Deserialize<'de> + PartialInformationCompare {
             .expect("Error converting entity JSON to entity type")
     }
 
-    fn apply_event(&mut self, event: &EventuallyEvent) -> FeedEventChangeResult;
+    fn apply_feed_event(&mut self, event: &EventuallyEvent) -> FeedEventChangeResult;
 }

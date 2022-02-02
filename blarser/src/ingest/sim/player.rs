@@ -82,7 +82,7 @@ pub struct Player {
 }
 
 impl Entity for Player {
-    fn apply_event(&mut self, event: &EventuallyEvent) -> FeedEventChangeResult {
+    fn apply_feed_event(&mut self, event: &EventuallyEvent) -> FeedEventChangeResult {
         match event.r#type {
             EventType::FlyOut => {
                 self.fielding_out(event, "flyout")
