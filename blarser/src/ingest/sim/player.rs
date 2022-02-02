@@ -1,22 +1,19 @@
 use serde::Deserialize;
+use serde_json::Value;
 use uuid::Uuid;
 use partial_information::{Ranged, PartialInformationCompare};
 use partial_information_derive::PartialInformationCompare;
 
 use crate::api::{EventType, EventuallyEvent};
-use crate::ingest::sim::{Entity, FeedEventChangeResult};
+use crate::ingest::sim::{Entity, FeedEventChangeResult, GenericEvent, EventType as GenericEventType};
 
 #[derive(Debug, Deserialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]
-pub struct Item {
-
-}
+pub struct Item {}
 
 #[derive(Debug, Deserialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]
-pub struct PlayerState {
-
-}
+pub struct PlayerState {}
 
 #[derive(Deserialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]
@@ -82,6 +79,17 @@ pub struct Player {
 }
 
 impl Entity for Player {
+    fn apply_event(&mut self, event: &GenericEvent) -> FeedEventChangeResult {
+        match &event.event_type {
+            GenericEventType::FeedEvent(event) => self.apply_feed_event(event),
+            other => {
+                panic!("{:?} event does not apply to Player", other)
+            }
+        }
+    }
+}
+
+impl Player {
     fn apply_feed_event(&mut self, event: &EventuallyEvent) -> FeedEventChangeResult {
         match event.r#type {
             EventType::FlyOut => {

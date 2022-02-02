@@ -1,11 +1,10 @@
 use serde::Deserialize;
 use partial_information::PartialInformationCompare;
-use crate::api::EventuallyEvent;
+use crate::ingest::sim::GenericEvent;
 
 pub enum FeedEventChangeResult {
     Ok,
     DidNotApply,
-    Incompatible(String),
 }
 
 pub trait Entity: for<'de> Deserialize<'de> + PartialInformationCompare {
@@ -14,5 +13,5 @@ pub trait Entity: for<'de> Deserialize<'de> + PartialInformationCompare {
             .expect("Error converting entity JSON to entity type")
     }
 
-    fn apply_feed_event(&mut self, event: &EventuallyEvent) -> FeedEventChangeResult;
+    fn apply_event(&mut self, event: &GenericEvent) -> FeedEventChangeResult;
 }

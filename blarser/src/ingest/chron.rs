@@ -7,13 +7,12 @@ use diesel::{self, Connection, ExpressionMethods, insert_into, PgConnection, Run
 use futures::{stream, Stream, StreamExt};
 use rocket::{info};
 use uuid::Uuid;
-use itertools::{Itertools, Either};
+use itertools::{Itertools};
 use crate::api::{chronicler, ChroniclerItem, EventuallyEvent};
 use crate::ingest::task::IngestState;
 
 use diesel::prelude::*;
-use crate::ingest::sim;
-use crate::ingest::sim::FeedEventChangeResult;
+use crate::ingest::sim::{self, EventType, FeedEventChangeResult, GenericEvent};
 use crate::schema::*;
 
 
@@ -64,8 +63,8 @@ impl InsertChronUpdate {
             entity_type,
             entity_id: item.entity_id,
             perceived_at: item.valid_from,
-            earliest_time: item.valid_from - Duration::seconds(5),
-            latest_time: item.valid_from + Duration::seconds(5),
+            earliest_time: item.valid_from - Duration::seconds(15),
+            latest_time: item.valid_from + Duration::seconds(15),
             resolved,
             data: item.data,
         }
@@ -113,6 +112,7 @@ async fn fetch_initial_state(ingest: IngestState, start_at_time: &'static str) -
 }
 
 type ChronUpdateStreamPin = Pin<Box<dyn Stream<Item=InsertChronUpdate> + Send>>;
+
 pub async fn ingest_chron(ingest: IngestState, start_at_time: &'static str) {
     info!("Started Chron ingest task");
 
@@ -216,7 +216,7 @@ fn kmerge_chron_updates<StreamT: Iterator<Item=ChronUpdateStreamPin>>(streams_it
 
             Some((item_to_yield, heap))
         })
-            .filter_map(|x| async {x})
+            .filter_map(|x| async { x })
     }).flatten()
 }
 
@@ -239,16 +239,16 @@ async fn do_ingest(ingest: &mut IngestState, mut update: InsertChronUpdate) -> D
 
     ingest.db.run(move |c| {
         c.transaction(|| {
-            let prev = get_previous_resolved_update(c, &update);
+            let prev = get_previous_resolved_update(c, update.ingest_id, update.entity_type, update.entity_id, update.earliest_time);
 
             // We know for sure that no other update can overlap with `prev` because it's resolved.
             // Therefore, we know this update's earliest_time should be no earlier than `prev`'s
             // latest_time
             update.earliest_time = max(update.earliest_time, prev.latest_time);
 
-            let feed_events = get_possible_feed_events(c, &update, prev.latest_time);
+            let feed_events = get_possible_feed_events(c, update.ingest_id, update.entity_type, update.entity_id, prev.latest_time, update.latest_time);
 
-            find_placement(update, prev, feed_events);
+            find_placement(c, update.ingest_id, update, prev, feed_events);
             Ok::<_, diesel::result::Error>(())
         })
     }).await.expect("Database error processing ingest");
@@ -256,11 +256,10 @@ async fn do_ingest(ingest: &mut IngestState, mut update: InsertChronUpdate) -> D
     time
 }
 
-fn find_placement<FeedIterT>(this_update: InsertChronUpdate, prev_update: ChronUpdate, feed_events: FeedIterT)
-    where FeedIterT: Iterator<Item=EventuallyEvent> {
+fn find_placement(c: &PgConnection, ingest_id: i32, this_update: InsertChronUpdate, prev_update: ChronUpdate, feed_events: Vec<EventuallyEvent>) {
     match this_update.entity_type {
-        "player" => find_placement_typed::<sim::Player, _>(this_update, prev_update, feed_events),
-        "sim" => find_placement_typed::<sim::Sim, _>(this_update, prev_update, feed_events),
+        "player" => find_placement_typed::<sim::Player>(c, ingest_id, this_update, prev_update, feed_events),
+        "sim" => find_placement_typed::<sim::Sim>(c, ingest_id, this_update, prev_update, feed_events),
         other => panic!("Unknown entity type {}", other)
     }
 }
@@ -273,39 +272,50 @@ fn to_bulleted_list(vec: Vec<String>) -> Option<String> {
     Some(format!("- {}", vec.join("\n- ")))
 }
 
-fn find_placement_typed<'a, EntityT, FeedIterT>(this_update: InsertChronUpdate, prev_update: ChronUpdate, feed_events: FeedIterT)
-    where EntityT: sim::Entity, FeedIterT: Iterator<Item=EventuallyEvent> {
+type GenericEventSource = Box<dyn Iterator<Item=GenericEvent>>;
+
+struct Placement {
+    span_start: DateTime<Utc>,
+    span_end: DateTime<Utc>,
+    conflicts: Vec<String>,
+}
+
+fn find_placement_typed<'a, EntityT>(c: &PgConnection, ingest_id: i32, this_update: InsertChronUpdate, prev_update: ChronUpdate, feed_events: Vec<EventuallyEvent>)
+    where EntityT: sim::Entity {
     let expected_entity = EntityT::new(this_update.data);
     let mut entity = EntityT::new(prev_update.data);
     let starting_conflicts = entity.get_conflicts(&expected_entity);
-    let (oks, fails): (Vec<_>, Vec<_>) = feed_events
-        .flat_map(|event| {
-            match entity.apply_feed_event(&event) {
+    let events = feed_events.into_iter().map(|event| GenericEvent { time: event.created, event_type: EventType::FeedEvent(event) })
+        .chain(get_timed_events(c, ingest_id, prev_update.latest_time, this_update.latest_time))
+        .sorted_by_key(|item| item.time)
+        .collect_vec();
+
+    // Each event creates a span, starting at the event time and ending at the next event time (or
+    // this update's latest time, for the last event)
+    let span_ends = events.iter().skip(1).map(|event| event.time).chain(iter::once(this_update.latest_time));
+
+    info!("There are {} potential spans for {} update", events.len(), this_update.entity_type);
+
+    let (oks, fails): (Vec<_>, Vec<_>) = events.iter().zip(span_ends)
+        .scan(prev_update.earliest_time, |mut span_start, (event, span_end)| {
+            info!("Applying {:?} event", event.event_type);
+            match entity.apply_event(&event) {
                 FeedEventChangeResult::DidNotApply => {
-                    info!("{:?} event did not apply", event.r#type);
+                    info!("{:?} event did not apply", event.event_type);
                     None
                 }
-                FeedEventChangeResult::Incompatible(_error) => todo!(),
                 FeedEventChangeResult::Ok => {
-                    match to_bulleted_list(entity.get_conflicts(&expected_entity)) {
-                        None => {
-                            info!("Change could be placed after {:?} event", event.r#type);
-                            Some(Ok(event.created))
-                        }
-                        Some(conflicts) => {
-                            info!("Change could not placed after {:?} event:\n{}", event.r#type, conflicts);
-                            Some(Err(conflicts))
-                        }
-                    }
+                    let placement = Placement {
+                        span_start: *span_start,
+                        span_end,
+                        conflicts: entity.get_conflicts(&expected_entity)
+                    };
+                    *span_start = span_end;
+                    Some(placement)
                 }
             }
         })
-        .partition_map(|r| {
-            match r {
-                Ok(v) => Either::Left(v),
-                Err(v) => Either::Right(v),
-            }
-        });
+        .partition(|placement| placement.conflicts.is_empty());
     match (oks.len(), fails.len()) {
         (0, 0) => {
             match to_bulleted_list(starting_conflicts) {
@@ -313,12 +323,17 @@ fn find_placement_typed<'a, EntityT, FeedIterT>(this_update: InsertChronUpdate, 
                     panic!("Expected two consecutive Chron records for {} {} to differ, but they did not", this_update.entity_type, this_update.entity_id);
                 }
                 Some(conflicts) => {
-                    panic!("{} update differs from previous value and there are no feed events to explain why:\n{}", this_update.entity_type, conflicts);
+                    panic!("{} update differs from previous value and there are no events to explain why:\n{}", this_update.entity_type, conflicts);
                 }
             }
         }
         (0, _) => {
-            panic!("{} update cannot ever be placed -- no valid placements", this_update.entity_type);
+            let placement_reasons = fails.into_iter().map(|placement| {
+                format!("Between {:#?} and {:#?}:\n{}",
+                        placement.span_start, placement.span_end,
+                        to_bulleted_list(placement.conflicts).unwrap_or("".to_string()))
+            }).join("\n");
+            panic!("{} update cannot ever be placed -- no valid placements:\n{}", this_update.entity_type, placement_reasons);
         }
         (1, _) => {
             info!("{} update can be placed", this_update.entity_type);
@@ -331,14 +346,41 @@ fn find_placement_typed<'a, EntityT, FeedIterT>(this_update: InsertChronUpdate, 
     }
 }
 
-fn get_previous_resolved_update(c: &PgConnection, update: &InsertChronUpdate) -> ChronUpdate {
-    use crate::schema::chron_updates::dsl::*;
-    chron_updates
-        .filter(ingest_id.eq(update.ingest_id))
-        .filter(entity_type.eq(update.entity_type))
-        .filter(entity_id.eq(update.entity_id))
-        .filter(resolved.eq(true))
-        .filter(latest_time.lt(update.latest_time))
+fn get_timed_events(c: &PgConnection, ingest_id: i32, start_time: DateTime<Utc>, end_time: DateTime<Utc>) -> impl Iterator<Item=GenericEvent> {
+    let sim_ = get_entity::<sim::Sim>(c, ingest_id, "sim", Uuid::nil(), start_time);
+    let mut events = Vec::new();
+    if start_time < sim_.earlseason_date && sim_.earlseason_date < end_time {
+        events.push(GenericEvent {
+            time: sim_.earlseason_date,
+            event_type: EventType::EarlseasonStart,
+        })
+    }
+    events.into_iter().sorted_by_key(|e| e.time)
+}
+
+fn get_entity<EntityT: sim::Entity>(c: &PgConnection, ingest_id: i32, entity_type: &str, entity_id: Uuid, at_time: DateTime<Utc>) -> EntityT {
+    let last_known = get_previous_resolved_update(c, ingest_id, entity_type, entity_id, at_time);
+    let mut entity = EntityT::new(last_known.data);
+
+    // Start looking at latest_time -- this event is resolved, so we know there are no events that affect it
+    // that happen between earliest_time and latest_time.
+    // TODO: Can I get all events here or will that cause infinite recursion?
+    let feed_events = get_possible_feed_events(c, ingest_id, entity_type, entity_id, last_known.latest_time, at_time);
+    for feed_event in feed_events {
+        entity.apply_event(&GenericEvent { time: feed_event.created, event_type: EventType::FeedEvent(feed_event) });
+    }
+    entity
+}
+
+fn get_previous_resolved_update(c: &PgConnection, ingest_id: i32, entity_type: &str, entity_id: Uuid, before_time: DateTime<Utc>) -> ChronUpdate {
+    use crate::schema::chron_updates::dsl;
+    dsl::chron_updates
+        .filter(dsl::ingest_id.eq(ingest_id))
+        .filter(dsl::entity_type.eq(entity_type))
+        .filter(dsl::entity_id.eq(entity_id))
+        .filter(dsl::resolved.eq(true))
+        // This has to be le (not lt) for get_entity to work
+        .filter(dsl::latest_time.le(before_time))
         .limit(1)
         .load::<ChronUpdate>(c)
         .expect("Error querying previous record for entity type")
@@ -346,17 +388,17 @@ fn get_previous_resolved_update(c: &PgConnection, update: &InsertChronUpdate) ->
         .expect("Couldn't find a previous record for entity type")
 }
 
-fn get_possible_feed_events(c: &PgConnection, update: &InsertChronUpdate, after_time: DateTime<Utc>) -> impl Iterator<Item=EventuallyEvent> {
+fn get_possible_feed_events(c: &PgConnection, ingest_id: i32, entity_type: &str, entity_id: Uuid, from_time: DateTime<Utc>, to_time: DateTime<Utc>) -> Vec<EventuallyEvent> {
     use crate::schema::feed_events::dsl as feed;
     use crate::schema::feed_event_changes::dsl as changes;
     changes::feed_event_changes
         .inner_join(feed::feed_events)
         .select((feed::data, ))
-        .filter(feed::ingest_id.eq(update.ingest_id))
-        .filter(feed::created_at.ge(after_time))
-        .filter(feed::created_at.lt(update.latest_time))
-        .filter(changes::entity_type.eq(update.entity_type))
-        .filter(changes::entity_id.eq(update.entity_id).or(changes::entity_id.is_null()))
+        .filter(feed::ingest_id.eq(ingest_id))
+        .filter(feed::created_at.ge(from_time))
+        .filter(feed::created_at.lt(to_time))
+        .filter(changes::entity_type.eq(entity_type))
+        .filter(changes::entity_id.eq(entity_id).or(changes::entity_id.is_null()))
         .load::<(serde_json::Value, )>(c)
         .expect("Error querying feed events that change this entity")
         .into_iter()
@@ -364,4 +406,5 @@ fn get_possible_feed_events(c: &PgConnection, update: &InsertChronUpdate, after_
             serde_json::from_value(json.0)
                 .expect("Couldn't parse stored Feed event")
         })
+        .collect()
 }
