@@ -98,7 +98,7 @@ impl Entity for Player {
         }
     }
 
-    fn could_be(&self, other: &Self) -> bool {
+    fn get_conflicts(&self, other: &Self) -> Option<String> {
         todo!()
     }
 }

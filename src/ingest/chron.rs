@@ -5,7 +5,7 @@ use std::pin::Pin;
 use chrono::{DateTime, Duration, NaiveDateTime, Utc};
 use diesel::{self, Connection, ExpressionMethods, insert_into, PgConnection, RunQueryDsl};
 use futures::{stream, Stream, StreamExt};
-use rocket::info;
+use rocket::{info};
 use uuid::Uuid;
 use itertools::{Itertools, Either};
 use crate::api::{chronicler, ChroniclerItem, EventuallyEvent};
@@ -269,6 +269,7 @@ fn find_placement_typed<'a, EntityT, FeedIterT>(this_update: InsertChronUpdate, 
     where EntityT: sim::Entity, FeedIterT: Iterator<Item=EventuallyEvent> {
     let expected_entity = EntityT::new(this_update.data);
     let mut entity = EntityT::new(prev_update.data);
+    let starting_conflicts = entity.get_conflicts(&expected_entity);
     let (oks, fails): (Vec<_>, Vec<_>) = feed_events
         .flat_map(|event| {
             match entity.apply_event(&event) {
@@ -278,12 +279,15 @@ fn find_placement_typed<'a, EntityT, FeedIterT>(this_update: InsertChronUpdate, 
                 }
                 FeedEventChangeResult::Incompatible(_error) => todo!(),
                 FeedEventChangeResult::Ok => {
-                    if entity.could_be(&expected_entity) {
-                        info!("Change could be placed after {:?} event", event.r#type);
-                        Some(Ok(event.created))
-                    } else {
-                        info!("Change could not placed after {:?} event", event.r#type);
-                        Some(Err("TODO Get mismatched fields"))
+                    match entity.get_conflicts(&expected_entity) {
+                        None => {
+                            info!("Change could be placed after {:?} event", event.r#type);
+                            Some(Ok(event.created))
+                        }
+                        Some(conflicts) => {
+                            info!("Change could not placed after {:?} event:\n{}", event.r#type, conflicts);
+                            Some(Err(conflicts))
+                        }
                     }
                 }
             }
@@ -296,7 +300,14 @@ fn find_placement_typed<'a, EntityT, FeedIterT>(this_update: InsertChronUpdate, 
         });
     match (oks.len(), fails.len()) {
         (0, 0) => {
-            panic!("{} update differs from previous value and there are no feed events to explain why", this_update.entity_type);
+            match starting_conflicts {
+                None => {
+                    panic!("Expected two consecutive Chron records for {} {} to differ, but they did not", this_update.entity_type, this_update.entity_id);
+                }
+                Some(conflicts) => {
+                    panic!("{} update differs from previous value and there are no feed events to explain why:\n{}", this_update.entity_type, conflicts);
+                }
+            }
         }
         (0, _) => {
             panic!("{} update cannot ever be placed -- no valid placements", this_update.entity_type);

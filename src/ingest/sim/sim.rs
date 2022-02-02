@@ -61,7 +61,7 @@ impl Entity for Sim {
         }
     }
 
-    fn could_be(&self, other: &Self) -> bool {
+    fn get_conflicts(&self, other: &Self) -> Option<String> {
         todo!()
     }
 }
