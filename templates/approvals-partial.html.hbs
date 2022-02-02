@@ -1,8 +1,0 @@
-<pre>{{ message }}</pre>
-<form action="/approve" method="post">
-    <input type="hidden" name="approval_id" value="{{ id }}">
-    <input type="hidden" name="from_route" value="{{ from_route }}">
-    <textarea name="message" placeholder="Message (optional)"></textarea>
-    <button name="approved" value="false" type="submit">Reject</button>
-    <button name="approved" value="true" type="submit">Accept</button>
-</form>
