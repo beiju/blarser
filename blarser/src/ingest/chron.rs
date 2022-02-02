@@ -1,4 +1,4 @@
-use std::cmp::{max, Ordering};
+use std::cmp::{min, max, Ordering};
 use std::collections::BinaryHeap;
 use std::iter;
 use std::pin::Pin;
@@ -248,18 +248,30 @@ async fn do_ingest(ingest: &mut IngestState, mut update: InsertChronUpdate) -> D
 
             let feed_events = get_possible_feed_events(c, update.ingest_id, update.entity_type, update.entity_id, prev.latest_time, update.latest_time);
 
-            find_placement(c, update.ingest_id, update, prev, feed_events);
-            Ok::<_, diesel::result::Error>(())
+            if let Some(placement) = find_placement(c, &update, prev, feed_events) {
+                // TODO Do I need to do min and max? Is span_start and span_end sufficient?
+                update.earliest_time = max(update.earliest_time, placement.span_start);
+                update.latest_time = min(update.latest_time, placement.span_end);
+                update.resolved = true;
+                info!("Inserting resolved {} update", update.entity_type);
+            } else {
+                info!("Inserting unresolved {} update", update.entity_type);
+            }
+
+            insert_into(crate::schema::chron_updates::dsl::chron_updates).values(update).execute(c)
+
+            // TODO: If the previous update's span overlaps this update's span, shrink it. Then, if
+            //  the previous update is unresolved, try resolving it again.
         })
     }).await.expect("Database error processing ingest");
 
     time
 }
 
-fn find_placement(c: &PgConnection, ingest_id: i32, this_update: InsertChronUpdate, prev_update: ChronUpdate, feed_events: Vec<EventuallyEvent>) {
+fn find_placement(c: &PgConnection, this_update: &InsertChronUpdate, prev_update: ChronUpdate, feed_events: Vec<EventuallyEvent>) -> Option<Placement> {
     match this_update.entity_type {
-        "player" => find_placement_typed::<sim::Player>(c, ingest_id, this_update, prev_update, feed_events),
-        "sim" => find_placement_typed::<sim::Sim>(c, ingest_id, this_update, prev_update, feed_events),
+        "player" => find_placement_typed::<sim::Player>(c, this_update, prev_update, feed_events),
+        "sim" => find_placement_typed::<sim::Sim>(c, this_update, prev_update, feed_events),
         other => panic!("Unknown entity type {}", other)
     }
 }
@@ -280,13 +292,13 @@ struct Placement {
     conflicts: Vec<String>,
 }
 
-fn find_placement_typed<'a, EntityT>(c: &PgConnection, ingest_id: i32, this_update: InsertChronUpdate, prev_update: ChronUpdate, feed_events: Vec<EventuallyEvent>)
+fn find_placement_typed<'a, EntityT>(c: &PgConnection, this_update: &InsertChronUpdate, prev_update: ChronUpdate, feed_events: Vec<EventuallyEvent>) -> Option<Placement>
     where EntityT: sim::Entity {
-    let expected_entity = EntityT::new(this_update.data);
+    let expected_entity = EntityT::new(this_update.data.clone());
     let mut entity = EntityT::new(prev_update.data);
     let starting_conflicts = entity.get_conflicts(&expected_entity);
     let events = feed_events.into_iter().map(|event| GenericEvent { time: event.created, event_type: EventType::FeedEvent(event) })
-        .chain(get_timed_events(c, ingest_id, prev_update.latest_time, this_update.latest_time))
+        .chain(get_timed_events(c, this_update.ingest_id, prev_update.latest_time, this_update.latest_time))
         .sorted_by_key(|item| item.time)
         .collect_vec();
 
@@ -337,11 +349,11 @@ fn find_placement_typed<'a, EntityT>(c: &PgConnection, ingest_id: i32, this_upda
         }
         (1, _) => {
             info!("{} update can be placed", this_update.entity_type);
-            todo!()
+            Some(oks.into_iter().exactly_one().ok().unwrap())
         }
         (_, _) => {
             info!("{} update cannot currently be placed -- multiple valid placements", this_update.entity_type);
-            todo!()
+            None
         }
     }
 }
