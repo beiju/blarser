@@ -1,4 +1,5 @@
-use std::cmp::max;
+use std::cmp::{max, Ordering};
+use std::collections::BinaryHeap;
 use std::iter;
 use std::pin::Pin;
 use chrono::{DateTime, Duration, NaiveDateTime, Utc};
@@ -30,6 +31,7 @@ struct ChronUpdate {
 }
 
 #[derive(Queryable)]
+#[allow(dead_code)]
 struct FeedEventChange {
     id: i32,
     ingest_id: i32,
@@ -110,6 +112,7 @@ async fn fetch_initial_state(ingest: IngestState, start_at_time: &'static str) -
     ingest
 }
 
+type ChronUpdateStreamPin = Pin<Box<dyn Stream<Item=InsertChronUpdate> + Send>>;
 pub async fn ingest_chron(ingest: IngestState, start_at_time: &'static str) {
     info!("Started Chron ingest task");
 
@@ -125,17 +128,17 @@ pub async fn ingest_chron(ingest: IngestState, start_at_time: &'static str) {
                     InsertChronUpdate::from_chron(ingest.ingest_id, entity_type, entity, true)
                 });
 
-            Box::pin(stream) as Pin<Box<dyn Stream<Item=InsertChronUpdate> + Send>>
+            Box::pin(stream) as ChronUpdateStreamPin
         })
         .chain(iter::once(
             Box::pin(chronicler::game_updates(start_at_time)
                 .map(move |entity| {
                     InsertChronUpdate::from_chron(ingest.ingest_id, "game", entity, true)
                 })
-            ) as Pin<Box<dyn Stream<Item=InsertChronUpdate> + Send>>
+            ) as ChronUpdateStreamPin
         ));
 
-    stream::select_all(streams)
+    kmerge_chron_updates(streams)
         .fold(ingest, |mut ingest, update| async {
             wait_for_feed_ingest(&mut ingest, update.latest_time).await;
 
@@ -146,6 +149,75 @@ pub async fn ingest_chron(ingest: IngestState, start_at_time: &'static str) {
 
             ingest
         }).await;
+}
+
+// TODO this is not compatible with live data. It currently relies on a stream closing when it
+//   catches up to live data. There's a github issue for a standard kmerge_by for streams,
+//   hopefully it at least has a proposed implementation by the time I get to live data.
+fn kmerge_chron_updates<StreamT: Iterator<Item=ChronUpdateStreamPin>>(streams_it: StreamT) -> impl Stream<Item=InsertChronUpdate> {
+    struct KmergeData {
+        stream: ChronUpdateStreamPin,
+        // next_date is the earliest date that the next item might have. if the next item is known,
+        // this is that item's date (and next_item is Some). if the next item is not yet available,
+        // this is the date of the last completed ingest from Eventually (TODO)
+        next_date: DateTime<Utc>,
+        next_item: Option<InsertChronUpdate>,
+    }
+    impl Eq for KmergeData {}
+    impl PartialEq<Self> for KmergeData {
+        fn eq(&self, other: &Self) -> bool {
+            self.next_date.eq(&other.next_date)
+        }
+    }
+    impl PartialOrd<Self> for KmergeData {
+        fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+            // Swap the order to turn > into < and vice versa -- this turns the BinaryHeap from
+            // max-first (the default) to min-first
+            other.next_date.partial_cmp(&self.next_date)
+        }
+    }
+    impl Ord for KmergeData {
+        fn cmp(&self, other: &Self) -> Ordering {
+            // Swap the order to turn > into < and vice versa
+            other.next_date.cmp(&self.next_date)
+        }
+    }
+
+    // Use stream::once to do async initialization without having to make the function async
+    stream::once(async {
+        let streams_init: BinaryHeap<_> = stream::iter(streams_it)
+            // This throws away endpoints with no data -- see note at top of function
+            .filter_map(|mut stream| async {
+                match stream.next().await {
+                    None => None,
+                    Some(first_item) => {
+                        let date = first_item.perceived_at;
+                        Some(KmergeData {
+                            stream,
+                            next_date: date,
+                            next_item: Some(first_item),
+                        })
+                    }
+                }
+            })
+            .collect().await;
+        stream::unfold(streams_init, |mut heap| async {
+            let mut heap_entry = heap.pop()
+                .expect("This heap should never terminate");
+            let item_to_yield = heap_entry.next_item;
+            // TODO Also fetch the latest ingest time somehow
+            let next_item = heap_entry.stream.next().await;
+            heap_entry.next_date = match &next_item {
+                Some(item) => item.perceived_at,
+                None => todo!(),  // This is where I need to use the last ingest time
+            };
+            heap_entry.next_item = next_item;
+            heap.push(heap_entry);
+
+            Some((item_to_yield, heap))
+        })
+            .filter_map(|x| async {x})
+    }).flatten()
 }
 
 async fn wait_for_feed_ingest(ingest: &mut IngestState, wait_until_time: DateTime<Utc>) {
