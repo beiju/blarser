@@ -10,7 +10,7 @@ use crate::api::{chronicler, ChroniclerItem, EventuallyEvent};
 use crate::ingest::task::IngestState;
 
 use diesel::prelude::*;
-use crate::ingest::sim::simulate;
+use crate::ingest::sim;
 use crate::schema::*;
 
 
@@ -174,14 +174,31 @@ async fn do_ingest(ingest: &mut IngestState, mut update: InsertChronUpdate) -> D
 
             let feed_events = get_possible_feed_events(c, &update, prev.latest_time);
 
-            // let valid_states = simulate(prev, feed_events)
-            //     .filter();
-
+            find_placement(update, prev, feed_events);
             Ok::<_, diesel::result::Error>(())
         })
     }).await.expect("Database error processing ingest");
 
     time
+}
+
+fn find_placement<FeedIterT>(this_update: InsertChronUpdate, prev_update: ChronUpdate, feed_events: FeedIterT)
+    where FeedIterT: Iterator<Item=EventuallyEvent> {
+    match this_update.entity_type {
+        "player" => find_placement_typed::<sim::Player, _>(this_update, prev_update, feed_events),
+        other => panic!("Unknown entity type {}", other)
+    }
+}
+
+fn find_placement_typed<'a, EntityT, FeedIterT>(this_update: InsertChronUpdate, prev_update: ChronUpdate, feed_events: FeedIterT)
+    where EntityT: sim::Entity, FeedIterT: Iterator<Item=EventuallyEvent> {
+    let expected_entity = EntityT::new(this_update.data);
+    feed_events
+        .fold(EntityT::new(prev_update.data), |entity, event| {
+            todo!()
+        });
+
+    todo!()
 }
 
 fn get_previous_resolved_update(c: &PgConnection, update: &InsertChronUpdate) -> ChronUpdate {
