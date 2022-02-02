@@ -1,10 +1,10 @@
 use serde::Deserialize;
 use crate::api::EventuallyEvent;
 
-pub enum FeedEventChangeResult<EntityT> {
+pub enum FeedEventChangeResult {
+    Ok,
     DidNotApply,
-    Incompatible,
-    Ok(EntityT)
+    Incompatible(String),
 }
 
 pub trait Entity: for<'de> Deserialize<'de> {
@@ -13,6 +13,6 @@ pub trait Entity: for<'de> Deserialize<'de> {
             .expect("Error converting entity JSON to entity type")
     }
 
-    fn apply_event(self, event: &EventuallyEvent) -> FeedEventChangeResult<Self> where Self: Sized;
+    fn apply_event(&mut self, event: &EventuallyEvent) -> FeedEventChangeResult;
     fn could_be(&self, other: &Self) -> bool;
 }

@@ -6,11 +6,13 @@ use diesel::{self, Connection, ExpressionMethods, insert_into, PgConnection, Run
 use futures::{stream, Stream, StreamExt};
 use rocket::info;
 use uuid::Uuid;
+use itertools::{Itertools, Either};
 use crate::api::{chronicler, ChroniclerItem, EventuallyEvent};
 use crate::ingest::task::IngestState;
 
 use diesel::prelude::*;
 use crate::ingest::sim;
+use crate::ingest::sim::FeedEventChangeResult;
 use crate::schema::*;
 
 
@@ -193,12 +195,48 @@ fn find_placement<FeedIterT>(this_update: InsertChronUpdate, prev_update: ChronU
 fn find_placement_typed<'a, EntityT, FeedIterT>(this_update: InsertChronUpdate, prev_update: ChronUpdate, feed_events: FeedIterT)
     where EntityT: sim::Entity, FeedIterT: Iterator<Item=EventuallyEvent> {
     let expected_entity = EntityT::new(this_update.data);
-    feed_events
-        .fold(EntityT::new(prev_update.data), |entity, event| {
-            todo!()
+    let mut entity = EntityT::new(prev_update.data);
+    let (oks, fails): (Vec<_>, Vec<_>) = feed_events
+        .flat_map(|event| {
+            match entity.apply_event(&event) {
+                FeedEventChangeResult::DidNotApply => {
+                    info!("{:?} event did not apply", event.r#type);
+                    None
+                }
+                FeedEventChangeResult::Incompatible(_error) => todo!(),
+                FeedEventChangeResult::Ok => {
+                    if entity.could_be(&expected_entity) {
+                        info!("Change could be placed after {:?} event", event.r#type);
+                        Some(Ok(event.created))
+                    } else {
+                        info!("Change could not placed after {:?} event", event.r#type);
+                        Some(Err("TODO Get mismatched fields"))
+                    }
+                }
+            }
+        })
+        .partition_map(|r| {
+            match r {
+                Ok(v) => Either::Left(v),
+                Err(v) => Either::Right(v),
+            }
         });
-
-    todo!()
+    match (oks.len(), fails.len()) {
+        (0, 0) => {
+            panic!("{} update differs from previous value and there are no feed events to explain why", this_update.entity_type);
+        }
+        (0, _) => {
+            panic!("{} update cannot ever be placed -- no valid placements", this_update.entity_type);
+        }
+        (1, _) => {
+            info!("{} update can be placed", this_update.entity_type);
+            todo!()
+        }
+        (_, _) => {
+            info!("{} update cannot currently be placed -- multiple valid placements", this_update.entity_type);
+            todo!()
+        }
+    }
 }
 
 fn get_previous_resolved_update(c: &PgConnection, update: &InsertChronUpdate) -> ChronUpdate {
