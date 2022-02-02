@@ -1,0 +1,13 @@
+{{#> base title="Pending Approvals" }}
+
+    {{#*inline "content-block"}}
+        <ul>
+            {{#each approvals}}
+                <li>
+                    {{> approvals-partial from_route="approvals" }}
+                </li>
+            {{/each}}
+        </ul>
+    {{/inline}}
+
+{{/base}}

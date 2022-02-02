@@ -1,0 +1,17 @@
+.logs {
+    list-style: none;
+    display: flex;
+    flex-direction: column-reverse;
+}
+
+.log-message {
+    background: rgb(212 248 255);
+    margin: 3px 0;
+    overflow: hidden;
+    border-left: 3px solid rgb(13 202 240);
+}
+
+.log-message p {
+    margin: 0;
+    padding: 3px 8px;
+}
