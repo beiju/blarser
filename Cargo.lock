@@ -156,6 +156,7 @@ dependencies = [
  "log",
  "nom",
  "owning_ref",
+ "partial_information",
  "reqwest",
  "rocket",
  "rocket_dyn_templates",
@@ -1344,6 +1345,24 @@ dependencies = [
  "redox_syscall",
  "smallvec",
  "winapi 0.3.9",
+]
+
+[[package]]
+name = "partial_information"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "serde_repr",
+]
+
+[[package]]
+name = "partial_information_derive"
+version = "0.1.0"
+dependencies = [
+ "quote",
+ "syn",
 ]
 
 [[package]]

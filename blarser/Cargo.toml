@@ -33,6 +33,8 @@ uuid = { version = "0.8.2", features = ["serde"] }
 async-recursion = "0.3.2"
 nom = { version = "7", features = ["alloc"] }
 owning_ref = "0.4.1"
+partial_information = { path = "../partial_information" }
+
 
 
 [dependencies.rocket_sync_db_pools]

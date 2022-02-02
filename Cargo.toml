@@ -2,4 +2,6 @@
 
 members = [
     "blarser",
+    "partial_information",
+    "partial_information_derive",
 ]
