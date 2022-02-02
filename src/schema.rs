@@ -7,9 +7,9 @@ table! {
         ingest_id -> Int4,
         entity_type -> Text,
         entity_id -> Uuid,
-        perceived_at -> Timestamp,
-        earliest_time -> Timestamp,
-        latest_time -> Timestamp,
+        perceived_at -> Timestamptz,
+        earliest_time -> Timestamptz,
+        latest_time -> Timestamptz,
         resolved -> Bool,
         data -> Jsonb,
     }
@@ -34,7 +34,7 @@ table! {
     feed_events (id) {
         id -> Int4,
         ingest_id -> Int4,
-        created_at -> Timestamp,
+        created_at -> Timestamptz,
         data -> Jsonb,
     }
 }
@@ -45,9 +45,9 @@ table! {
 
     ingest_approvals (id) {
         id -> Int4,
-        at -> Timestamp,
+        at -> Timestamptz,
         chronicler_entity_type -> Varchar,
-        chronicler_time -> Timestamp,
+        chronicler_time -> Timestamptz,
         chronicler_entity_id -> Uuid,
         message -> Text,
         approved -> Nullable<Bool>,
@@ -61,7 +61,7 @@ table! {
 
     ingest_logs (id) {
         id -> Int4,
-        at -> Timestamp,
+        at -> Timestamptz,
         ingest_id -> Int4,
         #[sql_name = "type"]
         type_ -> Log_type,
@@ -76,7 +76,7 @@ table! {
 
     ingests (id) {
         id -> Int4,
-        started_at -> Timestamp,
+        started_at -> Timestamptz,
         events_parsed -> Int4,
     }
 }

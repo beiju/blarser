@@ -2,7 +2,7 @@ use std::cmp::max;
 use std::iter;
 use std::pin::Pin;
 use chrono::{DateTime, Duration, NaiveDateTime, Utc};
-use diesel::{Connection, ExpressionMethods, insert_into, PgConnection, RunQueryDsl};
+use diesel::{self, Connection, ExpressionMethods, insert_into, PgConnection, RunQueryDsl};
 use futures::{stream, Stream, StreamExt};
 use rocket::info;
 use uuid::Uuid;
@@ -13,15 +13,16 @@ use diesel::prelude::*;
 use crate::ingest::sim::simulate;
 use crate::schema::*;
 
-#[derive(Queryable)]
+
+#[derive(Queryable, PartialEq, Debug)]
 struct ChronUpdate {
     id: i32,
     ingest_id: i32,
     entity_type: String,
     entity_id: Uuid,
-    perceived_at: NaiveDateTime,
-    earliest_time: NaiveDateTime,
-    latest_time: NaiveDateTime,
+    perceived_at: DateTime<Utc>,
+    earliest_time: DateTime<Utc>,
+    latest_time: DateTime<Utc>,
     resolved: bool,
     data: serde_json::Value,
 }
@@ -45,9 +46,9 @@ struct InsertChronUpdate {
     ingest_id: i32,
     entity_type: &'static str,
     entity_id: Uuid,
-    perceived_at: NaiveDateTime,
-    earliest_time: NaiveDateTime,
-    latest_time: NaiveDateTime,
+    perceived_at: DateTime<Utc>,
+    earliest_time: DateTime<Utc>,
+    latest_time: DateTime<Utc>,
     resolved: bool,
     data: serde_json::Value,
 }
@@ -58,9 +59,9 @@ impl InsertChronUpdate {
             ingest_id,
             entity_type,
             entity_id: item.entity_id,
-            perceived_at: item.valid_from.naive_utc(),
-            earliest_time: (item.valid_from - Duration::seconds(5)).naive_utc(),
-            latest_time: (item.valid_from + Duration::seconds(5)).naive_utc(),
+            perceived_at: item.valid_from,
+            earliest_time: item.valid_from - Duration::seconds(5),
+            latest_time: item.valid_from + Duration::seconds(5),
             resolved,
             data: item.data,
         }
@@ -107,33 +108,6 @@ async fn fetch_initial_state(ingest: IngestState, start_at_time: &'static str) -
     ingest
 }
 
-// This differs from InsertChronUpdate just on the type of the time fields
-struct PendingChronUpdate {
-    ingest_id: i32,
-    entity_type: &'static str,
-    entity_id: Uuid,
-    perceived_at: DateTime<Utc>,
-    earliest_time: DateTime<Utc>,
-    latest_time: DateTime<Utc>,
-    resolved: bool,
-    data: serde_json::Value,
-}
-
-impl PendingChronUpdate {
-    fn from_chron(ingest_id: i32, entity_type: &'static str, item: ChroniclerItem, resolved: bool) -> Self {
-        PendingChronUpdate {
-            ingest_id,
-            entity_type,
-            entity_id: item.entity_id,
-            perceived_at: item.valid_from,
-            earliest_time: item.valid_from - Duration::seconds(5),
-            latest_time: item.valid_from + Duration::seconds(5),
-            resolved,
-            data: item.data,
-        }
-    }
-}
-
 pub async fn ingest_chron(ingest: IngestState, start_at_time: &'static str) {
     info!("Started Chron ingest task");
 
@@ -146,17 +120,17 @@ pub async fn ingest_chron(ingest: IngestState, start_at_time: &'static str) {
         .map(move |entity_type| {
             let stream = chronicler::versions(entity_type, start_at_time)
                 .map(move |entity| {
-                    PendingChronUpdate::from_chron(ingest.ingest_id, entity_type, entity, true)
+                    InsertChronUpdate::from_chron(ingest.ingest_id, entity_type, entity, true)
                 });
 
-            Box::pin(stream) as Pin<Box<dyn Stream<Item=PendingChronUpdate> + Send>>
+            Box::pin(stream) as Pin<Box<dyn Stream<Item=InsertChronUpdate> + Send>>
         })
         .chain(iter::once(
             Box::pin(chronicler::game_updates(start_at_time)
                 .map(move |entity| {
-                    PendingChronUpdate::from_chron(ingest.ingest_id, "game", entity, true)
+                    InsertChronUpdate::from_chron(ingest.ingest_id, "game", entity, true)
                 })
-            ) as Pin<Box<dyn Stream<Item=PendingChronUpdate> + Send>>
+            ) as Pin<Box<dyn Stream<Item=InsertChronUpdate> + Send>>
         ));
 
     stream::select_all(streams)
@@ -185,7 +159,7 @@ async fn wait_for_feed_ingest(ingest: &mut IngestState, wait_until_time: DateTim
     }
 }
 
-async fn do_ingest(ingest: &mut IngestState, mut update: PendingChronUpdate) -> DateTime<Utc> {
+async fn do_ingest(ingest: &mut IngestState, mut update: InsertChronUpdate) -> DateTime<Utc> {
     info!("Doing ingest");
     let time = update.latest_time;
 
@@ -196,13 +170,12 @@ async fn do_ingest(ingest: &mut IngestState, mut update: PendingChronUpdate) -> 
             // We know for sure that no other update can overlap with `prev` because it's resolved.
             // Therefore, we know this update's earliest_time should be no earlier than `prev`'s
             // latest_time
-            update.earliest_time = max(update.earliest_time,
-                                       DateTime::<Utc>::from_utc(prev.latest_time, Utc));
+            update.earliest_time = max(update.earliest_time, prev.latest_time);
 
             let feed_events = get_possible_feed_events(c, &update, prev.latest_time);
 
-            let valid_states = simulate(prev, feed_events)
-                .filter();
+            // let valid_states = simulate(prev, feed_events)
+            //     .filter();
 
             Ok::<_, diesel::result::Error>(())
         })
@@ -211,14 +184,14 @@ async fn do_ingest(ingest: &mut IngestState, mut update: PendingChronUpdate) -> 
     time
 }
 
-fn get_previous_resolved_update(c: &PgConnection, update: &PendingChronUpdate) -> ChronUpdate {
+fn get_previous_resolved_update(c: &PgConnection, update: &InsertChronUpdate) -> ChronUpdate {
     use crate::schema::chron_updates::dsl::*;
     chron_updates
         .filter(ingest_id.eq(update.ingest_id))
         .filter(entity_type.eq(update.entity_type))
         .filter(entity_id.eq(update.entity_id))
         .filter(resolved.eq(true))
-        .filter(latest_time.lt(update.latest_time.naive_utc()))
+        .filter(latest_time.lt(update.latest_time))
         .limit(1)
         .load::<ChronUpdate>(c)
         .expect("Error querying previous record for entity type")
@@ -226,18 +199,18 @@ fn get_previous_resolved_update(c: &PgConnection, update: &PendingChronUpdate) -
         .expect("Couldn't find a previous record for entity type")
 }
 
-fn get_possible_feed_events(c: &PgConnection, update: &PendingChronUpdate, after_time: NaiveDateTime) -> impl Iterator<Item=EventuallyEvent> {
+fn get_possible_feed_events(c: &PgConnection, update: &InsertChronUpdate, after_time: DateTime<Utc>) -> impl Iterator<Item=EventuallyEvent> {
     use crate::schema::feed_events::dsl as feed;
     use crate::schema::feed_event_changes::dsl as changes;
     changes::feed_event_changes
         .inner_join(feed::feed_events)
-        .select((feed::data,))
+        .select((feed::data, ))
         .filter(feed::ingest_id.eq(update.ingest_id))
         .filter(feed::created_at.ge(after_time))
-        .filter(feed::created_at.lt(update.latest_time.naive_utc()))
+        .filter(feed::created_at.lt(update.latest_time))
         .filter(changes::entity_type.eq(update.entity_type))
         .filter(changes::entity_id.eq(update.entity_id).or(changes::entity_id.is_null()))
-        .load::<(serde_json::Value,)>(c)
+        .load::<(serde_json::Value, )>(c)
         .expect("Error querying feed events that change this entity")
         .into_iter()
         .map(|json| {

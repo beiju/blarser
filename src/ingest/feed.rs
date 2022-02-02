@@ -1,4 +1,4 @@
-use chrono::{DateTime, Duration, NaiveDateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use diesel::{Connection, insert_into, RunQueryDsl};
 use rocket::info;
 use futures::StreamExt;
@@ -14,7 +14,7 @@ use crate::schema::*;
 #[table_name = "feed_events"]
 struct InsertFeedEvent {
     ingest_id: i32,
-    created_at: NaiveDateTime,
+    created_at: DateTime<Utc>,
     data: serde_json::Value,
 }
 
@@ -22,7 +22,7 @@ impl InsertFeedEvent {
     fn from_eventually(ingest_id: i32, item: EventuallyEvent) -> Self {
         InsertFeedEvent {
             ingest_id,
-            created_at: item.created.naive_utc(),
+            created_at: item.created,
             data: serde_json::value::to_value(item)
                 .expect("Failed to re-serialize Eventually event"),
         }
