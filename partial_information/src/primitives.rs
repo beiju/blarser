@@ -14,3 +14,7 @@ impl<'de, UnderlyingType> Deserialize<'de> for Ranged<UnderlyingType>
         Ok(Ranged::Known(val))
     }
 }
+
+trait PartialInformationFieldCompare {
+    fn get_conflicts(&self, other: &Self) -> Option<String>;
+}

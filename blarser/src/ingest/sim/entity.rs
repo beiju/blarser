@@ -14,5 +14,4 @@ pub trait Entity: for<'de> Deserialize<'de> {
     }
 
     fn apply_event(&mut self, event: &EventuallyEvent) -> FeedEventChangeResult;
-    fn get_conflicts(&self, other: &Self) -> Option<String>;
 }

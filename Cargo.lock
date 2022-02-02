@@ -157,6 +157,7 @@ dependencies = [
  "nom",
  "owning_ref",
  "partial_information",
+ "partial_information_derive",
  "reqwest",
  "rocket",
  "rocket_dyn_templates",

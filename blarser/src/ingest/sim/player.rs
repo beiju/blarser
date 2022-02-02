@@ -1,6 +1,7 @@
 use serde::Deserialize;
 use uuid::Uuid;
-use partial_information::Ranged;
+use partial_information::{Ranged, PartialInformationCompare};
+use partial_information_derive::PartialInformationCompare;
 
 use crate::api::{EventType, EventuallyEvent};
 use crate::ingest::sim::{Entity, FeedEventChangeResult};
@@ -17,7 +18,7 @@ pub struct PlayerState {
 
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]

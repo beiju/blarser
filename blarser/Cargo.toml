@@ -34,7 +34,7 @@ async-recursion = "0.3.2"
 nom = { version = "7", features = ["alloc"] }
 owning_ref = "0.4.1"
 partial_information = { path = "../partial_information" }
-
+partial_information_derive = { path = "../partial_information_derive" }
 
 
 [dependencies.rocket_sync_db_pools]
