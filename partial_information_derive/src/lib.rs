@@ -46,17 +46,17 @@ fn impl_partial_information_compare(ast: DeriveInput) -> Result<TokenStream2> {
             let span = field_name.span();
             let field_name_stringified = LitStr::new(&field_name.to_string(), span);
             quote_spanned! { span=>
-            ::partial_information::PartialInformationFieldCompare::get_conflicts(
-                    #field_name_stringified.to_string(), &self.#field_name, &other.#field_name).into_iter()
+            conflicts.extend(::partial_information::PartialInformationFieldCompare::get_conflicts(
+                    #field_name_stringified.to_string(), &self.#field_name, &other.#field_name));
         }
-        }).fold(quote!{ ::std::iter::empty() }, |lhs, rhs| {
-            quote!{ #lhs.chain(#rhs) }
         });
 
         quote! {
         impl PartialInformationCompare for #name {
             fn get_conflicts(&self, other: &Self) -> Vec<String> {
-                #get_conflicts.collect()
+                let mut conflicts = Vec::new();
+                #(#get_conflicts)*
+                conflicts
             }
         }
     }

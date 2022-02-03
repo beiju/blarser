@@ -4,7 +4,6 @@ use uuid::Uuid;
 use partial_information::PartialInformationCompare;
 use partial_information_derive::PartialInformationCompare;
 
-use crate::api::{EventuallyEvent};
 use crate::ingest::sim::{Entity, FeedEventChangeResult, GenericEvent, EventType as GenericEventType};
 
 #[derive(Deserialize, PartialInformationCompare)]

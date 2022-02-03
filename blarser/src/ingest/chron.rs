@@ -14,6 +14,7 @@ use crate::ingest::task::IngestState;
 use diesel::prelude::*;
 use crate::ingest::sim::{self, EventType, FeedEventChangeResult, GenericEvent};
 use crate::schema::*;
+use crate::schema::ingests::star;
 
 
 #[derive(Queryable, PartialEq, Debug)]
@@ -234,12 +235,12 @@ async fn wait_for_feed_ingest(ingest: &mut IngestState, wait_until_time: DateTim
 }
 
 async fn do_ingest(ingest: &mut IngestState, mut update: InsertChronUpdate) -> DateTime<Utc> {
-    info!("Doing ingest");
+    info!("Starting ingest for {} {} timestamped {}", update.entity_type, update.entity_id, update.perceived_at);
     let time = update.latest_time;
 
     ingest.db.run(move |c| {
         c.transaction(|| {
-            let prev = get_previous_resolved_update(c, update.ingest_id, update.entity_type, update.entity_id, update.earliest_time);
+            let prev = get_previous_resolved_update(c, update.ingest_id, update.entity_type, update.entity_id, update.latest_time);
 
             // We know for sure that no other update can overlap with `prev` because it's resolved.
             // Therefore, we know this update's earliest_time should be no earlier than `prev`'s
@@ -272,6 +273,7 @@ fn find_placement(c: &PgConnection, this_update: &InsertChronUpdate, prev_update
     match this_update.entity_type {
         "player" => find_placement_typed::<sim::Player>(c, this_update, prev_update, feed_events),
         "sim" => find_placement_typed::<sim::Sim>(c, this_update, prev_update, feed_events),
+        "game" => find_placement_typed::<sim::Game>(c, this_update, prev_update, feed_events),
         other => panic!("Unknown entity type {}", other)
     }
 }
@@ -283,8 +285,6 @@ fn to_bulleted_list(vec: Vec<String>) -> Option<String> {
 
     Some(format!("- {}", vec.join("\n- ")))
 }
-
-type GenericEventSource = Box<dyn Iterator<Item=GenericEvent>>;
 
 struct Placement {
     span_start: DateTime<Utc>,
@@ -309,7 +309,7 @@ fn find_placement_typed<'a, EntityT>(c: &PgConnection, this_update: &InsertChron
     info!("There are {} potential spans for {} update", events.len(), this_update.entity_type);
 
     let (oks, fails): (Vec<_>, Vec<_>) = events.iter().zip(span_ends)
-        .scan(prev_update.earliest_time, |mut span_start, (event, span_end)| {
+        .scan(prev_update.earliest_time, |span_start, (event, span_end)| {
             info!("Applying {:?} event", event.event_type);
             match entity.apply_event(&event) {
                 FeedEventChangeResult::DidNotApply => {
@@ -358,30 +358,60 @@ fn find_placement_typed<'a, EntityT>(c: &PgConnection, this_update: &InsertChron
     }
 }
 
-fn get_timed_events(c: &PgConnection, ingest_id: i32, start_time: DateTime<Utc>, end_time: DateTime<Utc>) -> impl Iterator<Item=GenericEvent> {
-    let sim_ = get_entity::<sim::Sim>(c, ingest_id, "sim", Uuid::nil(), start_time);
+fn get_timed_events(c: &PgConnection, ingest_id: i32, start_date: DateTime<Utc>, end_date: DateTime<Utc>) -> impl Iterator<Item=GenericEvent> {
+    let mut versions = get_versions::<sim::Sim>(c, ingest_id, "sim", Uuid::nil(), start_date, end_date).peekable();
     let mut events = Vec::new();
-    if start_time < sim_.earlseason_date && sim_.earlseason_date < end_time {
-        events.push(GenericEvent {
-            time: sim_.earlseason_date,
-            event_type: EventType::EarlseasonStart,
-        })
+    while let Some((entity_start_date, sim_)) = versions.next() {
+        let entity_end_date = versions.peek().map(|(date, _)| date);
+
+        // Simultaneously check if the time is in the range that the caller requested and the range
+        // for which this sim_ is valid
+        let start_date = max(start_date, entity_start_date);
+        let end_date = match entity_end_date {
+            Some(entity_end_date) => max(end_date, *entity_end_date),
+            None => end_date,
+        };
+
+        if start_date < sim_.earlseason_date && sim_.earlseason_date < end_date {
+            events.push(GenericEvent {
+                time: sim_.earlseason_date,
+                event_type: EventType::EarlseasonStart,
+            });
+        }
     }
+
     events.into_iter().sorted_by_key(|e| e.time)
 }
 
-fn get_entity<EntityT: sim::Entity>(c: &PgConnection, ingest_id: i32, entity_type: &str, entity_id: Uuid, at_time: DateTime<Utc>) -> EntityT {
-    let last_known = get_previous_resolved_update(c, ingest_id, entity_type, entity_id, at_time);
-    let mut entity = EntityT::new(last_known.data);
+fn get_versions<EntityT: sim::Entity>(c: &PgConnection, ingest_id: i32, entity_type: &str, entity_id: Uuid, start_time: DateTime<Utc>, end_time: DateTime<Utc>)
+    -> impl Iterator<Item=(DateTime<Utc>, EntityT)> {
+    // TODO Consider changes caused by feed events
+    get_resolved_updates_between(c, ingest_id, entity_type, entity_id, start_time, end_time)
+        .into_iter()
+        .map(|update| (update.earliest_time, EntityT::new(update.data)))
+}
 
-    // Start looking at latest_time -- this event is resolved, so we know there are no events that affect it
-    // that happen between earliest_time and latest_time.
-    // TODO: Can I get all events here or will that cause infinite recursion?
-    let feed_events = get_possible_feed_events(c, ingest_id, entity_type, entity_id, last_known.latest_time, at_time);
-    for feed_event in feed_events {
-        entity.apply_event(&GenericEvent { time: feed_event.created, event_type: EventType::FeedEvent(feed_event) });
-    }
-    entity
+fn get_resolved_updates_between(c: &PgConnection, ingest_id: i32, entity_type: &str, entity_id: Uuid, start_time: DateTime<Utc>, end_time: DateTime<Utc>) -> Vec<ChronUpdate> {
+    use crate::schema::chron_updates::dsl;
+    let query = dsl::chron_updates
+        .filter(dsl::ingest_id.eq(ingest_id))
+        .filter(dsl::entity_type.eq(entity_type))
+        .filter(dsl::entity_id.eq(entity_id))
+        .filter(dsl::resolved.eq(true))
+        .filter(dsl::earliest_time.lt(end_time))
+        // ge is important, because sometimes start_time comes from the very object that needs to be
+        // returned from this function (that case could be optimized, but it's not worth the effort
+        // at the time I'm writing this)
+        .filter(dsl::latest_time.ge(start_time))
+        // Resolved updates can't overlap, so using either time field should be equivalent
+        .order(dsl::latest_time);
+
+    // let debug = diesel::debug_query::<diesel::pg::Pg, _>(&query);
+    // info!("Running query:\n{:?}", debug.to_string());
+
+    query
+        .load::<ChronUpdate>(c)
+        .expect("Error querying previous record for entity type")
 }
 
 fn get_previous_resolved_update(c: &PgConnection, ingest_id: i32, entity_type: &str, entity_id: Uuid, before_time: DateTime<Utc>) -> ChronUpdate {

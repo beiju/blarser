@@ -19,12 +19,12 @@ impl<T> PartialInformationFieldCompare for T where T: PartialInformationCompare 
     }
 }
 
-impl<ItemT> PartialInformationFieldCompare for Option<ItemT> where ItemT: PartialInformationFieldCompare + Debug {
+impl<ItemT> PartialInformationFieldCompare for Option<ItemT> where ItemT: PartialInformationFieldCompare {
     fn get_conflicts(field_path: String, expected: &Self, observed: &Self) -> Vec<String> {
         match (expected, observed) {
             (None, None) => vec![],
-            (None, Some(val)) => vec![format!("{} Expected null, but observed {:?}", field_path, val)],
-            (Some(val), None) => vec![format!("{} Expected {:?}, but observed null", field_path, val)],
+            (None, Some(_)) => vec![format!("{} Expected null, but observed a value", field_path)],
+            (Some(_), None) => vec![format!("{} Expected a value, but observed null", field_path)],
             (Some(a), Some(b)) => PartialInformationFieldCompare::get_conflicts(field_path, a, b)
         }
     }
