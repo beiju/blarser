@@ -171,12 +171,6 @@ impl StateInterface<'_> {
                 None => to_time,
             };
 
-            info!("{}", start_date < sim_.earlseason_date);
-            info!("{}, {} < {} ({})", sim_.earlseason_date < end_date, sim_.earlseason_date, end_date, to_time);
-            info!("{}", (entity_type == "sim" || entity_type == "game"));
-            info!("{}", entity_type == "sim");
-            info!("{}", entity_type == "game");
-
             if start_date < sim_.earlseason_date && sim_.earlseason_date < end_date &&
                 (entity_type == "sim" || entity_type == "game") {
                 events.push(GenericEvent {

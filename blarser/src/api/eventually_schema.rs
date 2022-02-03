@@ -59,6 +59,7 @@ pub struct EventuallyEvent {
     pub day: i32,
     pub season: i32,
     pub tournament: i32,
+    pub phase: i32,
 }
 
 #[derive(Serialize_repr, Deserialize_repr, PartialEq, Debug)]

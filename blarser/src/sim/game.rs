@@ -2,12 +2,13 @@ use std::iter;
 use chrono::{DateTime, Utc};
 use itertools::Itertools;
 use serde::Deserialize;
+use serde_with::with_prefix;
 use uuid::Uuid;
 use partial_information::{PartialInformationCompare, Ranged, MaybeKnown};
 use partial_information_derive::PartialInformationCompare;
 
 use crate::api::{EventType, EventuallyEvent};
-use crate::sim::{Entity, FeedEventChangeResult, Team};
+use crate::sim::{Entity, FeedEventChangeResult, Player, Team};
 use crate::state::{StateInterface, GenericEvent, GenericEventType};
 
 #[derive(Clone, Deserialize, PartialInformationCompare)]
@@ -39,51 +40,62 @@ pub struct UpdateFull {
 
 #[derive(Clone, Deserialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]
+#[serde(rename_all = "PascalCase")] // it will be camelCase after being prefixed with "home"/"away"
+#[allow(dead_code)]
+pub struct GameByTeam {
+    odds: Option<Ranged<f32>>,
+    outs: i32,
+    team: Uuid,
+    balls: i32,
+    bases: i32,
+    score: Option<f32>,
+    batter: Option<Uuid>,
+    pitcher: Option<MaybeKnown<Uuid>>,
+    strikes: Option<i32>,
+    team_name: String,
+    team_runs: Option<f32>,
+    team_color: String,
+    team_emoji: String,
+    batter_mod: String,
+    batter_name: Option<String>,
+    pitcher_mod: String,
+    pitcher_name: Option<MaybeKnown<String>>,
+    team_nickname: String,
+    team_batter_count: Option<i32>,
+    team_secondary_color: String,
+}
+
+#[derive(Clone, Deserialize, PartialInformationCompare)]
+// Can't use deny_unknown_fields here because of the prefixed subobjects
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
 pub struct Game {
     id: Uuid,
     day: i32,
     sim: String,
-    loser: Option<Uuid>, // I think?
+    loser: Option<Uuid>,
+    // I think?
     phase: i32,
     rules: Uuid,
     shame: bool,
     state: GameState,
     inning: i32,
     season: i32,
-    winner: Option<Uuid>, // I think?
+    winner: Option<Uuid>,
+    // I think?
     weather: i32,
-    away_odds: Option<Ranged<f32>>,
-    away_outs: i32,
-    away_team: Uuid,
     end_phase: i32,
-    home_odds: Option<Ranged<f32>>,
-    home_outs: i32,
-    home_team: Uuid,
     outcomes: Vec<String>,
     season_id: Uuid,
-    away_balls: i32,
-    away_bases: i32,
-    away_score: Option<f32>,
     finalized: bool,
     game_start: bool,
-    home_balls: i32,
-    home_bases: i32,
-    home_score: Option<f32>,
     play_count: i64,
     stadium_id: Option<Uuid>,
     statsheet: Uuid,
     at_bat_balls: i32,
-    away_batter: Option<Uuid>,
-    home_batter: Option<Uuid>,
     last_update: String,
     tournament: i32,
-    away_pitcher: Option<MaybeKnown<Uuid>>,
-    away_strikes: Option<i32>,
     base_runners: Vec<Uuid>,
-    home_pitcher: Option<MaybeKnown<Uuid>>,
-    home_strikes: Option<i32>,
     repeat_count: i32,
     score_ledger: String,
     score_update: String,
@@ -91,50 +103,40 @@ pub struct Game {
     terminology: Uuid,
     top_of_inning: bool,
     at_bat_strikes: i32,
-    away_team_name: String,
-    away_team_runs: Option<f32>,
     game_complete: bool,
-    home_team_name: String,
-    home_team_runs: Option<i32>,
     is_postseason: bool,
     is_prize_match: Option<bool>,
     is_title_match: bool,
-    queued_events: Vec<i32>, // what? (i put i32 there as a placeholder)
+    queued_events: Vec<i32>,
+    // what? (i put i32 there as a placeholder)
     series_length: i32,
-    away_batter_mod: String,
-    away_team_color: String,
-    away_team_emoji: String,
     bases_occupied: Vec<i32>,
-    home_batter_mod: String,
-    home_team_color: String,
-    home_team_emoji: String,
-    away_batter_name: Option<String>,
-    away_pitcher_mod: String,
     base_runner_mods: Vec<String>,
     game_start_phase: i32,
     half_inning_outs: i32,
-    home_batter_name: Option<String>,
-    home_pitcher_mod: String,
     last_update_full: Option<Vec<UpdateFull>>,
     new_inning_phase: i32,
     top_inning_score: i32,
-    away_pitcher_name: Option<MaybeKnown<String>>,
     base_runner_names: Vec<String>,
     baserunner_count: i32,
     half_inning_score: i32,
-    home_pitcher_name: Option<MaybeKnown<String>>,
-    tournament_round: Option<i32>, // what? (i32 placeholder)
-    away_team_nickname: String,
-    home_team_nickname: String,
+    tournament_round: Option<i32>,
+    // what? (i32 placeholder)
     secret_baserunner: Option<Uuid>,
     bottom_inning_score: i32,
     new_half_inning_phase: i32,
-    away_team_batter_count: Option<i32>,
-    home_team_batter_count: i32,
-    away_team_secondary_color: String,
-    home_team_secondary_color: String,
-    tournament_round_game_index: Option<i32>
+    tournament_round_game_index: Option<i32>,
+
+    #[serde(flatten, with = "prefix_home")]
+    home: GameByTeam,
+
+    #[serde(flatten, with = "prefix_away")]
+    away: GameByTeam,
 }
+
+with_prefix!(prefix_home "home");
+with_prefix!(prefix_away "away");
+
 
 impl Entity for Game {
     fn name() -> &'static str {
@@ -145,19 +147,14 @@ impl Entity for Game {
         match &event.event_type {
             GenericEventType::EarlseasonStart => {
                 // This event generates odds and sets a bunch of properties
-                self.home_batter_name = Some(String::new());
-                self.home_odds = Some(Ranged::Range(0.0, 0.1));
-                self.home_pitcher = Some(MaybeKnown::Unknown);
-                self.home_pitcher_name = Some(MaybeKnown::Unknown);
-                self.home_score = Some(0.0);
-                self.home_strikes = Some(3);
-                // This half should be an exact copy of the Home half
-                self.away_batter_name = Some(String::new());
-                self.away_odds = Some(Ranged::Range(0.0, 1.0));
-                self.away_pitcher = Some(MaybeKnown::Unknown);
-                self.away_pitcher_name = Some(MaybeKnown::Unknown);
-                self.away_score = Some(0.0);
-                self.away_strikes = Some(3);
+                for self_by_team in [&mut self.home, &mut self.away] {
+                    self_by_team.batter_name = Some(String::new());
+                    self_by_team.odds = Some(Ranged::Range(0.0, 1.0));
+                    self_by_team.pitcher = Some(MaybeKnown::Unknown);
+                    self_by_team.pitcher_name = Some(MaybeKnown::Unknown);
+                    self_by_team.score = Some(0.0);
+                    self_by_team.strikes = Some(3);
+                }
                 FeedEventChangeResult::Ok
             }
             GenericEventType::FeedEvent(feed_event) => {
@@ -175,7 +172,7 @@ impl Game {
         match event.game_tags.iter().exactly_one() {
             Ok(game_id) => {
                 if &self.id != game_id {
-                    return FeedEventChangeResult::DidNotApply
+                    return FeedEventChangeResult::DidNotApply;
                 }
             }
             Err(_) => return FeedEventChangeResult::DidNotApply,
@@ -185,13 +182,14 @@ impl Game {
             EventType::LetsGo => {
                 self.game_start = true;
                 self.game_start_phase = -1;
-                self.home_team_batter_count = -1;
-                self.away_team_batter_count = Some(-1);
+                self.home.team_batter_count = Some(-1);
+                self.away.team_batter_count = Some(-1);
                 self.game_event(event);
                 FeedEventChangeResult::Ok
             }
             EventType::StormWarning => {
-                self.last_update = "WINTER STORM WARNING\n".to_string();
+                self.game_start_phase = 11; // sure why not
+                self.game_event(event);
                 FeedEventChangeResult::Ok
             }
             EventType::PlayBall => {
@@ -201,11 +199,10 @@ impl Game {
                 self.top_of_inning = false;
 
                 // Yeah, it unsets pitchers. Why, blaseball.
-                self.home_pitcher = None;
-                self.home_pitcher_name = Some(MaybeKnown::Known(String::new()));
-                self.home_pitcher = None;
-                self.away_pitcher_name = Some(MaybeKnown::Known(String::new()));
-                self.away_pitcher = None;
+                self.home.pitcher = None;
+                self.home.pitcher_name = Some(MaybeKnown::Known(String::new()));
+                self.away.pitcher = None;
+                self.away.pitcher_name = Some(MaybeKnown::Known(String::new()));
 
                 self.game_event(event);
                 FeedEventChangeResult::Ok
@@ -222,12 +219,22 @@ impl Game {
                 FeedEventChangeResult::Ok
             }
             EventType::BatterUp => {
-                if self.top_of_inning {
-                    let team: Team = state.entity(self.home_team, event.created);
-                    let batter_count = self.away_team_batter_count
-                        .expect("Team batter count must be populated during a game");
-                    self.away_batter = Some(team.batter_for_count(batter_count as usize));
-                }
+                let self_by_team = if self.top_of_inning {
+                    &mut self.home
+                } else {
+                    &mut self.away
+                };
+
+                let team: Team = state.entity(self_by_team.team, event.created);
+                let batter_count = self_by_team.team_batter_count
+                    .expect("Team batter count must be populated during a game");
+                let batter_id = team.batter_for_count(batter_count as usize);
+                self_by_team.batter = Some(batter_id);
+                let player: Player = state.entity(batter_id, event.created);
+                self_by_team.batter_name = Some(player.name);
+                self_by_team.team_batter_count = Some(team.lineup.len() as i32);
+
+                self.game_event(event);
                 FeedEventChangeResult::Ok
             }
             other => {
@@ -263,7 +270,7 @@ impl Game {
                 nuts: 0, // todo can I even get this?
                 r#type: event.r#type as i32,
                 blurb: String::new(), // todo ?
-                phase: 0, // todo ?
+                phase: event.phase, // todo ?
                 season: event.season,
                 created: event.created,
                 category: event.category,
@@ -275,5 +282,4 @@ impl Game {
             }
         }).collect())
     }
-
 }
