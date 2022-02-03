@@ -2,14 +2,14 @@ use std::fmt::Debug;
 use serde::{Deserialize, Deserializer};
 use crate::PartialInformationFieldCompare;
 
-pub enum Ranged<UnderlyingType: PartialOrd + Debug> {
-    Unknown,
+#[derive(Clone)]
+pub enum Ranged<UnderlyingType: Clone + Debug + PartialOrd> {
     Known(UnderlyingType),
     Range(UnderlyingType, UnderlyingType),
 }
 
 impl<'de, UnderlyingType> Deserialize<'de> for Ranged<UnderlyingType>
-    where UnderlyingType: for<'de2> Deserialize<'de2> + PartialOrd + Debug {
+    where UnderlyingType: for<'de2> Deserialize<'de2> + Clone + Debug + PartialOrd {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
         where D: Deserializer<'de> {
         let val: UnderlyingType = Deserialize::deserialize(deserializer)?;
@@ -17,12 +17,12 @@ impl<'de, UnderlyingType> Deserialize<'de> for Ranged<UnderlyingType>
     }
 }
 
-impl<T: PartialOrd + Debug> PartialInformationFieldCompare for Ranged<T> {
+impl<T> PartialInformationFieldCompare for Ranged<T>
+    where T: Clone + Debug + PartialOrd {
     fn get_conflicts(field_path: String, expected: &Self, actual: &Self) -> Vec<String> {
         match actual {
             Ranged::Known(actual) => {
                 match expected {
-                    Ranged::Unknown => { vec![] }
                     Ranged::Known(expected) => {
                         if actual == expected {
                             vec![]

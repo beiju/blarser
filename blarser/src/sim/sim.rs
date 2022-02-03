@@ -4,15 +4,16 @@ use uuid::Uuid;
 use partial_information::PartialInformationCompare;
 use partial_information_derive::PartialInformationCompare;
 
-use crate::ingest::sim::{Entity, FeedEventChangeResult, GenericEvent, EventType as GenericEventType};
+use crate::sim::{Entity, FeedEventChangeResult};
+use crate::state::{StateInterface, GenericEvent, GenericEventType};
 
-#[derive(Deserialize, PartialInformationCompare)]
+#[derive(Clone, Debug, Deserialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
 pub struct SimState {}
 
-#[derive(Deserialize, PartialInformationCompare)]
+#[derive(Clone, Debug, Deserialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
@@ -54,7 +55,11 @@ pub struct Sim {
 }
 
 impl Entity for Sim {
-    fn apply_event(&mut self, event: &GenericEvent) -> FeedEventChangeResult {
+    fn name() -> &'static str {
+        "sim"
+    }
+
+    fn apply_event(&mut self, event: &GenericEvent, _state: &StateInterface) -> FeedEventChangeResult {
         match &event.event_type {
             GenericEventType::EarlseasonStart => {
                 if self.phase == 1 {

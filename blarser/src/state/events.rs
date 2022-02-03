@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use crate::api::EventuallyEvent;
 
 #[derive(Debug)]
-pub enum EventType {
+pub enum GenericEventType {
     FeedEvent(EventuallyEvent),
 
     // Timed events
@@ -11,6 +11,6 @@ pub enum EventType {
 
 pub struct GenericEvent {
     pub time: DateTime<Utc>,
-    pub event_type: EventType,
+    pub event_type: GenericEventType,
 }
 

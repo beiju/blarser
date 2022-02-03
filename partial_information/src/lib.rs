@@ -1,5 +1,7 @@
-mod primitives;
+mod ranged;
+mod maybe_known;
 mod compare;
 
-pub use primitives::{Ranged};
+pub use ranged::Ranged;
+pub use maybe_known::MaybeKnown;
 pub use compare::{PartialInformationFieldCompare, PartialInformationCompare};
