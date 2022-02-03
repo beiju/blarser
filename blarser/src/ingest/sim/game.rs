@@ -3,6 +3,7 @@ use serde::Deserialize;
 use uuid::Uuid;
 use partial_information::PartialInformationCompare;
 use partial_information_derive::PartialInformationCompare;
+use crate::api::{EventType, EventuallyEvent};
 
 use crate::ingest::sim::{Entity, FeedEventChangeResult, GenericEvent, EventType as GenericEventType};
 
@@ -141,6 +142,44 @@ pub struct Game {
 impl Entity for Game {
     fn apply_event(&mut self, event: &GenericEvent) -> FeedEventChangeResult {
         match &event.event_type {
+            GenericEventType::EarlseasonStart => {
+                // This event generates odds and sets a bunch of properties
+                // TODO Get the error message to tell me what to modify here
+                FeedEventChangeResult::Ok
+            }
+            GenericEventType::FeedEvent(feed_event) => {
+                self.apply_feed_event(feed_event)
+            }
+            other => {
+                panic!("{:?} event does not apply to Game", other)
+            }
+        }
+    }
+}
+
+impl Game {
+    fn apply_feed_event(&mut self, event: &EventuallyEvent) -> FeedEventChangeResult {
+        match event.r#type {
+            EventType::LetsGo => {
+                // TODO
+                FeedEventChangeResult::Ok
+            }
+            EventType::StormWarning => {
+                // TODO
+                FeedEventChangeResult::Ok
+            }
+            EventType::PlayBall => {
+                // TODO
+                FeedEventChangeResult::Ok
+            }
+            EventType::HalfInning => {
+                // TODO
+                FeedEventChangeResult::Ok
+            }
+            EventType::BatterUp => {
+                // TODO
+                FeedEventChangeResult::Ok
+            }
             other => {
                 panic!("{:?} event does not apply to Game", other)
             }

@@ -108,9 +108,7 @@ impl Player {
             }
         }
     }
-}
 
-impl Player {
     fn fielding_out(&mut self, event: &EventuallyEvent, out_str: &'static str) -> FeedEventChangeResult {
         // TODO Parse flyout description for more robust check
         if event.description.starts_with(&format!("{} hit a {} to ", self.name, out_str)) {
