@@ -215,6 +215,18 @@ impl Game {
                 self.phase = 6;
                 self.half_inning_score = 0;
 
+                // The first halfInning event re-sets the data that PlayBall clears
+                if self.inning == 0 {
+                    for self_by_team in [&mut self.home, &mut self.away] {
+                        let team: Team = state.entity(self_by_team.team, event.created);
+                        let pitcher_id = team.active_pitcher();
+                        let pitcher: Player = state.entity(pitcher_id, event.created);
+                        self_by_team.pitcher = Some(MaybeKnown::Known(pitcher_id));
+                        self_by_team.pitcher_name = Some(MaybeKnown::Known(pitcher.name));
+                    }
+                }
+
+
                 self.game_event(event);
                 FeedEventChangeResult::Ok
             }
@@ -236,6 +248,20 @@ impl Game {
 
                 self.game_event(event);
                 FeedEventChangeResult::Ok
+            }
+            EventType::Ball => {
+                self.at_bat_balls += 1;
+                self.game_event(event);
+                FeedEventChangeResult::Ok
+            }
+            EventType::Strike => {
+                self.at_bat_strikes += 1;
+                self.game_event(event);
+                FeedEventChangeResult::Ok
+            }
+            EventType::GroundOut => {
+                // Ground outs is complicated, it turns out
+                self.apply_ground_out(event)
             }
             other => {
                 panic!("{:?} event does not apply to Game", other)
@@ -281,5 +307,11 @@ impl Game {
                 description: event.description.clone(),
             }
         }).collect())
+    }
+    fn apply_ground_out(&mut self, event: &EventuallyEvent) -> FeedEventChangeResult {
+        // Ground outs are so difficult because they can be a simple ground out, a fielder's choice,
+        // or a double play and any of the above can score players and advance runners. Oh and in
+        // gamma10, the game stopped putting the player id in player_tags.
+        todo!()
     }
 }

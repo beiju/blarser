@@ -83,4 +83,8 @@ impl Team {
     pub fn batter_for_count(&self, count: usize) -> Uuid {
         self.lineup[count % self.lineup.len()]
     }
+
+    pub fn active_pitcher(&self) -> Uuid {
+        self.rotation[self.rotation_slot as usize % self.rotation.len()]
+    }
 }

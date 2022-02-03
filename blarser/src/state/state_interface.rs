@@ -96,16 +96,13 @@ impl StateInterface<'_> {
     pub fn entity<EntityT: Entity>(&self, entity_id: Uuid, at_time: DateTime<Utc>) -> EntityT {
         info!("Computing {} {} at {}", EntityT::name(), entity_id, at_time);
         let (mut entity, event_start_time): (EntityT, _) = self.last_resolved_entity(entity_id, at_time);
-        info!("Latest known entity: {}", event_start_time);
         let events = self.events_for_entity(EntityT::name(), entity_id, event_start_time, at_time);
-        info!("{} potential events since last known entity", events.len());
 
         for event in events {
-            info!("Applying {:?}", event.event_type);
+            info!("    Applying {:?}", event.event_type);
             entity.apply_event(&event, self);
         }
 
-        info!("Finished computing {} {}", EntityT::name(), entity_id);
         entity
     }
 
@@ -157,10 +154,8 @@ impl StateInterface<'_> {
     fn timed_events_for_entity(&self, entity_type: &str, _entity_id: Uuid, from_time: DateTime<Utc>, to_time: DateTime<Utc>) -> impl Iterator<Item=GenericEvent> {
         // observed_versions instead of versions to break an infinite recursion
         let mut versions = self.observed_versions::<sim::Sim>(Uuid::nil(), from_time, to_time).into_iter().peekable();
-        info!("Fetched versions between {} and {}", from_time, to_time);
         let mut events = Vec::new();
         while let Some((entity_start_date, sim_)) = versions.next() {
-            info!("{:?}", sim_);
             let entity_end_date = versions.peek().map(|(date, _)| date);
 
             // Simultaneously check if the time is in the range that the caller requested and the range
