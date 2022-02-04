@@ -8,8 +8,8 @@ use uuid::Uuid;
 use partial_information::{PartialInformationCompare, Ranged, MaybeKnown};
 use partial_information_derive::PartialInformationCompare;
 
-use crate::api::{EventType, EventuallyEvent, Weather};
-use crate::event_utils;
+use crate::api::{EventType, EventuallyEvent};
+use crate::{api, event_utils};
 use crate::sim::{Entity, FeedEventChangeResult, parse, Player, Team};
 use crate::sim::parse::Base;
 use crate::state::{StateInterface, GenericEvent, GenericEventType};
@@ -18,7 +18,11 @@ use crate::state::{StateInterface, GenericEvent, GenericEventType};
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
-pub struct GameState {}
+pub struct GameState {
+    // :/
+    snowfall_events: MaybeKnown<Option<i32>>,
+
+}
 
 #[derive(Clone, Deserialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]
@@ -193,21 +197,40 @@ impl Game {
             Err(_) => return FeedEventChangeResult::DidNotApply,
         };
 
-        match event.r#type {
+        let result = match event.r#type {
             EventType::LetsGo => self.lets_go(event),
             EventType::StormWarning => self.storm_warning(event),
             EventType::PlayBall => self.play_ball(event),
             EventType::HalfInning => self.half_inning(event, state),
             EventType::BatterUp => self.batter_up(event, state),
-            EventType::Ball => self.ball(event),
             EventType::Strike => self.strike(event),
+            EventType::Ball => self.ball(event),
+            EventType::FoulBall => self.foul_ball(event),
+            EventType::Strikeout => self.strikeout(event),
             // It's easier to combine ground out and flyout types into one function
             EventType::GroundOut => self.fielding_out(event),
             EventType::FlyOut => self.fielding_out(event),
+            EventType::Hit => self.hit(event),
+            EventType::HomeRun => self.home_run(event),
             other => {
                 panic!("{:?} event does not apply to Game", other)
             }
+        };
+        // During Snow games, sometimes snowfall_events gets changed from null to 0. I can't figure
+        // out what triggers it, so I'm just saying that if it's currently null, and the weather is
+        // Snowy, any event might set it to 0
+        if let FeedEventChangeResult::Ok = result {
+            if let MaybeKnown::Known(None) = self.state.snowfall_events {
+                // There's probably an easier way but hey, this works
+                let weather: api::Weather = serde_json::from_value(serde_json::json!(self.weather))
+                    .expect("Unexpected Weather type");
+                if weather == api::Weather::Snowy {
+                    self.state.snowfall_events = MaybeKnown::Unknown;
+                }
+            }
         }
+
+        result
     }
 
     fn strike(&mut self, event: &EventuallyEvent) -> FeedEventChangeResult {
@@ -218,6 +241,14 @@ impl Game {
 
     fn ball(&mut self, event: &EventuallyEvent) -> FeedEventChangeResult {
         self.at_bat_balls += 1;
+        self.game_event(event);
+        FeedEventChangeResult::Ok
+    }
+
+    fn foul_ball(&mut self, event: &EventuallyEvent) -> FeedEventChangeResult {
+        if self.at_bat_strikes < 2 {
+            self.at_bat_strikes += 1;
+        }
         self.game_event(event);
         FeedEventChangeResult::Ok
     }
@@ -233,7 +264,6 @@ impl Game {
         self_by_team.batter = Some(batter_id);
         let player: Player = state.entity(batter_id, event.created);
         self_by_team.batter_name = Some(player.name);
-        self_by_team.team_batter_count = Some(team.lineup.len() as i32);
 
         self.game_event(event);
         FeedEventChangeResult::Ok
@@ -367,7 +397,6 @@ impl Game {
             assert_eq!(event_batter_id, &batter_id,
                        "Batter in GroundOut/Flyout event didn't match batter in game state");
         }
-
 
         let (scoring_runners, other_events) = separate_scoring_events(&event.metadata.siblings, &batter_id);
 
@@ -528,6 +557,76 @@ impl Game {
         self.base_runner_mods.push(runner_mod);
         self.bases_occupied.push(Ranged::Known(to_base as i32));
         self.baserunner_count += 1;
+    }
+
+    fn hit(&mut self, event: &EventuallyEvent) -> FeedEventChangeResult {
+        let event_batter_id = event_utils::get_one_id(&event.player_tags, "playerTags");
+        let batter_id = self.team_at_bat().batter.clone()
+            .expect("Batter must exist during Hit event");
+        let batter_name = self.team_at_bat().batter_name.clone()
+            .expect("Batter name must exist during Hit event");
+
+        assert_eq!(event_batter_id, &batter_id,
+                   "Batter in Hit event didn't match batter in game state");
+
+        let hit_type = parse::parse_hit(&batter_name, &event.description)
+            .expect("Error parsing Hit description");
+
+        let (scoring_runners, _) = separate_scoring_events(&event.metadata.siblings, &batter_id);
+        for runner_id in scoring_runners {
+            self.score_runner(runner_id, "Base Hit");
+        }
+
+        self.game_event(event);
+        self.advance_runners(hit_type as i32 + 1);
+        let batter_mod = self.team_at_bat().batter_mod.clone();
+        self.push_base_runner(batter_id, batter_name, batter_mod, hit_type);
+        self.end_at_bat();
+
+        FeedEventChangeResult::Ok
+    }
+
+    fn home_run(&mut self, event: &EventuallyEvent) -> FeedEventChangeResult {
+        let event_batter_id = event_utils::get_one_id(&event.player_tags, "playerTags");
+        let batter_id = self.team_at_bat().batter.clone()
+            .expect("Batter must exist during HomeRun event");
+        let batter_name = self.team_at_bat().batter_name.clone()
+            .expect("Batter name must exist during HomeRun event");
+
+        assert_eq!(event_batter_id, &batter_id,
+                   "Batter in HomeRun event didn't match batter in game state");
+
+        parse::parse_home_run(&batter_name, &event.description)
+            .expect("Error parsing HomeRun description");
+
+        for runner_id in self.base_runners.clone() {
+            self.score_runner(&runner_id, "Home Run");
+        }
+
+        self.game_event(event);
+        self.end_at_bat();
+
+        FeedEventChangeResult::Ok
+    }
+
+    fn strikeout(&mut self, event: &EventuallyEvent) -> FeedEventChangeResult {
+        let event_batter_id = event_utils::get_one_id(&event.player_tags, "playerTags");
+        let batter_id = self.team_at_bat().batter.clone()
+            .expect("Batter must exist during Strikeout event");
+        let batter_name = self.team_at_bat().batter_name.clone()
+            .expect("Batter name must exist during Strikeout event");
+
+        assert_eq!(event_batter_id, &batter_id,
+                   "Batter in Strikeout event didn't match batter in game state");
+
+        // The result isn't used now, but it will be when double strikes are implemented
+        parse::parse_strikeout(&batter_name, &event.description)
+            .expect("Error parsing Strikeout description");
+
+        self.out(event, 1);
+        self.end_at_bat();
+
+        FeedEventChangeResult::Ok
     }
 }
 
