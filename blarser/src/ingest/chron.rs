@@ -58,13 +58,24 @@ struct InsertChronUpdate {
 
 impl InsertChronUpdate {
     fn from_chron(ingest_id: i32, entity_type: &'static str, item: ChroniclerItem, resolved: bool) -> Self {
+        // Optimization: Game updates are timestamped after they are recorded, so valid_from is
+        // the upper bound. This optimization could be performed on the other types, too, I just
+        // need to look it up (and it relies on Chron's order of fetch vs. timestamp being stable,
+        // which might not be the case). Game events are so numerous and close together that it's
+        // worth it.
+        let latest_time = if entity_type == "game" {
+            item.valid_from
+        } else {
+            item.valid_from + Duration::seconds(15)
+        };
+
         InsertChronUpdate {
             ingest_id,
             entity_type,
             entity_id: item.entity_id,
             perceived_at: item.valid_from,
             earliest_time: item.valid_from - Duration::seconds(15),
-            latest_time: item.valid_from + Duration::seconds(15),
+            latest_time,
             resolved,
             data: item.data,
         }
@@ -240,8 +251,23 @@ async fn do_ingest(ingest: IngestState, mut update: InsertChronUpdate) -> (DateT
     ingest.db.run(move |c| {
         let state = StateInterface {
             conn: &c,
-            ingest_id: ingest.ingest_id
+            ingest_id: ingest.ingest_id,
         };
+
+        // Optimization for game updates: The order in which entity versions are perceived is reliable,
+        // so we can fetch the previous update for this item and we know that this update's
+        // earliest_time must be no earlier than the previous version's earliest_time. This is only
+        // worth doing for game events, because other types of updates are usually so far apart that
+        // there cannot be any overlap. There is a time cost to fetching the previous update so it's not
+        // worth doing if it's unlikely to be useful.
+        if update.entity_type == "game" {
+            update.earliest_time = max(
+                update.earliest_time,
+                state.previous_update_earliest_time(&update.entity_type,
+                                                    update.entity_id,
+                                                    update.perceived_at),
+            );
+        }
 
         state.conn.transaction(|| {
             if let Some(placement) = find_placement(&state, &update) {

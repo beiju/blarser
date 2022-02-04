@@ -1,7 +1,4 @@
 use std::cmp::{max, min};
-use std::iter;
-use std::iter::Map;
-use std::vec::IntoIter;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 use diesel::{
@@ -10,12 +7,10 @@ use diesel::{
     QueryDsl,
 };
 use itertools::Itertools;
-use rocket::{info, info_};
-use serde_json::Value;
+use rocket::{info};
 
 use crate::sim::{self, Entity, FeedEventChangeResult};
 use crate::api::EventuallyEvent;
-use crate::schema::ingests::star;
 use crate::state::{GenericEvent, GenericEventType};
 
 pub struct StateInterface<'conn> {
@@ -117,6 +112,7 @@ impl StateInterface<'_> {
             .filter(dsl::resolved.eq(true))
             // This has to be le (not lt)
             .filter(dsl::latest_time.le(at_or_before))
+            .order(dsl::latest_time.desc())
             .limit(1)
             .load::<(serde_json::Value, DateTime<Utc>)>(*self.conn)
             .expect("Error querying last known version of entity")
@@ -129,6 +125,24 @@ impl StateInterface<'_> {
 
         (entity, time)
     }
+
+    pub fn previous_update_earliest_time(&self, entity_type: &str, entity_id: Uuid, perceived_before: DateTime<Utc>) -> DateTime<Utc> {
+        use crate::schema::chron_updates::dsl;
+        dsl::chron_updates
+            .select((dsl::earliest_time))
+            .filter(dsl::ingest_id.eq(self.ingest_id))
+            .filter(dsl::entity_type.eq(entity_type))
+            .filter(dsl::entity_id.eq(entity_id))
+            .filter(dsl::perceived_at.le(perceived_before))
+            .order(dsl::latest_time.desc())
+            .limit(1)
+            .load::<DateTime<Utc>>(*self.conn)
+            .expect("Error querying last known version of entity")
+            .into_iter()
+            .exactly_one()
+            .expect("Expected exactly one response from query")
+    }
+
 
     pub fn feed_events_for_entity(&self, entity_type: &str, entity_id: Uuid, from_time: DateTime<Utc>, to_time: DateTime<Utc>) -> Vec<EventuallyEvent> {
         use crate::schema::feed_events::dsl as feed;
