@@ -47,7 +47,7 @@ pub fn changes_for_event(event: &EventuallyEvent) -> Vec<(&'static str, Option<U
         EventType::Hit => vec![change_game(event), change_player(event)],
         EventType::HomeRun => vec![change_game(event), change_player(event)],
         EventType::PlayerStatReroll => vec![change_player(event)],
-        EventType::Snowflakes => vec![change_game(event), ("player", None)],
+        EventType::Snowflakes => vec![change_game(event)],
         EventType::StolenBase => vec![change_game(event)],
         EventType::Walk => vec![change_game(event)],
         EventType::InningEnd => vec![change_game(event)], // Losing triple threat not implemented yet

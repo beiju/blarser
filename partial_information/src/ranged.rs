@@ -9,6 +9,10 @@ pub enum Ranged<UnderlyingType: Clone + Debug + PartialOrd> {
     Range(UnderlyingType, UnderlyingType),
 }
 
+// Ranged is Copy if underlying type is Copy
+impl<UnderlyingType> Copy for Ranged<UnderlyingType>
+    where UnderlyingType: Copy + Clone + Debug + PartialOrd {}
+
 impl<UnderlyingType> Ranged<UnderlyingType>
     where UnderlyingType: Ord + Clone + Debug + PartialOrd {
     pub fn could_be(&self, other: &UnderlyingType) -> bool {
@@ -50,6 +54,13 @@ impl<UnderlyingType> ops::Add<Ranged<UnderlyingType>> for Ranged<UnderlyingType>
                 Ranged::Range(a1 + b1, a2 + b2)
             }
         }
+    }
+}
+
+impl<UnderlyingType> ops::AddAssign<Ranged<UnderlyingType>> for Ranged<UnderlyingType>
+    where UnderlyingType: ops::Add<UnderlyingType, Output=UnderlyingType> + Copy + Debug + PartialOrd {
+    fn add_assign(&mut self, rhs: Ranged<UnderlyingType>) {
+        *self = *self + rhs;
     }
 }
 

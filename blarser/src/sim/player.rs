@@ -1,6 +1,6 @@
 use serde::Deserialize;
 use uuid::Uuid;
-use partial_information::{Ranged, PartialInformationCompare};
+use partial_information::{Ranged, PartialInformationCompare, MaybeKnown};
 use partial_information_derive::PartialInformationCompare;
 
 use crate::api::{EventType, EventuallyEvent};
@@ -72,10 +72,10 @@ pub struct Player {
     pub moxie: Ranged<f32>,
     pub total_fingers: i32,
 
-    pub defense_rating: f32,
-    pub hitting_rating: f32,
-    pub pitching_rating: f32,
-    pub baserunning_rating: f32,
+    pub defense_rating: MaybeKnown<f32>,
+    pub hitting_rating: MaybeKnown<f32>,
+    pub pitching_rating: MaybeKnown<f32>,
+    pub baserunning_rating: MaybeKnown<f32>,
 }
 
 impl Entity for Player {
@@ -102,9 +102,17 @@ impl Player {
             EventType::GroundOut => {
                 self.fielding_out(event, "ground out")
             }
-            EventType::Snowflakes => {
-                // TODO Ugh why does the most complicated one have to come up first
-                // This does apply sometimes and I need to figure that out
+            EventType::PlayerStatReroll => {
+                // This event is normally a child (or in events that use siblings, a non-first
+                // sibling), but for Snow events it's a top-level event. For now I assert that it's
+                // always snow.
+
+                assert_eq!(event.description, format!("Snow fell on {}!", self.name),
+                           "Unexpected top-level PlayerStatReroll event");
+
+                // TODO: Find the actual range
+                self.adjust_attributes(Ranged::Range(-0.025, 0.025));
+
                 FeedEventChangeResult::DidNotApply
             }
             other => {
@@ -121,5 +129,56 @@ impl Player {
         } else {
             FeedEventChangeResult::DidNotApply
         }
+    }
+
+    fn adjust_attributes(&mut self, range: Ranged<f32>) {
+        self.adjust_batting(range);
+        self.adjust_pitching(range);
+        self.adjust_baserunning(range);
+        self.adjust_defense(range);
+    }
+
+    fn adjust_batting(&mut self, range: Ranged<f32>) {
+        self.buoyancy += range;
+        self.divinity += range;
+        self.martyrdom += range;
+        self.moxie += range;
+        self.musclitude += range;
+        self.patheticism += range;
+        self.thwackability += range;
+        self.tragicness += range;
+
+        self.baserunning_rating = MaybeKnown::Unknown;
+    }
+
+    fn adjust_pitching(&mut self, range: Ranged<f32>) {
+        self.coldness += range;
+        self.overpowerment += range;
+        self.ruthlessness += range;
+        self.shakespearianism += range;
+        self.suppression += range;
+        self.unthwackability += range;
+
+        self.pitching_rating = MaybeKnown::Unknown;
+    }
+
+    fn adjust_baserunning(&mut self, range: Ranged<f32>) {
+        self.base_thirst += range;
+        self.continuation += range;
+        self.ground_friction += range;
+        self.indulgence += range;
+        self.laserlikeness += range;
+
+        self.baserunning_rating = MaybeKnown::Unknown;
+    }
+
+    fn adjust_defense(&mut self, range: Ranged<f32>) {
+        self.anticapitalism += range;
+        self.chasiness += range;
+        self.omniscience += range;
+        self.tenaciousness += range;
+        self.watchfulness += range;
+
+        self.defense_rating = MaybeKnown::Unknown;
     }
 }

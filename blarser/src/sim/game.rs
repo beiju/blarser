@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::iter;
 use chrono::{DateTime, Utc};
 use itertools::Itertools;
@@ -23,6 +24,19 @@ pub struct GameState {
     snowfall_events: MaybeKnown<Option<i32>>,
 
 }
+#[derive(Clone, Deserialize, PartialInformationCompare)]
+#[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
+pub struct UpdateFullMetadata {
+    r#mod: Option<String>,
+
+}
+
+impl UpdateFullMetadata {
+    pub fn any_some(&self) -> bool {
+        self.r#mod.is_some()
+    }
+}
 
 #[derive(Clone, Deserialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]
@@ -38,6 +52,7 @@ pub struct UpdateFull {
     season: i32,
     created: DateTime<Utc>,
     category: i32,
+    metadata: Option<UpdateFullMetadata>,
     game_tags: Vec<Uuid>,
     team_tags: Vec<Uuid>,
     player_tags: Vec<Uuid>,
@@ -339,8 +354,11 @@ impl Game {
             .chain(iter::once(&String::new()))
             .join("\n");
 
+
         // last_update_full is a subset of the event
         self.last_update_full = Some(events.iter().map(|event| {
+            let metadata: UpdateFullMetadata = serde_json::from_value(event.metadata.other.clone())
+                .expect("Couldn't get metadata from event");
             UpdateFull {
                 id: event.id,
                 day: event.day,
@@ -356,6 +374,7 @@ impl Game {
                 player_tags: event.player_tags.clone(),
                 tournament: event.tournament,
                 description: event.description.clone(),
+                metadata: if metadata.any_some() { Some(metadata) } else { None },
             }
         }).collect())
     }
@@ -380,8 +399,6 @@ impl Game {
         // Ground outs and flyouts are different event types, but the logic is so similar that it's
         // easier to combine them
 
-        info!("At bat team has batter: {}", self.team_at_bat().batter.is_some());
-        info!("Fielding team has batter: {}", self.team_fielding().batter.is_some());
         let batter_id = self.team_at_bat().batter.clone()
             .expect("Batter must exist during GroundOut/FlyOut event");
         let batter_name = self.team_at_bat().batter_name.clone()
