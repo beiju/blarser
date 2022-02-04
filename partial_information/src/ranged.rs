@@ -3,7 +3,7 @@ use std::ops;
 use serde::{Deserialize, Deserializer};
 use crate::PartialInformationFieldCompare;
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum Ranged<UnderlyingType: Clone + Debug + PartialOrd> {
     Known(UnderlyingType),
     Range(UnderlyingType, UnderlyingType),

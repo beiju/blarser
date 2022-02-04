@@ -1,8 +1,6 @@
-use std::collections::HashMap;
 use std::iter;
 use chrono::{DateTime, Utc};
 use itertools::Itertools;
-use rocket::info;
 use serde::Deserialize;
 use serde_with::with_prefix;
 use uuid::Uuid;
@@ -24,7 +22,7 @@ pub struct GameState {
     snowfall_events: MaybeKnown<Option<i32>>,
 
 }
-#[derive(Clone, Deserialize, PartialInformationCompare)]
+#[derive(Clone, Debug, Deserialize, Default, PartialInformationCompare)]
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
 pub struct UpdateFullMetadata {
@@ -38,7 +36,7 @@ impl UpdateFullMetadata {
     }
 }
 
-#[derive(Clone, Deserialize, PartialInformationCompare)]
+#[derive(Clone, Debug, Deserialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
@@ -52,7 +50,8 @@ pub struct UpdateFull {
     season: i32,
     created: DateTime<Utc>,
     category: i32,
-    metadata: Option<UpdateFullMetadata>,
+    #[serde(default)]
+    metadata: UpdateFullMetadata,
     game_tags: Vec<Uuid>,
     team_tags: Vec<Uuid>,
     player_tags: Vec<Uuid>,
@@ -138,14 +137,14 @@ pub struct Game {
     half_inning_outs: i32,
     last_update_full: Option<Vec<UpdateFull>>,
     new_inning_phase: i32,
-    top_inning_score: i32,
+    top_inning_score: f32,
     base_runner_names: Vec<String>,
     baserunner_count: i32,
-    half_inning_score: i32,
+    half_inning_score: f32,
     tournament_round: Option<i32>,
     // what? (i32 placeholder)
     secret_baserunner: Option<Uuid>,
-    bottom_inning_score: i32,
+    bottom_inning_score: f32,
     new_half_inning_phase: i32,
     tournament_round_game_index: Option<i32>,
 
@@ -285,7 +284,7 @@ impl Game {
             self.inning += 1;
         }
         self.phase = 6;
-        self.half_inning_score = 0;
+        self.half_inning_score = 0.0;
 
         // The first halfInning event re-sets the data that PlayBall clears
         if self.inning == 0 {
@@ -357,7 +356,7 @@ impl Game {
 
         // last_update_full is a subset of the event
         self.last_update_full = Some(events.iter().map(|event| {
-            let metadata: UpdateFullMetadata = serde_json::from_value(event.metadata.other.clone())
+            let metadata = serde_json::from_value(event.metadata.other.clone())
                 .expect("Couldn't get metadata from event");
             UpdateFull {
                 id: event.id,
@@ -374,7 +373,7 @@ impl Game {
                 player_tags: event.player_tags.clone(),
                 tournament: event.tournament,
                 description: event.description.clone(),
-                metadata: if metadata.any_some() { Some(metadata) } else { None },
+                metadata,
             }
         }).collect())
     }
@@ -483,9 +482,9 @@ impl Game {
 
             // Reset both top and bottom inning scored only when the bottom half ends
             if !self.top_of_inning {
-                self.top_inning_score = 0;
-                self.bottom_inning_score = 0;
-                self.half_inning_score = 0;
+                self.top_inning_score = 0.0;
+                self.bottom_inning_score = 0.0;
+                self.half_inning_score = 0.0;
             }
 
             // End the game
@@ -503,8 +502,8 @@ impl Game {
                 };
 
                 if end_game {
-                    self.top_inning_score = 0;
-                    self.half_inning_score = 0;
+                    self.top_inning_score = 0.0;
+                    self.half_inning_score = 0.0;
                     self.phase = 7;
                 }
             }
@@ -599,6 +598,8 @@ impl Game {
     }
 
     fn home_run(&mut self, event: &EventuallyEvent) -> FeedEventChangeResult {
+        self.game_event(event);
+
         let event_batter_id = event_utils::get_one_id(&event.player_tags, "playerTags");
         let batter_id = self.team_at_bat().batter.clone()
             .expect("Batter must exist during HomeRun event");
@@ -608,15 +609,30 @@ impl Game {
         assert_eq!(event_batter_id, &batter_id,
                    "Batter in HomeRun event didn't match batter in game state");
 
-        parse::parse_home_run(&batter_name, &event.description)
+        let runs_scored = parse::parse_home_run(&batter_name, &event.description)
             .expect("Error parsing HomeRun description");
+
+        self.end_at_bat();
+
+        let runs_scored = runs_scored as f32;
+
+        // Home runs are treated specially in the score system
+        self.score_ledger = format!("Home Run: {} Run{}", runs_scored, plural(runs_scored));
+        self.score_update = format!("{} Runs scored!", runs_scored);
+        if self.top_of_inning {
+            self.top_inning_score += runs_scored;
+        } else {
+            self.bottom_inning_score += runs_scored;
+        }
+        self.half_inning_score += runs_scored;
+        self.team_at_bat().score = match self.team_at_bat().score {
+            None => { Some(runs_scored) }
+            Some(prev_score) => { Some(prev_score + runs_scored) }
+        };
 
         for runner_id in self.base_runners.clone() {
             self.score_runner(&runner_id, "Home Run");
         }
-
-        self.game_event(event);
-        self.end_at_bat();
 
         FeedEventChangeResult::Ok
     }
@@ -681,6 +697,14 @@ impl Game {
         FeedEventChangeResult::Ok
     }
 
+}
+
+fn plural(n: f32) -> &'static str {
+    if n == 1.0 {
+        ""
+    } else {
+        "s"
+    }
 }
 
 

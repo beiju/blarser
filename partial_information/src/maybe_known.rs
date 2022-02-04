@@ -2,7 +2,7 @@ use std::fmt::Debug;
 use serde::{Deserialize, Deserializer};
 use crate::PartialInformationFieldCompare;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum MaybeKnown<UnderlyingType: Clone + Debug + PartialOrd > {
     Unknown,
     Known(UnderlyingType),
