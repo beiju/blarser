@@ -1,40 +1,11 @@
 use rocket::error;
+use serde::Deserialize;
 use uuid::Uuid;
 use crate::api::{EventType, EventuallyEvent};
-
-fn get_one_id<'a>(tags: &'a [Uuid], field_name: &'static str) -> &'a Uuid {
-    get_one_id_excluding(tags, field_name, None)
-}
-
-fn get_one_id_excluding<'a>(tags: &'a [Uuid], field_name: &'static str, excluding: Option<&'a Uuid>) -> &'a Uuid {
-    match tags.len() {
-        0 => {
-            panic!("Expected exactly one element in {} but found none", field_name)
-        }
-        1 => {
-            &tags[0]
-        }
-        2 => {
-            if let Some(excluding) = excluding {
-                if tags[0] == *excluding {
-                    &tags[1]
-                } else if tags[1] == *excluding {
-                    &tags[0]
-                } else {
-                    panic!("Expected exactly one element in {}, excluding {}, but found two (neither excluded)", field_name, excluding)
-                }
-            } else {
-                panic!("Expected exactly one element in {} but found 2", field_name)
-            }
-        }
-        n => {
-            panic!("Expected exactly one element in {} but found {}", field_name, n)
-        }
-    }
-}
+use crate::event_utils;
 
 fn change_game(event: &EventuallyEvent) -> (&'static str, Option<Uuid>) {
-    ("game", Some(*get_one_id(&event.game_tags, "gameTags")))
+    ("game", Some(*event_utils::get_one_id(&event.game_tags, "gameTags")))
 }
 
 fn change_player(event: &EventuallyEvent) -> (&'static str, Option<Uuid>) {
@@ -42,13 +13,26 @@ fn change_player(event: &EventuallyEvent) -> (&'static str, Option<Uuid>) {
     if event.player_tags.is_empty() {
         ("player", None)
     } else {
-        ("player", Some(*get_one_id(&event.player_tags, "playerTags")))
+        ("player", Some(*event_utils::get_one_id(&event.player_tags, "playerTags")))
     }
 }
 
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct LetsGoMetadata {
+    pub home: Uuid,
+    pub away: Uuid,
+}
+
+
 pub fn changes_for_event(event: &EventuallyEvent) -> Vec<(&'static str, Option<Uuid>)> {
     match event.r#type {
-        EventType::LetsGo => vec![change_game(event)],
+        EventType::LetsGo => {
+            // LetsGo events change the active pitcher on Team entities
+            let metadata: LetsGoMetadata = serde_json::from_value(event.metadata.other.clone())
+                .expect("Couldn't parse metadata for LetsGo event");
+            vec![change_game(event), ("team", Some(metadata.home)), ("team", Some(metadata.away))]
+        }
         EventType::StormWarning => vec![change_game(event)],
         EventType::PlayBall => vec![change_game(event)],
         EventType::HalfInning => vec![change_game(event)],

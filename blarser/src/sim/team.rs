@@ -74,6 +74,14 @@ impl Entity for Team {
 impl Team {
     fn apply_feed_event(&mut self, event: &EventuallyEvent) -> FeedEventChangeResult {
         match event.r#type {
+            EventType::LetsGo => {
+                if event.day > 0 {
+                    self.rotation_slot += 1;
+                    FeedEventChangeResult::Ok
+                } else {
+                    FeedEventChangeResult::DidNotApply
+                }
+            }
             other => {
                 panic!("{:?} event does not apply to Team", other)
             }

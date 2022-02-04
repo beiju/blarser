@@ -1,14 +1,17 @@
 use std::iter;
 use chrono::{DateTime, Utc};
 use itertools::Itertools;
+use rocket::{info, State};
 use serde::Deserialize;
 use serde_with::with_prefix;
 use uuid::Uuid;
 use partial_information::{PartialInformationCompare, Ranged, MaybeKnown};
 use partial_information_derive::PartialInformationCompare;
 
-use crate::api::{EventType, EventuallyEvent};
-use crate::sim::{Entity, FeedEventChangeResult, Player, Team};
+use crate::api::{EventType, EventuallyEvent, Weather};
+use crate::event_utils;
+use crate::sim::{Entity, FeedEventChangeResult, parse, Player, Team};
+use crate::sim::parse::Base;
 use crate::state::{StateInterface, GenericEvent, GenericEventType};
 
 #[derive(Clone, Deserialize, PartialInformationCompare)]
@@ -110,7 +113,7 @@ pub struct Game {
     queued_events: Vec<i32>,
     // what? (i put i32 there as a placeholder)
     series_length: i32,
-    bases_occupied: Vec<i32>,
+    bases_occupied: Vec<Ranged<i32>>,
     base_runner_mods: Vec<String>,
     game_start_phase: i32,
     half_inning_outs: i32,
@@ -167,6 +170,18 @@ impl Entity for Game {
     }
 }
 
+struct ActivePitcher {
+    rotation_slot: i64,
+    pitcher_id: Uuid,
+    pitcher_name: String,
+}
+
+struct Score {
+    player_name: String,
+    source: &'static str,
+    runs: i64, // falsehoods
+}
+
 impl Game {
     fn apply_feed_event(&mut self, event: &EventuallyEvent, state: &StateInterface) -> FeedEventChangeResult {
         match event.game_tags.iter().exactly_one() {
@@ -179,95 +194,106 @@ impl Game {
         };
 
         match event.r#type {
-            EventType::LetsGo => {
-                self.game_start = true;
-                self.game_start_phase = -1;
-                self.home.team_batter_count = Some(-1);
-                self.away.team_batter_count = Some(-1);
-                self.game_event(event);
-                FeedEventChangeResult::Ok
-            }
-            EventType::StormWarning => {
-                self.game_start_phase = 11; // sure why not
-                self.game_event(event);
-                FeedEventChangeResult::Ok
-            }
-            EventType::PlayBall => {
-                self.game_start_phase = 20;
-                self.inning = -1;
-                self.phase = 2;
-                self.top_of_inning = false;
-
-                // Yeah, it unsets pitchers. Why, blaseball.
-                self.home.pitcher = None;
-                self.home.pitcher_name = Some(MaybeKnown::Known(String::new()));
-                self.away.pitcher = None;
-                self.away.pitcher_name = Some(MaybeKnown::Known(String::new()));
-
-                self.game_event(event);
-                FeedEventChangeResult::Ok
-            }
-            EventType::HalfInning => {
-                self.top_of_inning = !self.top_of_inning;
-                if self.top_of_inning {
-                    self.inning += 1;
-                }
-                self.phase = 6;
-                self.half_inning_score = 0;
-
-                // The first halfInning event re-sets the data that PlayBall clears
-                if self.inning == 0 {
-                    for self_by_team in [&mut self.home, &mut self.away] {
-                        let team: Team = state.entity(self_by_team.team, event.created);
-                        let pitcher_id = team.active_pitcher();
-                        let pitcher: Player = state.entity(pitcher_id, event.created);
-                        self_by_team.pitcher = Some(MaybeKnown::Known(pitcher_id));
-                        self_by_team.pitcher_name = Some(MaybeKnown::Known(pitcher.name));
-                    }
-                }
-
-
-                self.game_event(event);
-                FeedEventChangeResult::Ok
-            }
-            EventType::BatterUp => {
-                let self_by_team = if self.top_of_inning {
-                    &mut self.home
-                } else {
-                    &mut self.away
-                };
-
-                let team: Team = state.entity(self_by_team.team, event.created);
-                let batter_count = self_by_team.team_batter_count
-                    .expect("Team batter count must be populated during a game");
-                let batter_id = team.batter_for_count(batter_count as usize);
-                self_by_team.batter = Some(batter_id);
-                let player: Player = state.entity(batter_id, event.created);
-                self_by_team.batter_name = Some(player.name);
-                self_by_team.team_batter_count = Some(team.lineup.len() as i32);
-
-                self.game_event(event);
-                FeedEventChangeResult::Ok
-            }
-            EventType::Ball => {
-                self.at_bat_balls += 1;
-                self.game_event(event);
-                FeedEventChangeResult::Ok
-            }
-            EventType::Strike => {
-                self.at_bat_strikes += 1;
-                self.game_event(event);
-                FeedEventChangeResult::Ok
-            }
-            EventType::GroundOut => {
-                // Ground outs is complicated, it turns out
-                self.apply_ground_out(event)
-            }
+            EventType::LetsGo => self.lets_go(event),
+            EventType::StormWarning => self.storm_warning(event),
+            EventType::PlayBall => self.play_ball(event),
+            EventType::HalfInning => self.half_inning(event, state),
+            EventType::BatterUp => self.batter_up(event, state),
+            EventType::Ball => self.ball(event),
+            EventType::Strike => self.strike(event),
+            // It's easier to combine ground out and flyout types into one function
+            EventType::GroundOut => self.fielding_out(event),
+            EventType::FlyOut => self.fielding_out(event),
             other => {
                 panic!("{:?} event does not apply to Game", other)
             }
         }
     }
+
+    fn strike(&mut self, event: &EventuallyEvent) -> FeedEventChangeResult {
+        self.at_bat_strikes += 1;
+        self.game_event(event);
+        FeedEventChangeResult::Ok
+    }
+
+    fn ball(&mut self, event: &EventuallyEvent) -> FeedEventChangeResult {
+        self.at_bat_balls += 1;
+        self.game_event(event);
+        FeedEventChangeResult::Ok
+    }
+
+    fn batter_up(&mut self, event: &EventuallyEvent, state: &StateInterface) -> FeedEventChangeResult {
+        let self_by_team = self.team_at_bat();
+
+        let team: Team = state.entity(self_by_team.team, event.created);
+        let batter_count = 1 + self_by_team.team_batter_count
+            .expect("Team batter count must be populated during a game");
+        self_by_team.team_batter_count = Some(batter_count);
+        let batter_id = team.batter_for_count(batter_count as usize);
+        self_by_team.batter = Some(batter_id);
+        let player: Player = state.entity(batter_id, event.created);
+        self_by_team.batter_name = Some(player.name);
+        self_by_team.team_batter_count = Some(team.lineup.len() as i32);
+
+        self.game_event(event);
+        FeedEventChangeResult::Ok
+    }
+
+    fn half_inning(&mut self, event: &EventuallyEvent, state: &StateInterface) -> FeedEventChangeResult {
+        self.top_of_inning = !self.top_of_inning;
+        if self.top_of_inning {
+            self.inning += 1;
+        }
+        self.phase = 6;
+        self.half_inning_score = 0;
+
+        // The first halfInning event re-sets the data that PlayBall clears
+        if self.inning == 0 {
+            for self_by_team in [&mut self.home, &mut self.away] {
+                let team: Team = state.entity(self_by_team.team, event.created);
+                let pitcher_id = team.active_pitcher();
+                let pitcher: Player = state.entity(pitcher_id, event.created);
+                self_by_team.pitcher = Some(MaybeKnown::Known(pitcher_id));
+                self_by_team.pitcher_name = Some(MaybeKnown::Known(pitcher.name));
+            }
+        }
+
+
+        self.game_event(event);
+        FeedEventChangeResult::Ok
+    }
+
+    fn play_ball(&mut self, event: &EventuallyEvent) -> FeedEventChangeResult {
+        self.game_start_phase = 20;
+        self.inning = -1;
+        self.phase = 2;
+        self.top_of_inning = false;
+
+        // Yeah, it unsets pitchers. Why, blaseball.
+        self.home.pitcher = None;
+        self.home.pitcher_name = Some(MaybeKnown::Known(String::new()));
+        self.away.pitcher = None;
+        self.away.pitcher_name = Some(MaybeKnown::Known(String::new()));
+
+        self.game_event(event);
+        FeedEventChangeResult::Ok
+    }
+
+    fn storm_warning(&mut self, event: &EventuallyEvent) -> FeedEventChangeResult {
+        self.game_start_phase = 11; // sure why not
+        self.game_event(event);
+        FeedEventChangeResult::Ok
+    }
+
+    fn lets_go(&mut self, event: &EventuallyEvent) -> FeedEventChangeResult {
+        self.game_start = true;
+        self.game_start_phase = -1;
+        self.home.team_batter_count = Some(-1);
+        self.away.team_batter_count = Some(-1);
+
+        FeedEventChangeResult::Ok
+    }
+
 
     fn game_event(&mut self, first_event: &EventuallyEvent) {
         let events = &first_event.metadata.siblings;
@@ -308,10 +334,219 @@ impl Game {
             }
         }).collect())
     }
-    fn apply_ground_out(&mut self, event: &EventuallyEvent) -> FeedEventChangeResult {
-        // Ground outs are so difficult because they can be a simple ground out, a fielder's choice,
-        // or a double play and any of the above can score players and advance runners. Oh and in
-        // gamma10, the game stopped putting the player id in player_tags.
-        todo!()
+
+    fn team_at_bat(&mut self) -> &mut GameByTeam {
+        if self.top_of_inning {
+            &mut self.away
+        } else {
+            &mut self.home
+        }
     }
+
+    fn team_fielding(&mut self) -> &mut GameByTeam {
+        if self.top_of_inning {
+            &mut self.home
+        } else {
+            &mut self.away
+        }
+    }
+
+    fn fielding_out(&mut self, event: &EventuallyEvent) -> FeedEventChangeResult {
+        // Ground outs and flyouts are different event types, but the logic is so similar that it's
+        // easier to combine them
+
+        info!("At bat team has batter: {}", self.team_at_bat().batter.is_some());
+        info!("Fielding team has batter: {}", self.team_fielding().batter.is_some());
+        let batter_id = self.team_at_bat().batter.clone()
+            .expect("Batter must exist during GroundOut/FlyOut event");
+        let batter_name = self.team_at_bat().batter_name.clone()
+            .expect("Batter name must exist during GroundOut/FlyOut event");
+
+        // Verify batter id if the event has the player id; annoyingly, sometimes it doesn't
+        if let Some(event_batter_id) = event.player_tags.first() {
+            assert_eq!(event_batter_id, &batter_id,
+                       "Batter in GroundOut/Flyout event didn't match batter in game state");
+        }
+
+
+        let (scoring_runners, other_events) = separate_scoring_events(&event.metadata.siblings, &batter_id);
+
+        let out = match other_events.len() {
+            1 => parse::parse_simple_out(&batter_name, &other_events[0].description)
+                .expect("Error parsing simple fielding out"),
+            2 => parse::parse_complex_out(&batter_name, &other_events[0].description, &other_events[1].description)
+                .expect("Error parsing complex fielding out"),
+            more => panic!("Unexpected fielding out with {} non-score siblings", more)
+        };
+
+        for runner_id in scoring_runners {
+            let source = if let parse::FieldingOut::FieldersChoice(_, _) = out {
+                "Base Hit"
+            } else {
+                "Sacrifice"
+            };
+            self.score_runner(runner_id, source);
+        }
+
+        let outs_added = if let parse::FieldingOut::DoublePlay = out { 2 } else { 1 };
+        self.out(event, outs_added);
+        self.end_at_bat();
+
+        if let parse::FieldingOut::FieldersChoice(runner_name_parsed, out_at_base) = out {
+            let runner_idx = self.get_baserunner_with_name(runner_name_parsed, out_at_base);
+            self.remove_base_runner(runner_idx);
+            // Advance runners first to ensure the batter is not allowed past first
+            self.advance_runners(0);
+            let batter_mod = self.team_at_bat().batter_mod.clone();
+            self.push_base_runner(batter_id, batter_name, batter_mod, Base::First);
+        } else if let parse::FieldingOut::DoublePlay = out {
+            if self.baserunner_count == 1 {
+                self.remove_base_runner(0);
+            } else if self.half_inning_outs < 3 {
+                // Need to figure out how to handle double plays with multiple people on base
+                todo!()
+            }
+            self.advance_runners(0);
+        } else {
+            self.advance_runners(0);
+        }
+
+        FeedEventChangeResult::Ok
+    }
+
+    fn score_runner(&mut self, runner_id: &Uuid, source: &'static str) -> Score {
+        let runner_from_state = self.base_runners.remove(0);
+        if runner_from_state != *runner_id {
+            panic!("Got a scoring event for {} but {} was first in the list", runner_id, runner_from_state);
+        }
+        let runner_name = self.base_runner_names.remove(0);
+        self.base_runner_mods.remove(0);
+        self.bases_occupied.remove(0);
+        self.baserunner_count -= 1;
+
+        Score {
+            player_name: runner_name,
+            source,
+            runs: 1,
+        }
+    }
+
+    fn out(&mut self, event: &EventuallyEvent, outs_added: i32) {
+        self.game_event(event);
+
+        let end_of_half_inning = self.half_inning_outs + outs_added == 3;
+        if end_of_half_inning {
+            self.half_inning_outs = 0;
+            self.phase = 3;
+            self.clear_bases();
+
+            // Reset both top and bottom inning scored only when the bottom half ends
+            if !self.top_of_inning {
+                self.top_inning_score = 0;
+                self.bottom_inning_score = 0;
+                self.half_inning_score = 0;
+            }
+
+            // End the game
+            if self.inning >= 8 {
+                let home_score = self.home.score
+                    .expect("Score field must not be null during a game");
+                let away_score = self.away.score
+                    .expect("Score field must not be null during a game");
+                let end_game = if self.top_of_inning && home_score > away_score {
+                    true
+                } else if !self.top_of_inning && home_score != away_score { // 20.3
+                    true
+                } else {
+                    false
+                };
+
+                if end_game {
+                    self.top_inning_score = 0;
+                    self.half_inning_score = 0;
+                    self.phase = 7;
+                }
+            }
+        } else {
+            self.half_inning_outs += outs_added;
+        }
+    }
+
+    fn clear_bases(&mut self) {
+        self.base_runners.clear();
+        self.base_runner_names.clear();
+        self.base_runner_mods.clear();
+        self.bases_occupied.clear();
+        self.baserunner_count = 0;
+    }
+
+    fn end_at_bat(&mut self) {
+        self.team_at_bat().batter = None;
+        self.team_at_bat().batter_name = Some("".to_string());
+        self.at_bat_balls = 0;
+        self.at_bat_strikes = 0;
+    }
+
+    fn get_baserunner_with_name(&self, expected_name: &str, base_plus_one: Base) -> usize {
+        self.get_baserunner_with_property(expected_name, base_plus_one, &self.base_runner_names)
+            .expect("Couldn't find baserunner with specified on specified base")
+    }
+
+    fn get_baserunner_with_property<U, T: ?Sized + std::cmp::PartialEq<U>>(
+        &self, expected_property: &T, which_base: Base, baserunner_properties: &[U],
+    ) -> Option<usize> {
+        Iterator::zip(baserunner_properties.into_iter(), self.bases_occupied.iter())
+            .enumerate()
+            .filter_map(|(i, (name, base))| {
+                if expected_property == name && base.could_be(&(which_base as i32 - 1)) {
+                    Some(i)
+                } else {
+                    None
+                }
+            })
+            .exactly_one().ok()
+    }
+
+    fn remove_base_runner(&mut self, runner_idx: usize) {
+        self.base_runners.remove(runner_idx);
+        self.base_runner_names.remove(runner_idx);
+        self.base_runner_mods.remove(runner_idx);
+        self.bases_occupied.remove(runner_idx);
+        self.baserunner_count -= 1;
+    }
+
+    fn advance_runners(&mut self, advance_at_least: i32) {
+        for base in &mut self.bases_occupied {
+            // You can advance by up to 1 "extra" base
+            *base = base.clone() + Ranged::Range(advance_at_least, advance_at_least + 1)
+        }
+    }
+
+    fn push_base_runner(&mut self, runner_id: Uuid, runner_name: String, runner_mod: String, to_base: Base) {
+        self.base_runners.push(runner_id);
+        self.base_runner_names.push(runner_name);
+        self.base_runner_mods.push(runner_mod);
+        self.bases_occupied.push(Ranged::Known(to_base as i32));
+        self.baserunner_count += 1;
+    }
+}
+
+
+fn separate_scoring_events<'a>(siblings: &'a Vec<EventuallyEvent>, hitter_id: &'a Uuid) -> (Vec<&'a Uuid>, Vec<&'a EventuallyEvent>) {
+    // The first event is never a scoring event, and it mixes up the rest of the logic because the
+    // "hit" or "walk" event type is reused
+    let (first, rest) = siblings.split_first()
+        .expect("Event's siblings array is empty");
+    let mut scores = Vec::new();
+    let mut others = vec![first];
+
+    for event in rest {
+        if event.r#type == EventType::Hit || event.r#type == EventType::Walk {
+            scores.push(event_utils::get_one_id_excluding(&event.player_tags, "playerTags", Some(hitter_id)));
+        } else if event.r#type != EventType::RunsScored {
+            others.push(event);
+        }
+    }
+
+    (scores, others)
 }

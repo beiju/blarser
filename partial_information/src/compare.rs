@@ -1,4 +1,3 @@
-use std::fmt::Debug;
 use uuid::Uuid;
 use std::iter::Iterator;
 use chrono::{DateTime, Utc};

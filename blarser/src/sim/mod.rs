@@ -4,6 +4,7 @@ mod player;
 mod sim;
 mod game;
 mod team;
+mod parse;
 
 pub use entity::{Entity, FeedEventChangeResult};
 pub use player::Player;
