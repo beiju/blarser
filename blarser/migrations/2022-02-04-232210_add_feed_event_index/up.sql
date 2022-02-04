@@ -1,0 +1,1 @@
+CREATE INDEX feed_event_changes_entity_query ON feed_event_changes (entity_type, entity_id);

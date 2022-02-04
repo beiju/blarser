@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX chron_updates_latest_time ON chron_updates (ingest_id, entity_type, entity_id, latest_time)

@@ -78,7 +78,7 @@ impl<T> PartialInformationFieldCompare for Ranged<T>
                         }
                     }
                     Ranged::Range(lower, upper) => {
-                        if lower < actual && actual < upper {
+                        if lower <= actual && actual <= upper {
                             vec![]
                         } else {
                             vec![format!("{}: Expected value between {:?} and {:?}, but value was {:?}", field_path, lower, upper, actual)]
