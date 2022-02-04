@@ -1,7 +1,7 @@
 use std::iter;
 use chrono::{DateTime, Utc};
 use itertools::Itertools;
-use rocket::{info, State};
+use rocket::info;
 use serde::Deserialize;
 use serde_with::with_prefix;
 use uuid::Uuid;
@@ -174,12 +174,6 @@ impl Entity for Game {
     }
 }
 
-struct ActivePitcher {
-    rotation_slot: i64,
-    pitcher_id: Uuid,
-    pitcher_name: String,
-}
-
 struct Score {
     player_name: String,
     source: &'static str,
@@ -198,7 +192,7 @@ impl Game {
         };
 
         let result = match event.r#type {
-            EventType::LetsGo => self.lets_go(event),
+            EventType::LetsGo => self.lets_go(),
             EventType::StormWarning => self.storm_warning(event),
             EventType::PlayBall => self.play_ball(event),
             EventType::HalfInning => self.half_inning(event, state),
@@ -212,6 +206,7 @@ impl Game {
             EventType::FlyOut => self.fielding_out(event),
             EventType::Hit => self.hit(event),
             EventType::HomeRun => self.home_run(event),
+            EventType::Snowflakes => self.snowflakes(event, state),
             other => {
                 panic!("{:?} event does not apply to Game", other)
             }
@@ -315,7 +310,7 @@ impl Game {
         FeedEventChangeResult::Ok
     }
 
-    fn lets_go(&mut self, event: &EventuallyEvent) -> FeedEventChangeResult {
+    fn lets_go(&mut self) -> FeedEventChangeResult {
         self.game_start = true;
         self.game_start_phase = -1;
         self.home.team_batter_count = Some(-1);
@@ -628,6 +623,47 @@ impl Game {
 
         FeedEventChangeResult::Ok
     }
+
+    fn snowflakes(&mut self, event: &EventuallyEvent, state: &StateInterface) -> FeedEventChangeResult {
+
+        let (snow_event, _) = event.metadata.siblings.split_first()
+            .expect("Snowflakes event is missing metadata.siblings");
+
+        parse::parse_snowfall(&snow_event.description)
+            .expect("Error parsing Snowflakes description");
+
+        self.game_event(event);
+        self.game_start_phase = 20;
+        self.state.snowfall_events = match self.state.snowfall_events {
+            MaybeKnown::Unknown => { MaybeKnown::Unknown }
+            MaybeKnown::Known(None) => { MaybeKnown::Known(Some(1))}
+            MaybeKnown::Known(Some(x)) => { MaybeKnown::Known(Some(x + 1))}
+        };
+
+        // The Player entity will take care of adding the Frozen mod, but the Game entity needs to
+        // check if the current batter or pitcher just got Frozen
+        if let Some(batter_id) = self.team_at_bat().batter {
+            let batter: Player = state.entity(batter_id, event.created);
+            if batter.game_attr.iter().any(|mod_name| mod_name == "FROZEN") {
+                self.team_at_bat().batter = None;
+                self.team_at_bat().batter_name = Some("".to_string());
+            }
+        }
+
+        if let Some(pitcher_id) = &self.team_at_bat().pitcher {
+            let pitcher_id = pitcher_id.known()
+                .expect("Pitcher must be Known in Snowfall event");
+
+            let pitcher: Player = state.entity(*pitcher_id, event.created);
+            if pitcher.game_attr.iter().any(|mod_name| mod_name == "FROZEN") {
+                self.team_at_bat().pitcher = None;
+                self.team_at_bat().pitcher_name = Some("".to_string().into());
+            }
+        }
+
+        FeedEventChangeResult::Ok
+    }
+
 }
 
 

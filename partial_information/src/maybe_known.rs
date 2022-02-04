@@ -8,6 +8,16 @@ pub enum MaybeKnown<UnderlyingType: Clone + Debug + PartialOrd > {
     Known(UnderlyingType),
 }
 
+impl<UnderlyingType> MaybeKnown<UnderlyingType>
+    where UnderlyingType: Clone + Debug + PartialOrd {
+    pub fn known(&self) -> Option<&UnderlyingType> {
+        match self {
+            MaybeKnown::Unknown => { None }
+            MaybeKnown::Known(val) => { Some(val) }
+        }
+    }
+}
+
 impl<'de, UnderlyingType> Deserialize<'de> for MaybeKnown<UnderlyingType>
     where UnderlyingType: for<'de2> Deserialize<'de2> + Clone + Debug + PartialOrd {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
