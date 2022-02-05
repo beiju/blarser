@@ -23,6 +23,7 @@ pub struct GameState {
     snowfall_events: MaybeKnown<Option<i32>>,
 
 }
+
 #[derive(Clone, Debug, Deserialize, Default, PartialInformationCompare)]
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
@@ -163,7 +164,7 @@ impl Entity for Game {
         let mut earliest = EarliestEvent::new();
 
         let sim: Sim = state.get_sim(from_time);
-        if from_time < sim.earlseason_date && sim.earlseason_date <= to_time  {
+        if from_time < sim.earlseason_date && sim.earlseason_date <= to_time {
             earliest.push(GenericEvent {
                 time: sim.earlseason_date,
                 event_type: GenericEventType::EarlseasonStart,
@@ -179,17 +180,15 @@ impl Entity for Game {
                 .first()
                 .expect("lastUpdateFull must be non-empty when game phase is 3")
                 .created + Duration::seconds(5);
-            if from_time < event_time && event_time <= to_time  {
+            if from_time < event_time && event_time <= to_time {
                 earliest.push(GenericEvent {
                     time: event_time,
                     event_type: GenericEventType::EndTopHalf,
                 })
             }
-
         }
 
         earliest.into_inner()
-
     }
 
     fn apply_event(&mut self, event: &GenericEvent, state: &StateInterface) -> FeedEventChangeResult {
@@ -258,6 +257,7 @@ impl Game {
             EventType::HomeRun => self.home_run(event),
             EventType::Snowflakes => self.snowflakes(event, state),
             EventType::StolenBase => self.stolen_base(event, state),
+            EventType::Walk => self.walk(event),
             other => {
                 panic!("{:?} event does not apply to Game", other)
             }
@@ -610,6 +610,46 @@ impl Game {
         self.base_runner_mods.push(runner_mod);
         self.bases_occupied.push(Ranged::Known(to_base as i32));
         self.baserunner_count += 1;
+
+        let mut last_occupied_base: Option<i32> = None;
+        for base in self.bases_occupied.iter_mut().rev() {
+            match base {
+                Ranged::Known(base_num) => {
+                    if let Some(last_occupied_base_num) = last_occupied_base.as_mut() {
+                        if *base_num <= *last_occupied_base_num {
+                            *last_occupied_base_num = *base_num + 1;
+
+                            *base = Ranged::Known(*last_occupied_base_num);
+                        } else {
+                            *last_occupied_base_num = *base_num;
+                        }
+                    } else {
+                        last_occupied_base = Some(*base_num);
+                    }
+                }
+                Ranged::Range(min_base, max_base) => {
+                    if let Some(last_occupied_base_num) = last_occupied_base {
+                        if *min_base <= last_occupied_base_num {
+                            let last_occupied_base_num = *min_base + 1;
+
+                            if last_occupied_base_num == *max_base {
+                                // Then this has collapsed the possibilities
+                                *base = Ranged::Known(last_occupied_base_num);
+                            } else {
+                                // Then this has just narrowed down the range
+                                *min_base = last_occupied_base_num;
+                            }
+                            last_occupied_base = Some(last_occupied_base_num)
+                        } else {
+                            last_occupied_base = Some(*min_base);
+                        }
+                    } else {
+                        last_occupied_base = Some(*min_base);
+                    }
+                }
+            }
+        }
+
     }
 
     fn hit(&mut self, event: &EventuallyEvent) -> FeedEventChangeResult {
@@ -710,8 +750,8 @@ impl Game {
         self.game_start_phase = 20;
         self.state.snowfall_events = match self.state.snowfall_events {
             MaybeKnown::Unknown => { MaybeKnown::Unknown }
-            MaybeKnown::Known(None) => { MaybeKnown::Known(Some(1))}
-            MaybeKnown::Known(Some(x)) => { MaybeKnown::Known(Some(x + 1))}
+            MaybeKnown::Known(None) => { MaybeKnown::Known(Some(1)) }
+            MaybeKnown::Known(Some(x)) => { MaybeKnown::Known(Some(x + 1)) }
         };
 
         // The Player entity will take care of adding the Frozen mod, but the Game entity needs to
@@ -774,6 +814,30 @@ impl Game {
             *self.team_at_bat().team_batter_count.as_mut()
                 .expect("Team batter count must not be null during a CaughtStealing event") -= 1;
         }
+
+        FeedEventChangeResult::Ok
+    }
+
+    fn walk(&mut self, event: &EventuallyEvent) -> FeedEventChangeResult {
+        let event_batter_id = event_utils::get_one_id(&event.player_tags, "playerTags");
+        let batter_id = self.team_at_bat().batter.clone()
+            .expect("Batter must exist during Walk event");
+        let batter_name = self.team_at_bat().batter_name.clone()
+            .expect("Batter name must exist during Walk event");
+
+        assert_eq!(event_batter_id, &batter_id,
+                   "Batter in Walk event didn't match batter in game state");
+
+        let (scoring_runners, _) = separate_scoring_events(&event.metadata.siblings, &batter_id);
+
+        for scoring_runner in scoring_runners {
+            self.score_runner(scoring_runner, "Walk");
+        }
+
+        let batter_mod = self.team_at_bat().batter_mod.clone();
+        self.push_base_runner(batter_id, batter_name, batter_mod, Base::First);
+        self.end_at_bat();
+        self.game_event(&event);
 
         FeedEventChangeResult::Ok
     }
