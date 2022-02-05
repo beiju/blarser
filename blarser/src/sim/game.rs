@@ -223,12 +223,6 @@ impl Entity for Game {
     }
 }
 
-struct Score {
-    player_name: String,
-    source: &'static str,
-    runs: i64, // falsehoods
-}
-
 impl Game {
     fn apply_feed_event(&mut self, event: &EventuallyEvent, state: &StateInterface) -> FeedEventChangeResult {
         match event.game_tags.iter().exactly_one() {
@@ -374,10 +368,6 @@ impl Game {
     fn game_event(&mut self, first_event: &EventuallyEvent) {
         let events = &first_event.metadata.siblings;
 
-        // These will be overwritten if there is a score
-        self.score_update = String::new();
-        self.score_ledger = String::new();
-
         // play and playCount are out of sync by exactly 1
         self.play_count = 1 + first_event.metadata.play
             .expect("Game event must have metadata.play");
@@ -412,7 +402,44 @@ impl Game {
                 description: event.description.clone(),
                 metadata,
             }
-        }).collect())
+        }).collect());
+
+        let score_event = events.iter()
+            .filter(|event| event.r#type == EventType::RunsScored)
+            .at_most_one()
+            .expect("Expected at most one RunsScored event");
+
+        if let Some(score_event) = score_event {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct RunsScoredMetadata {
+                ledger: String,
+                update: String,
+                away_score: f32,
+                home_score: f32,
+            }
+
+            let runs_metadata: RunsScoredMetadata = serde_json::from_value(score_event.metadata.other.clone())
+                .expect("Error parsing RunsScored event metadata");
+            self.score_update = runs_metadata.update;
+            self.score_ledger = runs_metadata.ledger;
+            let home_scored = runs_metadata.home_score - self.home.score
+                .expect("homeScore must exist during a game event");
+            let away_scored = runs_metadata.away_score - self.away.score
+                .expect("awayScore must exist during a game event");
+            self.half_inning_score += home_scored + away_scored;
+            if self.top_of_inning {
+                self.top_inning_score += home_scored + away_scored;
+            } else {
+                self.bottom_inning_score += home_scored + away_scored;
+            }
+            self.home.score = Some(runs_metadata.home_score);
+            self.away.score = Some(runs_metadata.away_score);
+
+        } else {
+            self.score_update = String::new();
+            self.score_ledger = String::new();
+        }
     }
 
     fn team_at_bat(&mut self) -> &mut GameByTeam {
@@ -457,12 +484,7 @@ impl Game {
         };
 
         for runner_id in scoring_runners {
-            let source = if let parse::FieldingOut::FieldersChoice(_, _) = out {
-                "Base Hit"
-            } else {
-                "Sacrifice"
-            };
-            self.score_runner(runner_id, source);
+            self.score_runner(runner_id);
         }
 
         let outs_added = if let parse::FieldingOut::DoublePlay = out { 2 } else { 1 };
@@ -491,21 +513,15 @@ impl Game {
         FeedEventChangeResult::Ok
     }
 
-    fn score_runner(&mut self, runner_id: &Uuid, source: &'static str) -> Score {
+    fn score_runner(&mut self, runner_id: &Uuid) {
         let runner_from_state = self.base_runners.remove(0);
         if runner_from_state != *runner_id {
             panic!("Got a scoring event for {} but {} was first in the list", runner_id, runner_from_state);
         }
-        let runner_name = self.base_runner_names.remove(0);
+        self.base_runner_names.remove(0);
         self.base_runner_mods.remove(0);
         self.bases_occupied.remove(0);
         self.baserunner_count -= 1;
-
-        Score {
-            player_name: runner_name,
-            source,
-            runs: 1,
-        }
     }
 
     fn out(&mut self, event: &EventuallyEvent, outs_added: i32) {
@@ -667,7 +683,7 @@ impl Game {
 
         let (scoring_runners, _) = separate_scoring_events(&event.metadata.siblings, &batter_id);
         for runner_id in scoring_runners {
-            self.score_runner(runner_id, "Base Hit");
+            self.score_runner(runner_id);
         }
 
         self.game_event(event);
@@ -691,29 +707,13 @@ impl Game {
         assert_eq!(event_batter_id, &batter_id,
                    "Batter in HomeRun event didn't match batter in game state");
 
-        let runs_scored = parse::parse_home_run(&batter_name, &event.description)
+        parse::parse_home_run(&batter_name, &event.description)
             .expect("Error parsing HomeRun description");
 
         self.end_at_bat();
 
-        let runs_scored = runs_scored as f32;
-
-        // Home runs are treated specially in the score system
-        self.score_ledger = format!("Home Run: {} Run{}", runs_scored, plural(runs_scored));
-        self.score_update = format!("{} Runs scored!", runs_scored);
-        if self.top_of_inning {
-            self.top_inning_score += runs_scored;
-        } else {
-            self.bottom_inning_score += runs_scored;
-        }
-        self.half_inning_score += runs_scored;
-        self.team_at_bat().score = match self.team_at_bat().score {
-            None => { Some(runs_scored) }
-            Some(prev_score) => { Some(prev_score + runs_scored) }
-        };
-
         for runner_id in self.base_runners.clone() {
-            self.score_runner(&runner_id, "Home Run");
+            self.score_runner(&runner_id);
         }
 
         FeedEventChangeResult::Ok
@@ -831,7 +831,7 @@ impl Game {
         let (scoring_runners, _) = separate_scoring_events(&event.metadata.siblings, &batter_id);
 
         for scoring_runner in scoring_runners {
-            self.score_runner(scoring_runner, "Walk");
+            self.score_runner(scoring_runner);
         }
 
         let batter_mod = self.team_at_bat().batter_mod.clone();
