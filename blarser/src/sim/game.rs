@@ -1,5 +1,5 @@
 use std::iter;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Utc, Duration};
 use itertools::Itertools;
 use serde::Deserialize;
 use serde_with::with_prefix;
@@ -163,11 +163,29 @@ impl Entity for Game {
         let mut earliest = EarliestEvent::new();
 
         let sim: Sim = state.get_sim(from_time);
-        if from_time < sim.earlseason_date && sim.earlseason_date < to_time  {
+        if from_time < sim.earlseason_date && sim.earlseason_date <= to_time  {
             earliest.push(GenericEvent {
                 time: sim.earlseason_date,
                 event_type: GenericEventType::EarlseasonStart,
             })
+        }
+
+        // There's a game update without a corresponding game event. It happens at the end of the
+        // first half of each inning, and from a cursory look at the game event json it appears to
+        // occur every time `phase == 3` and `top_of_inning == true`
+        if self.phase == 3 && self.top_of_inning {
+            let event_time = self.last_update_full.as_ref()
+                .expect("lastUpdateFull must be populated when game phase is 3")
+                .first()
+                .expect("lastUpdateFull must be non-empty when game phase is 3")
+                .created + Duration::seconds(5);
+            if from_time < event_time && event_time <= to_time  {
+                earliest.push(GenericEvent {
+                    time: event_time,
+                    event_type: GenericEventType::EndTopHalf,
+                })
+            }
+
         }
 
         earliest.into_inner()
@@ -186,6 +204,14 @@ impl Entity for Game {
                     self_by_team.score = Some(0.0);
                     self_by_team.strikes = Some(3);
                 }
+                self.last_update = String::new();
+                self.last_update_full = Some(Vec::new());
+                FeedEventChangeResult::Ok
+            }
+            GenericEventType::EndTopHalf => {
+                self.phase = 2;
+                self.play_count += 1;
+                self.last_update = String::new();
                 FeedEventChangeResult::Ok
             }
             GenericEventType::FeedEvent(feed_event) => {

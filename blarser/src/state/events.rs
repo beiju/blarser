@@ -7,6 +7,9 @@ pub enum GenericEventType {
 
     // Timed events
     EarlseasonStart,
+
+    // There's a game update without a feed event, so here's an event for it.
+    EndTopHalf,
 }
 
 #[derive(Debug)]

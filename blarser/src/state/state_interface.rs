@@ -121,20 +121,27 @@ impl<'conn, 'state, EntityT: Entity> Iterator for VersionsIter<'conn, 'state, En
                 FeedEventChangeResult::Ok => {
                     self.current_version_valid_from = next_event.time;
                     process_time = next_event.time;
-                    if version.is_some() {
-                        info!("Yielding new version for {} {}, valid from {}",
-                                EntityT::name(), self.entity_id, self.current_version_valid_from);
+                    if let Some(ref print_version) = version {
+                        info!("Yielding new version for {} {}, valid from {} to {}",
+                                EntityT::name(), self.entity_id, print_version.valid_from,
+                                print_version.valid_until.unwrap());
                         // Yield and advance time
                         return version;
                     } else {
-                        info!("Not yielding version for {} {}, valid from {}",
-                                EntityT::name(), self.entity_id, self.current_version_valid_from);
+                        info!("Not yielding version for {} {} that ends at {} because it's before the requested start time",
+                                EntityT::name(), self.entity_id, next_event.time);
                     }
                 }
             }
         }
 
         None
+    }
+}
+
+impl<'conn, 'state, EntityT: Entity> VersionsIter<'conn, 'state, EntityT> {
+    pub fn current_entity(&self) -> &EntityT {
+        &self.current_version
     }
 }
 

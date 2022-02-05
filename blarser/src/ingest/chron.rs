@@ -327,10 +327,9 @@ fn find_placement_typed<'a, EntityT>(state: &StateInterface, this_update: &Inser
     let mut versions = state.versions::<EntityT>(this_update.entity_id,
                                                  this_update.earliest_time,
                                                  this_update.latest_time);
-    let first_version = versions.next()
-        .expect("Couldn't get any version for entity");
     let expected_entity = EntityT::new(this_update.data.clone());
-    let starting_conflicts = first_version.entity.get_conflicts(&expected_entity);
+    // Before calling next(), current_entity() returns the previous resolved version
+    let starting_conflicts = versions.current_entity().get_conflicts(&expected_entity);
 
     let (oks, fails): (Vec<_>, Vec<_>) = versions
         .map(|version| {
