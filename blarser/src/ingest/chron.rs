@@ -281,10 +281,21 @@ async fn do_ingest(ingest: IngestState, mut update: InsertChronUpdate) -> (DateT
                 info!("Inserting unresolved {} update", update.entity_type);
             }
 
-            insert_into(crate::schema::chron_updates::dsl::chron_updates).values(update).execute(c)
+            // Copy these out before moving update
+            let entity_type = update.entity_type;
+            let entity_id = update.entity_id;
+            let perceived_at = update.perceived_at;
+            let earliest_time = update.earliest_time;
 
-            // TODO: If the previous update's span overlaps this update's span, shrink it. Then, if
-            //  the previous update is unresolved, try resolving it again.
+            insert_into(crate::schema::chron_updates::dsl::chron_updates).values(update).execute(c)?;
+
+            let should_re_resolve = state.bound_previous_update(
+                entity_type, entity_id, perceived_at, earliest_time);
+            if let Some(_re_resolve_id) = should_re_resolve {
+                todo!();
+            }
+
+            Ok::<_, diesel::result::Error>(())
         })
     }).await.expect("Database error processing ingest");
 

@@ -87,7 +87,8 @@ impl<'conn, 'state, EntityT: Entity> Iterator for VersionsIter<'conn, 'state, En
             } else {
                 // There's no more events!
                 self.stop = true;
-                info!("Yielding last version, valid from {}", self.current_version_valid_from);
+                info!("Yielding last version for {} {}, valid from {}",
+                    EntityT::name(), self.entity_id, self.current_version_valid_from);
                 return Some(EntityVersion {
                     valid_from: self.current_version_valid_from,
                     valid_until: None,
@@ -121,13 +122,13 @@ impl<'conn, 'state, EntityT: Entity> Iterator for VersionsIter<'conn, 'state, En
                     self.current_version_valid_from = next_event.time;
                     process_time = next_event.time;
                     if version.is_some() {
-                        info!("Yielding new version, valid from {} to {}",
-                        self.current_version_valid_from, next_event.time);
+                        info!("Yielding new version for {} {}, valid from {}",
+                                EntityT::name(), self.entity_id, self.current_version_valid_from);
                         // Yield and advance time
                         return version;
                     } else {
-                        info!("Not yielding new version, valid from {} to {}",
-                                self.current_version_valid_from, next_event.time);
+                        info!("Not yielding version for {} {}, valid from {}",
+                                EntityT::name(), self.entity_id, self.current_version_valid_from);
                     }
                 }
             }
@@ -143,6 +144,7 @@ impl<'conn> StateInterface<'conn> {
                                                       -> VersionsIter<'conn, 'state, EntityT> {
         info!("Getting {} {} between {} and {}", EntityT::name(), entity_id, start_time, end_time);
         let (entity, entity_start_time): (EntityT, _) = self.last_resolved_entity(entity_id, start_time);
+        info!("Most recent resolved entity is at {}", entity_start_time);
         let updates = (
             Box::new(self.version_updates(entity_id, start_time, end_time))
                 as Box<(dyn Iterator<Item=(chrono::DateTime<Utc>, EntityT)> + 'state)>
@@ -275,6 +277,46 @@ impl<'conn> StateInterface<'conn> {
             .expect("Expected exactly one response from query")
     }
 
+    pub fn bound_previous_update(&self, entity_type: &str, entity_id: Uuid, perceived_before: DateTime<Utc>, new_latest_time: DateTime<Utc>) -> Option<i32> {
+        use crate::schema::chron_updates::dsl;
+
+        // TODO Surely there should be a way to do this in one SQL query
+        let target = dsl::chron_updates
+            .select(dsl::id)
+            .filter(dsl::ingest_id.eq(self.ingest_id))
+            .filter(dsl::entity_type.eq(entity_type))
+            .filter(dsl::entity_id.eq(entity_id))
+            .filter(dsl::perceived_at.le(perceived_before))
+            // Only do the update if the new latest time is more restrictive
+            .filter(dsl::latest_time.gt(new_latest_time))
+            // Only update the latest row that fulfills the other filters
+            .order(dsl::perceived_at.desc())
+            .limit(1)
+            .get_result::<i32>(*self.conn)
+            .optional()
+            .expect("Error finding previous update");
+
+        if let Some(update_id) = target {
+            let is_resolved = diesel::update(dsl::chron_updates)
+                .filter(dsl::id.eq(update_id))
+                .set(dsl::latest_time.eq(new_latest_time))
+                .returning(dsl::resolved)
+                .get_result::<bool>(*self.conn)
+                .expect("Error updating bound of previous update");
+
+            info!("Updated bound for previous update");
+            if is_resolved {
+                None
+            } else {
+                Some(update_id)
+            }
+        } else {
+            info!("Bound for previous update did not overlap this update");
+            // If we didn't update any times, we shouldn't try to re-resolve previous updates
+            None
+        }
+    }
+
     pub fn feed_events_for_entity(&self, entity_type: &str, entity_id: Uuid, from_time: DateTime<Utc>, to_time: DateTime<Utc>) -> Vec<EventuallyEvent> {
         use crate::schema::feed_events::dsl as feed;
         use crate::schema::feed_event_changes::dsl as changes;
@@ -282,8 +324,12 @@ impl<'conn> StateInterface<'conn> {
             .inner_join(feed::feed_events)
             .select(feed::data)
             .filter(feed::ingest_id.eq(self.ingest_id))
-            .filter(feed::created_at.ge(from_time))
-            .filter(feed::created_at.lt(to_time))
+            // Needs to *exclude* events at from_time, because those will already be applied to an
+            // entity that's valid_from this from_time, and *include* events at to_time for the
+            // analogous reason. This is sort of the opposite of how updates work, so it is
+            // confusing. It's probably some sort of fencepost problem.
+            .filter(feed::created_at.gt(from_time))
+            .filter(feed::created_at.le(to_time))
             .filter(changes::entity_type.eq(entity_type))
             .filter(changes::entity_id.eq(entity_id).or(changes::entity_id.is_null()))
             .load::<serde_json::Value>(*self.conn)
