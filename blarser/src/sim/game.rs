@@ -257,6 +257,7 @@ impl Game {
             EventType::Hit => self.hit(event),
             EventType::HomeRun => self.home_run(event),
             EventType::Snowflakes => self.snowflakes(event, state),
+            EventType::StolenBase => self.stolen_base(event, state),
             other => {
                 panic!("{:?} event does not apply to Game", other)
             }
@@ -565,7 +566,12 @@ impl Game {
 
     fn get_baserunner_with_name(&self, expected_name: &str, base_plus_one: Base) -> usize {
         self.get_baserunner_with_property(expected_name, base_plus_one, &self.base_runner_names)
-            .expect("Couldn't find baserunner with specified on specified base")
+            .expect("Couldn't find baserunner with specified name on specified base")
+    }
+
+    fn get_baserunner_with_id(&self, expected_id: &Uuid, base_plus_one: Base) -> usize {
+        self.get_baserunner_with_property(expected_id, base_plus_one, &self.base_runners)
+            .expect("Couldn't find baserunner with specified id on specified base")
     }
 
     fn get_baserunner_with_property<U, T: ?Sized + std::cmp::PartialEq<U>>(
@@ -694,7 +700,6 @@ impl Game {
     }
 
     fn snowflakes(&mut self, event: &EventuallyEvent, state: &StateInterface) -> FeedEventChangeResult {
-
         let (snow_event, _) = event.metadata.siblings.split_first()
             .expect("Snowflakes event is missing metadata.siblings");
 
@@ -733,6 +738,45 @@ impl Game {
         FeedEventChangeResult::Ok
     }
 
+    fn stolen_base(&mut self, event: &EventuallyEvent, state: &StateInterface) -> FeedEventChangeResult {
+        let thief_id = event_utils::get_one_id(&event.player_tags, "playerTags");
+        let thief: Player = state.entity(*thief_id, event.created);
+
+        let steal = parse::parse_stolen_base(&thief.name, &event.description)
+            .expect("Error parsing StolenBase description");
+
+        match steal {
+            parse::BaseSteal::Steal(base) => {
+                self.apply_successful_steal(event, thief, base)
+            }
+            parse::BaseSteal::CaughtStealing(base) => {
+                self.apply_caught_stealing(thief, base)
+            }
+        }
+    }
+
+    fn apply_successful_steal(&mut self, event: &EventuallyEvent, thief: Player, base: Base) -> FeedEventChangeResult {
+        let baserunner_index = self.get_baserunner_with_id(&thief.id, base);
+        self.bases_occupied[baserunner_index] += 1;
+
+        self.game_event(event);
+
+        FeedEventChangeResult::Ok
+    }
+
+    fn apply_caught_stealing(&mut self, thief: Player, base: Base) -> FeedEventChangeResult {
+        let baserunner_index = self.get_baserunner_with_id(&thief.id, base);
+        self.remove_base_runner(baserunner_index);
+
+        if self.team_at_bat().outs == 3 {
+            self.end_at_bat();
+            // Weird thing the game does when the inning ends but the PA doesn't
+            *self.team_at_bat().team_batter_count.as_mut()
+                .expect("Team batter count must not be null during a CaughtStealing event") -= 1;
+        }
+
+        FeedEventChangeResult::Ok
+    }
 }
 
 fn plural(n: f32) -> &'static str {

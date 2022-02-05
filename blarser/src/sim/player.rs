@@ -5,6 +5,7 @@ use partial_information::{Ranged, PartialInformationCompare, MaybeKnown};
 use partial_information_derive::PartialInformationCompare;
 
 use crate::api::{EventType, EventuallyEvent};
+use crate::event_utils;
 use crate::sim::{Entity, FeedEventChangeResult};
 use crate::state::{StateInterface, GenericEvent, GenericEventType};
 
@@ -101,6 +102,12 @@ impl Entity for Player {
 impl Player {
     fn apply_feed_event(&mut self, event: &EventuallyEvent) -> FeedEventChangeResult {
         match event.r#type {
+            EventType::Hit | EventType::HomeRun => {
+                assert_eq!(&self.id, event_utils::get_one_id(&event.player_tags, "playerTags"),
+                           "Can't apply Hit/HomeRun event to this player: Unexpected ID");
+                self.consecutive_hits += 1;
+                FeedEventChangeResult::Ok
+            }
             EventType::FlyOut => {
                 self.fielding_out(event, "flyout")
             }

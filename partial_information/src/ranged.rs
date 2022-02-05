@@ -64,6 +64,37 @@ impl<UnderlyingType> ops::AddAssign<Ranged<UnderlyingType>> for Ranged<Underlyin
     }
 }
 
+
+// This requires Copy for simplicity of implementation, you could make it work without Copy
+impl<UnderlyingType> ops::Add<UnderlyingType> for Ranged<UnderlyingType>
+    where UnderlyingType: ops::Add<UnderlyingType, Output=UnderlyingType> + Copy + Debug + PartialOrd {
+    type Output = Ranged<UnderlyingType>;
+
+    fn add(self, rhs: UnderlyingType) -> Ranged<UnderlyingType> {
+        match self {
+            Ranged::Known(val) => { Ranged::Known(val + rhs) }
+            Ranged::Range(a, b) => {
+                Ranged::Range(a + rhs, b + rhs)
+            }
+        }
+    }
+}
+
+impl<UnderlyingType> ops::AddAssign<UnderlyingType> for Ranged<UnderlyingType>
+    where UnderlyingType: ops::AddAssign<UnderlyingType> + Copy + Debug + PartialOrd {
+    fn add_assign(&mut self, rhs: UnderlyingType) {
+        match self {
+            Ranged::Known(val) => {
+                *val += rhs;
+            }
+            Ranged::Range(a, b) => {
+                *a += rhs;
+                *b += rhs;
+            }
+        }
+    }
+}
+
 impl<T> PartialInformationFieldCompare for Ranged<T>
     where T: Clone + Debug + PartialOrd {
     fn get_conflicts(field_path: String, expected: &Self, actual: &Self) -> Vec<String> {

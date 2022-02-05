@@ -153,11 +153,11 @@ impl<'conn> StateInterface<'conn> {
         let (entity, entity_start_time): (EntityT, _) = self.last_resolved_entity(entity_id, start_time);
         info!("Most recent resolved entity is at {}", entity_start_time);
         let updates = (
-            Box::new(self.version_updates(entity_id, start_time, end_time))
+            Box::new(self.version_updates(entity_id, entity_start_time, end_time))
                 as Box<(dyn Iterator<Item=(chrono::DateTime<Utc>, EntityT)> + 'state)>
         ).peekable();
         let feed_events = (
-            Box::new(self.feed_events_for_entity(EntityT::name(), entity_id, start_time, end_time).into_iter())
+            Box::new(self.feed_events_for_entity(EntityT::name(), entity_id, entity_start_time, end_time).into_iter())
                 as Box<(dyn Iterator<Item=EventuallyEvent> + 'state)>
         ).peekable();
 
