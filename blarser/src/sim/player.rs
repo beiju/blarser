@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use uuid::Uuid;
 use partial_information::{Ranged, PartialInformationCompare, MaybeKnown};
@@ -15,7 +16,7 @@ pub struct Item {}
 #[serde(deny_unknown_fields)]
 pub struct PlayerState {}
 
-#[derive(Clone, Deserialize, PartialInformationCompare)]
+#[derive(Clone, Debug, Deserialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
@@ -81,6 +82,10 @@ pub struct Player {
 impl Entity for Player {
     fn name() -> &'static str {
         "player"
+    }
+
+    fn next_timed_event(&self, _from_time: DateTime<Utc>, _to_time: DateTime<Utc>, _state: &StateInterface) -> Option<GenericEvent> {
+        None
     }
 
     fn apply_event(&mut self, event: &GenericEvent, _state: &StateInterface) -> FeedEventChangeResult {

@@ -9,11 +9,12 @@ use partial_information_derive::PartialInformationCompare;
 
 use crate::api::{EventType, EventuallyEvent};
 use crate::{api, event_utils};
-use crate::sim::{Entity, FeedEventChangeResult, parse, Player, Team};
+use crate::sim::{Entity, FeedEventChangeResult, parse, Player, Sim, Team};
+use crate::sim::entity::EarliestEvent;
 use crate::sim::parse::Base;
 use crate::state::{StateInterface, GenericEvent, GenericEventType};
 
-#[derive(Clone, Deserialize, PartialInformationCompare)]
+#[derive(Clone, Debug, Deserialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
@@ -28,12 +29,6 @@ pub struct GameState {
 pub struct UpdateFullMetadata {
     r#mod: Option<String>,
 
-}
-
-impl UpdateFullMetadata {
-    pub fn any_some(&self) -> bool {
-        self.r#mod.is_some()
-    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialInformationCompare)]
@@ -59,7 +54,7 @@ pub struct UpdateFull {
     description: String,
 }
 
-#[derive(Clone, Deserialize, PartialInformationCompare)]
+#[derive(Clone, Debug, Deserialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "PascalCase")] // it will be camelCase after being prefixed with "home"/"away"
 #[allow(dead_code)]
@@ -86,7 +81,7 @@ pub struct GameByTeam {
     team_secondary_color: String,
 }
 
-#[derive(Clone, Deserialize, PartialInformationCompare)]
+#[derive(Clone, Debug, Deserialize, PartialInformationCompare)]
 // Can't use deny_unknown_fields here because of the prefixed subobjects
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
@@ -162,6 +157,21 @@ with_prefix!(prefix_away "away");
 impl Entity for Game {
     fn name() -> &'static str {
         "game"
+    }
+
+    fn next_timed_event(&self, from_time: DateTime<Utc>, to_time: DateTime<Utc>, state: &StateInterface) -> Option<GenericEvent> {
+        let mut earliest = EarliestEvent::new();
+
+        let sim: Sim = state.get_sim(from_time);
+        if from_time < sim.earlseason_date && sim.earlseason_date < to_time  {
+            earliest.push(GenericEvent {
+                time: sim.earlseason_date,
+                event_type: GenericEventType::EarlseasonStart,
+            })
+        }
+
+        earliest.into_inner()
+
     }
 
     fn apply_event(&mut self, event: &GenericEvent, state: &StateInterface) -> FeedEventChangeResult {

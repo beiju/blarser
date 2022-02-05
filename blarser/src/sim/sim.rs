@@ -5,7 +5,8 @@ use partial_information::PartialInformationCompare;
 use partial_information_derive::PartialInformationCompare;
 
 use crate::sim::{Entity, FeedEventChangeResult};
-use crate::state::{StateInterface, GenericEvent, GenericEventType};
+use crate::sim::entity::EarliestEvent;
+use crate::state::{GenericEvent, GenericEventType, StateInterface};
 
 #[derive(Clone, Debug, Deserialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]
@@ -57,6 +58,19 @@ pub struct Sim {
 impl Entity for Sim {
     fn name() -> &'static str {
         "sim"
+    }
+
+    fn next_timed_event(&self, from_time: DateTime<Utc>, to_time: DateTime<Utc>, _state: &StateInterface) -> Option<GenericEvent> {
+        let mut earliest = EarliestEvent::new();
+
+        if from_time < self.earlseason_date && self.earlseason_date < to_time  {
+            earliest.push(GenericEvent {
+                time: self.earlseason_date,
+                event_type: GenericEventType::EarlseasonStart,
+            })
+        }
+
+        earliest.into_inner()
     }
 
     fn apply_event(&mut self, event: &GenericEvent, _state: &StateInterface) -> FeedEventChangeResult {

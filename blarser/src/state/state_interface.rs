@@ -1,4 +1,5 @@
-use std::cmp::{max, min};
+use std::fmt::{Debug, Formatter};
+use std::iter::Peekable;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 use diesel::{
@@ -7,9 +8,9 @@ use diesel::{
     QueryDsl,
 };
 use itertools::Itertools;
-use rocket::{info};
+use rocket::{info, warn};
 
-use crate::sim::{self, Entity, FeedEventChangeResult};
+use crate::sim::{Entity, FeedEventChangeResult, Sim};
 use crate::api::EventuallyEvent;
 use crate::state::{GenericEvent, GenericEventType};
 
@@ -20,47 +21,154 @@ pub struct StateInterface<'conn> {
     // TODO: Cache parameters
 }
 
-impl StateInterface<'_> {
-    // Inclusive of start time, exclusive of end time
-    pub fn versions<'a, EntityT: Entity + 'a>(&'a self, entity_id: Uuid, start_time: DateTime<Utc>, end_time: DateTime<Utc>)
-                                              -> impl Iterator<Item=(DateTime<Utc>, EntityT)> + 'a {
-        let start_entity: EntityT = self.entity(entity_id, start_time);
-        let mut updates = self.version_updates(entity_id, start_time, end_time).peekable();
-        self.events_for_entity(EntityT::name(), entity_id, start_time, end_time).into_iter()
-            .scan(start_entity, move |entity, event| {
-                // If there's an update before this event, replace the stored entity with it
-                while let Some((next_update_time, _)) = updates.peek() {
-                    if next_update_time < &event.time {
-                        *entity = updates.next().unwrap().1;
+#[derive(Debug)]
+pub struct EntityVersion<EntityT: Entity> {
+    pub valid_from: DateTime<Utc>,
+    pub valid_until: Option<DateTime<Utc>>,
+    pub entity: EntityT,
+    pub from_event_debug: String,
+}
+
+pub struct VersionsIter<'conn, 'state, EntityT: Entity> {
+    state: &'state StateInterface<'conn>,
+    current_version: EntityT,
+    current_version_valid_from: DateTime<Utc>,
+    last_applied_event_debug: String,
+
+    updates: Peekable<Box<dyn Iterator<Item=(DateTime<Utc>, EntityT)> + 'state>>,
+    feed_events: Peekable<Box<dyn Iterator<Item=EventuallyEvent> + 'state>>,
+    start_time: DateTime<Utc>,
+    stop_time: DateTime<Utc>,
+
+    stop: bool,
+
+    // Only for debug printouts
+    entity_id: Uuid,
+}
+
+impl<'conn, 'state, EntityT: Entity> Debug for VersionsIter<'conn, 'state, EntityT> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str("VersionsIter")
+    }
+}
+
+
+impl<'conn, 'state, EntityT: Entity> Iterator for VersionsIter<'conn, 'state, EntityT> {
+    type Item = EntityVersion<EntityT>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        info!("Getting next version for {} {}", EntityT::name(), self.entity_id);
+        let mut process_time = self.current_version_valid_from;
+        while !self.stop {
+            let next_update_time = self.updates.peek().map(|(time, _)| *time);
+            let next_feed_event_time = self.feed_events.peek().map(|event| event.created);
+            let next_timed_event = self.current_version.next_timed_event(process_time, self.stop_time, self.state);
+
+            if let Some(update_time) = next_update_time {
+                let before_feed_event = next_feed_event_time.as_ref().map(|t| update_time < *t).unwrap_or(true);
+                let before_timed_event = next_timed_event.as_ref().map(|event| update_time < event.time).unwrap_or(true);
+
+                if before_feed_event && before_timed_event {
+                    info!("Replacing computed version with observed version");
+                    // Got an update to the current version. Replace stored entity with it
+                    let (_, update) = self.updates.next().unwrap();
+                    self.current_version = update;
+                }
+            }
+
+            let next_event = if let Some(feed_event_time) = next_feed_event_time && next_timed_event.as_ref().map(|event| feed_event_time < event.time).unwrap_or(true) {
+                let event = self.feed_events.next().unwrap();
+                GenericEvent {
+                    time: event.created,
+                    event_type: GenericEventType::FeedEvent(event),
+                }
+            } else if let Some(event) = next_timed_event {
+                event
+            } else {
+                // There's no more events!
+                self.stop = true;
+                info!("Yielding last version, valid from {}", self.current_version_valid_from);
+                return Some(EntityVersion {
+                    valid_from: self.current_version_valid_from,
+                    valid_until: None,
+                    entity: self.current_version.clone(),
+                    from_event_debug: std::mem::take(&mut self.last_applied_event_debug),
+                });
+            };
+
+            // Version represents the previous version, so need to clone the entity before applying
+            // the event
+            let version = if next_event.time >= self.start_time {
+                Some(EntityVersion {
+                    valid_from: self.current_version_valid_from,
+                    valid_until: Some(next_event.time),
+                    entity: self.current_version.clone(),
+                    from_event_debug: std::mem::take(&mut self.last_applied_event_debug),
+                })
+            } else {
+                None
+            };
+
+            self.last_applied_event_debug = format!("{:?}", next_event);
+            info!("Applying {} event", self.last_applied_event_debug);
+            match self.current_version.apply_event(&next_event, self.state) {
+                FeedEventChangeResult::DidNotApply => {
+                    info!("Event did not apply; continuing");
+                    // Just advance process time
+                    process_time = next_event.time;
+                }
+                FeedEventChangeResult::Ok => {
+                    self.current_version_valid_from = next_event.time;
+                    process_time = next_event.time;
+                    if version.is_some() {
+                        info!("Yielding new version, valid from {} to {}",
+                        self.current_version_valid_from, next_event.time);
+                        // Yield and advance time
+                        return version;
+                    } else {
+                        info!("Not yielding new version, valid from {} to {}",
+                                self.current_version_valid_from, next_event.time);
                     }
                 }
-
-                // Apply the event, and yield the modified entity if the event was applicable.
-                // The double-wrapping is because scan() uses the outer layer to stop iteration.
-                match entity.apply_event(&event, self) {
-                    FeedEventChangeResult::Ok => Some(Some((event.time, entity.clone()))),
-                    FeedEventChangeResult::DidNotApply => Some(None)
-                }
-            })
-            .flatten()
-    }
-
-    pub fn observed_versions<EntityT: Entity>(&self, entity_id: Uuid, start_time: DateTime<Utc>, end_time: DateTime<Utc>)
-                                              -> Vec<(DateTime<Utc>, EntityT)> {
-        let mut updates = self.version_updates(entity_id, start_time, end_time).collect_vec();
-        if let Some((earliest_time, _)) = updates.first() {
-            if earliest_time > &start_time {
-                // Then there is no at the beginning, just return the vec
-                return updates;
             }
         }
 
-        // If the function hasn't returned yet, that means the version at start_time isn't being
-        // fetched.
-        let start_entity: EntityT = self.last_resolved_entity(entity_id, start_time).0;
-        updates.insert(0, (start_time, start_entity));
+        None
+    }
+}
 
-        updates
+impl<'conn> StateInterface<'conn> {
+    // Inclusive of start time, exclusive of end time
+    pub fn versions<'state, EntityT: Entity + 'state>(&'state self, entity_id: Uuid, start_time: DateTime<Utc>, end_time: DateTime<Utc>)
+                                                      -> VersionsIter<'conn, 'state, EntityT> {
+        info!("Getting {} {} between {} and {}", EntityT::name(), entity_id, start_time, end_time);
+        let (entity, entity_start_time): (EntityT, _) = self.last_resolved_entity(entity_id, start_time);
+        let updates = (
+            Box::new(self.version_updates(entity_id, start_time, end_time))
+                as Box<(dyn Iterator<Item=(chrono::DateTime<Utc>, EntityT)> + 'state)>
+        ).peekable();
+        let feed_events = (
+            Box::new(self.feed_events_for_entity(EntityT::name(), entity_id, start_time, end_time).into_iter())
+                as Box<(dyn Iterator<Item=EventuallyEvent> + 'state)>
+        ).peekable();
+
+        VersionsIter {
+            state: self,
+            current_version: entity,
+            current_version_valid_from: entity_start_time,
+            last_applied_event_debug: "(unknown)".to_string(),
+            updates,
+            feed_events,
+            start_time,
+            stop_time: end_time,
+            stop: false,
+            entity_id,
+        }
+    }
+
+    pub fn get_sim(&self, at_time: DateTime<Utc>) -> Sim {
+        // TODO Add caching
+        self.entity(Uuid::nil(), at_time)
     }
 
     fn version_updates<EntityT: Entity>(&self, entity_id: Uuid, start_time: DateTime<Utc>, end_time: DateTime<Utc>) -> impl Iterator<Item=(DateTime<Utc>, EntityT)> {
@@ -89,36 +197,60 @@ impl StateInterface<'_> {
     }
 
     pub fn entity<EntityT: Entity>(&self, entity_id: Uuid, at_time: DateTime<Utc>) -> EntityT {
-        info!("Computing {} {} at {}", EntityT::name(), entity_id, at_time);
-        let (mut entity, event_start_time): (EntityT, _) = self.last_resolved_entity(entity_id, at_time);
-        let events = self.events_for_entity(EntityT::name(), entity_id, event_start_time, at_time);
+        info!("Getting {} {} at {}", EntityT::name(), entity_id, at_time);
+        let version = self.versions(entity_id, at_time, at_time).exactly_one()
+            .expect("Expected exactly one version but got zero or multiple");
 
-        for event in events {
-            info!("    Applying {:?}", event.event_type);
-            entity.apply_event(&event, self);
-        }
+        info!("{}, {}", version.valid_from, at_time);
+        assert!(version.valid_from <= at_time,
+                "Returned version does not become valid until after the requested time");
 
-        entity
+        assert!(version.valid_until.map(|valid_until| at_time < valid_until).unwrap_or(true),
+                "Returned version is no longer valid at the requested time");
+
+        version.entity
     }
 
     // Inclusive of start time, exclusive of end time
-    pub fn last_resolved_entity<EntityT: Entity>(&self, entity_id: Uuid, at_or_before: DateTime<Utc>) -> (EntityT, DateTime<Utc>) {
+    fn last_resolved_entity<EntityT: Entity>(&self, entity_id: Uuid, at_or_before: DateTime<Utc>) -> (EntityT, DateTime<Utc>) {
         use crate::schema::chron_updates::dsl;
-        let (json, time) = dsl::chron_updates
+
+        let last_known = dsl::chron_updates
             .select((dsl::data, dsl::latest_time))
             .filter(dsl::ingest_id.eq(self.ingest_id))
             .filter(dsl::entity_type.eq(EntityT::name()))
             .filter(dsl::entity_id.eq(entity_id))
             .filter(dsl::resolved.eq(true))
-            // This has to be le (not lt)
+            // This has to be le (not lt) and has to be latest_time
             .filter(dsl::latest_time.le(at_or_before))
             .order(dsl::latest_time.desc())
             .limit(1)
             .load::<(serde_json::Value, DateTime<Utc>)>(*self.conn)
             .expect("Error querying last known version of entity")
-            .into_iter()
-            .exactly_one()
-            .expect("Expected exactly one response from query");
+            .into_iter().next();
+
+        let (json, time) = match last_known {
+            Some((json, time)) => (json, time),
+            None => {
+                warn!("Didn't find any version of entity after {}, falling back to first version", at_or_before);
+                // Fall back to the first version of the entity, and lie about its time
+                let json = dsl::chron_updates
+                    .select(dsl::data)
+                    .filter(dsl::ingest_id.eq(self.ingest_id))
+                    .filter(dsl::entity_type.eq(EntityT::name()))
+                    .filter(dsl::entity_id.eq(entity_id))
+                    .filter(dsl::resolved.eq(true))
+                    .order(dsl::earliest_time.asc())
+                    .limit(1)
+                    .load::<serde_json::Value>(*self.conn)
+                    .expect("Error querying first known version of entity")
+                    .into_iter()
+                    .exactly_one()
+                    .expect("Couldn't get first known version of entity");
+
+                (json, at_or_before)
+            }
+        };
 
         let entity = serde_json::from_value(json)
             .expect("Error converting stored JSON into entity");
@@ -129,7 +261,7 @@ impl StateInterface<'_> {
     pub fn previous_update_earliest_time(&self, entity_type: &str, entity_id: Uuid, perceived_before: DateTime<Utc>) -> DateTime<Utc> {
         use crate::schema::chron_updates::dsl;
         dsl::chron_updates
-            .select((dsl::earliest_time))
+            .select(dsl::earliest_time)
             .filter(dsl::ingest_id.eq(self.ingest_id))
             .filter(dsl::entity_type.eq(entity_type))
             .filter(dsl::entity_id.eq(entity_id))
@@ -142,7 +274,6 @@ impl StateInterface<'_> {
             .exactly_one()
             .expect("Expected exactly one response from query")
     }
-
 
     pub fn feed_events_for_entity(&self, entity_type: &str, entity_id: Uuid, from_time: DateTime<Utc>, to_time: DateTime<Utc>) -> Vec<EventuallyEvent> {
         use crate::schema::feed_events::dsl as feed;
@@ -162,43 +293,6 @@ impl StateInterface<'_> {
                 serde_json::from_value(json)
                     .expect("Couldn't parse stored Feed event")
             })
-            .collect()
-    }
-
-    fn timed_events_for_entity(&self, entity_type: &str, _entity_id: Uuid, from_time: DateTime<Utc>, to_time: DateTime<Utc>) -> impl Iterator<Item=GenericEvent> {
-        // observed_versions instead of versions to break an infinite recursion
-        let mut versions = self.observed_versions::<sim::Sim>(Uuid::nil(), from_time, to_time).into_iter().peekable();
-        let mut events = Vec::new();
-        while let Some((entity_start_date, sim_)) = versions.next() {
-            let entity_end_date = versions.peek().map(|(date, _)| date);
-
-            // Simultaneously check if the time is in the range that the caller requested and the range
-            // for which this sim_ is valid
-            let start_date = max(from_time, entity_start_date);
-            let end_date = match entity_end_date {
-                Some(entity_end_date) => min(to_time, *entity_end_date),
-                None => to_time,
-            };
-
-            if start_date < sim_.earlseason_date && sim_.earlseason_date < end_date &&
-                (entity_type == "sim" || entity_type == "game") {
-                events.push(GenericEvent {
-                    time: sim_.earlseason_date,
-                    event_type: GenericEventType::EarlseasonStart,
-                });
-            }
-        }
-
-        events.into_iter().sorted_by_key(|e| e.time)
-    }
-
-
-    pub fn events_for_entity(&self, entity_type: &str, entity_id: Uuid, from_time: DateTime<Utc>, to_time: DateTime<Utc>) -> Vec<GenericEvent> {
-        let feed_events = self.feed_events_for_entity(entity_type, entity_id, from_time, to_time);
-        feed_events.into_iter()
-            .map(|event| GenericEvent { time: event.created, event_type: GenericEventType::FeedEvent(event) })
-            .chain(self.timed_events_for_entity(entity_type, entity_id, from_time, to_time))
-            .sorted_by_key(|item| item.time)
             .collect()
     }
 }

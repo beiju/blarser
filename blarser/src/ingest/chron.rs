@@ -3,17 +3,17 @@ use std::collections::BinaryHeap;
 use std::iter;
 use std::pin::Pin;
 use chrono::{DateTime, Duration, NaiveDateTime, Utc};
-use diesel::{self, Connection, ExpressionMethods, insert_into, PgConnection, RunQueryDsl};
+use diesel::{self, Connection, insert_into, RunQueryDsl};
 use futures::{stream, Stream, StreamExt};
-use rocket::{info, State};
+use rocket::{info};
 use uuid::Uuid;
 use itertools::{Itertools};
 use crate::api::{chronicler, ChroniclerItem};
 use crate::ingest::task::IngestState;
 
-use crate::sim::{self, FeedEventChangeResult};
+use crate::sim;
 use crate::schema::*;
-use crate::state::StateInterface;
+use crate::state::{StateInterface};
 
 
 #[derive(Queryable, PartialEq, Debug)]
@@ -270,10 +270,11 @@ async fn do_ingest(ingest: IngestState, mut update: InsertChronUpdate) -> (DateT
         }
 
         state.conn.transaction(|| {
-            if let Some(placement) = find_placement(&state, &update) {
-                // TODO Do I need to do min and max? Is span_start and span_end sufficient?
-                update.earliest_time = max(update.earliest_time, placement.span_start);
-                update.latest_time = min(update.latest_time, placement.span_end);
+            if let Some((start, maybe_end)) = find_placement(&state, &update) {
+                update.earliest_time = max(update.earliest_time, start);
+                if let Some(end) = maybe_end {
+                    update.latest_time = min(update.latest_time, end);
+                }
                 update.resolved = true;
                 info!("Inserting resolved {} update", update.entity_type);
             } else {
@@ -290,7 +291,7 @@ async fn do_ingest(ingest: IngestState, mut update: InsertChronUpdate) -> (DateT
     (time, ingest)
 }
 
-fn find_placement(state: &StateInterface, this_update: &InsertChronUpdate) -> Option<Placement> {
+fn find_placement(state: &StateInterface, this_update: &InsertChronUpdate) -> Placement {
     match this_update.entity_type {
         "player" => find_placement_typed::<sim::Player>(state, this_update),
         "sim" => find_placement_typed::<sim::Sim>(state, this_update),
@@ -299,82 +300,57 @@ fn find_placement(state: &StateInterface, this_update: &InsertChronUpdate) -> Op
     }
 }
 
-fn to_bulleted_list(vec: Vec<String>) -> Option<String> {
-    if vec.is_empty() {
-        return None;
-    }
-
-    Some(format!("- {}", vec.join("\n- ")))
+fn to_bulleted_list(vec: Vec<String>) -> String {
+    format!("- {}", vec.join("\n- "))
 }
 
-struct Placement {
-    span_start: DateTime<Utc>,
-    span_end: DateTime<Utc>,
-    conflicts: Vec<String>,
-    after_event: String,
-}
+type Placement = Option<(DateTime<Utc>, Option<DateTime<Utc>>)>;
 
-fn find_placement_typed<'a, EntityT>(state: &StateInterface, this_update: &InsertChronUpdate) -> Option<Placement>
+fn find_placement_typed<'a, EntityT>(state: &StateInterface, this_update: &InsertChronUpdate) -> Placement
     where EntityT: sim::Entity {
     info!("Trying to place {} {} between {} and {}",
         this_update.entity_type, this_update.entity_id,
         this_update.earliest_time, this_update.latest_time);
 
     info!("Computing entity state at start of range");
-    let mut entity: EntityT = state.entity(this_update.entity_id, this_update.earliest_time);
+    let mut versions = state.versions::<EntityT>(this_update.entity_id,
+                                                 this_update.earliest_time,
+                                                 this_update.latest_time);
+    let first_version = versions.next()
+        .expect("Couldn't get any version for entity");
     let expected_entity = EntityT::new(this_update.data.clone());
-    let starting_conflicts = entity.get_conflicts(&expected_entity);
+    let starting_conflicts = first_version.entity.get_conflicts(&expected_entity);
 
-    let events = state.events_for_entity(this_update.entity_type, this_update.entity_id, this_update.earliest_time, this_update.latest_time);
-    // Each event creates a span, starting at the event time and ending at the next event time (or
-    // this update's latest time, for the last event)
-    let span_ends = events.iter().skip(1).map(|event| event.time).chain(iter::once(this_update.latest_time));
-
-    info!("There are {} potential spans for {} update", events.len(), this_update.entity_type);
-
-    let (oks, fails): (Vec<_>, Vec<_>) = events.iter().zip(span_ends)
-        .scan(this_update.earliest_time, |span_start, (event, span_end)| {
-            info!("Applying {:?} event to {} {}", event.event_type, this_update.entity_type, this_update.entity_id);
-            match entity.apply_event(&event, state) {
-                FeedEventChangeResult::DidNotApply => {
-                    info!("{:?} event did not apply", event.event_type);
-                    None
-                }
-                FeedEventChangeResult::Ok => {
-                    let placement = Placement {
-                        span_start: *span_start,
-                        span_end,
-                        conflicts: entity.get_conflicts(&expected_entity),
-                        after_event: format!("{:?}", event.event_type),
-                    };
-                    *span_start = span_end;
-                    Some(placement)
-                }
-            }
+    let (oks, fails): (Vec<_>, Vec<_>) = versions
+        .map(|version| {
+            let conflicts = version.entity.get_conflicts(&expected_entity);
+            (version, conflicts)
         })
-        .partition(|placement| placement.conflicts.is_empty());
+        .partition(|(_, conflicts)| conflicts.is_empty());
     match (oks.len(), fails.len()) {
         (0, 0) => {
-            match to_bulleted_list(starting_conflicts) {
-                None => {
-                    panic!("Expected two consecutive Chron records for {} {} to differ, but they did not", this_update.entity_type, this_update.entity_id);
-                }
-                Some(conflicts) => {
-                    panic!("{} update differs from previous value and there are no events to explain why:\n{}", this_update.entity_type, conflicts);
-                }
+            if starting_conflicts.is_empty() {
+                panic!("Expected two consecutive Chron records for {} {} to differ, but they did not",
+                       this_update.entity_type, this_update.entity_id);
+            } else {
+                panic!("{} update differs from previous value and there are no events to explain why:\n{}",
+                       this_update.entity_type, to_bulleted_list(starting_conflicts));
             }
         }
         (0, _) => {
-            let placement_reasons = fails.into_iter().map(|placement| {
+            let placement_reasons = fails.into_iter().map(|(version, conflicts)| {
                 format!("Between {:#?} and {:#?}, after event {}:\n{}",
-                        placement.span_start, placement.span_end, placement.after_event,
-                        to_bulleted_list(placement.conflicts).unwrap_or("".to_string()))
+                        version.valid_from,
+                        version.valid_until.map(|t| format!("{:?}", t)).unwrap_or("(unknown)".to_string()),
+                        version.from_event_debug,
+                        to_bulleted_list(conflicts))
             }).join("\n");
             panic!("{} update cannot ever be placed -- no valid placements:\n{}", this_update.entity_type, placement_reasons);
         }
         (1, _) => {
             info!("{} update can be placed", this_update.entity_type);
-            Some(oks.into_iter().exactly_one().ok().unwrap())
+            let placed_version = oks.into_iter().exactly_one().ok().unwrap().0;
+            Some((placed_version.valid_from, placed_version.valid_until))
         }
         (_, _) => {
             info!("{} update cannot currently be placed -- multiple valid placements", this_update.entity_type);

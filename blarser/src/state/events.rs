@@ -9,6 +9,7 @@ pub enum GenericEventType {
     EarlseasonStart,
 }
 
+#[derive(Debug)]
 pub struct GenericEvent {
     pub time: DateTime<Utc>,
     pub event_type: GenericEventType,
