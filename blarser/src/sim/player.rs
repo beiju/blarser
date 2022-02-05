@@ -160,7 +160,7 @@ impl Player {
         self.thwackability += range;
         self.tragicness += range;
 
-        self.baserunning_rating = MaybeKnown::Unknown;
+        self.hitting_rating = MaybeKnown::Unknown;
     }
 
     fn adjust_pitching(&mut self, range: Ranged<f32>) {

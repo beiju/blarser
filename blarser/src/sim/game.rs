@@ -252,6 +252,8 @@ impl Game {
             EventType::Snowflakes => self.snowflakes(event, state),
             EventType::StolenBase => self.stolen_base(event, state),
             EventType::Walk => self.walk(event),
+            EventType::InningEnd => self.inning_end(event),
+            EventType::BatterSkipped => self.batter_skipped(event),
             other => {
                 panic!("{:?} event does not apply to Game", other)
             }
@@ -838,6 +840,21 @@ impl Game {
         self.push_base_runner(batter_id, batter_name, batter_mod, Base::First);
         self.end_at_bat();
         self.game_event(&event);
+
+        FeedEventChangeResult::Ok
+    }
+
+    fn inning_end(&mut self, event: &EventuallyEvent) -> FeedEventChangeResult {
+        self.game_event(&event);
+        self.phase = 2;
+
+        FeedEventChangeResult::Ok
+    }
+
+    fn batter_skipped(&mut self, event: &EventuallyEvent) -> FeedEventChangeResult {
+        self.game_event(event);
+        *self.team_at_bat().team_batter_count.as_mut()
+            .expect("TeamBatterCount must be populated during a game") += 1;
 
         FeedEventChangeResult::Ok
     }
