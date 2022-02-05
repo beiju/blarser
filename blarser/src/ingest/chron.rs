@@ -157,6 +157,7 @@ pub async fn ingest_chron(ingest: IngestState, start_at_time: &'static str) {
 
             ingest.notify_progress.send(update_time)
                 .expect("Error communicating with Eventually ingest");
+            info!("Chron ingest sent progress {}", update_time);
 
             ingest
         }).await;
@@ -234,11 +235,11 @@ fn kmerge_chron_updates<StreamT: Iterator<Item=ChronUpdateStreamPin>>(streams_it
 async fn wait_for_feed_ingest(ingest: &mut IngestState, wait_until_time: DateTime<Utc>) {
     loop {
         let feed_time = *ingest.receive_progress.borrow();
-        if feed_time < wait_until_time {
+        if wait_until_time < feed_time {
             break;
         }
-        info!("Chronicler ingest waiting for Eventually ingest to catch up ({}s)",
-            (wait_until_time - feed_time).num_seconds());
+        info!("Chronicler ingest waiting for Eventually ingest to catch up (at {} and we need {}, difference of {}s)",
+            feed_time, wait_until_time, (wait_until_time - feed_time).num_seconds());
         ingest.receive_progress.changed().await
             .expect("Error communicating with Eventually ingest");
     }

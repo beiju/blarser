@@ -56,19 +56,21 @@ pub async fn ingest_feed(db: IngestState, start_at_time: &'static str) {
         .fold(db, |mut ingest, events| async move {
             let processed_up_to = save_feed_events(&ingest, events).await;
 
+            ingest.notify_progress.send(processed_up_to)
+                .expect("Error communicating with Chronicler ingest");
+            info!("Feed ingest sent progress {}", processed_up_to);
+
             loop {
-                let stop_at = *ingest.receive_progress.borrow() + Duration::minutes(1);
+                let chron_time = *ingest.receive_progress.borrow();
+                let stop_at = chron_time + Duration::minutes(1);
                 if processed_up_to < stop_at {
                     break;
                 }
-                info!("Eventually ingest waiting for Chronicler ingest to catch up ({}s)",
-                    (processed_up_to - stop_at).num_seconds());
+                info!("Eventually ingest waiting for Chronicler ingest to catch up (at {} and we are at {}, {}s ahead)",
+                    chron_time, processed_up_to, (processed_up_to - chron_time).num_seconds());
                 ingest.receive_progress.changed().await
                     .expect("Error communicating with Chronicler ingest");
             }
-
-            ingest.notify_progress.send(processed_up_to)
-                .expect("Error communicating with Chronicler ingest");
 
             ingest
         }).await;

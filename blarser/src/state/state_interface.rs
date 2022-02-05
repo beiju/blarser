@@ -339,6 +339,7 @@ impl<'conn> StateInterface<'conn> {
             .filter(feed::created_at.le(to_time))
             .filter(changes::entity_type.eq(entity_type))
             .filter(changes::entity_id.eq(entity_id).or(changes::entity_id.is_null()))
+            .order(feed::created_at.asc())
             .load::<serde_json::Value>(*self.conn)
             .expect("Error querying feed events that change this entity")
             .into_iter()
