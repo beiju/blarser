@@ -8,6 +8,14 @@ fn change_game(event: &EventuallyEvent) -> (&'static str, Option<Uuid>) {
     ("game", Some(*event_utils::get_one_id(&event.game_tags, "gameTags")))
 }
 
+fn change_team(event: &EventuallyEvent) -> (&'static str, Option<Uuid>) {
+    ("team", Some(*event_utils::get_one_id(&event.team_tags, "teamTags")))
+}
+
+fn change_team_i(event: &EventuallyEvent, i: usize) -> (&'static str, Option<Uuid>) {
+    ("team", Some(event.team_tags[i]))
+}
+
 fn change_player(event: &EventuallyEvent) -> (&'static str, Option<Uuid>) {
     // Sometimes fielding outs don't say what player they're for, which is *very* annoying
     if event.player_tags.is_empty() {
@@ -54,9 +62,10 @@ pub fn changes_for_event(event: &EventuallyEvent) -> Vec<(&'static str, Option<U
         EventType::BatterSkipped => vec![change_game(event)],
         EventType::PeanutFlavorText => vec![change_game(event)],
         EventType::GameEnd => vec![change_game(event)],
-        EventType::WinCollectedRegular => vec![change_game(event),
-                                               ("team", Some(*event_utils::get_one_id(&event.team_tags, "teamTags")))],
-        EventType::GameOver => vec![change_game(event)],
+        EventType::WinCollectedRegular => vec![change_game(event), change_team(event)],
+        EventType::GameOver => vec![change_game(event), ("standings", None), change_team_i(event, 0), change_team_i(event, 1)],
+        EventType::ModExpires => vec![change_player(event)],
+        EventType::PitcherChange => vec![change_game(event), change_team_i(event, 0), change_team_i(event, 1)], // I presume this changes something in team
         unknown_type => {
             error!("Don't know changes for event {:?}", unknown_type);
             todo!()

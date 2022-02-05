@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::iter;
 use chrono::{DateTime, Duration, Utc};
 use itertools::Itertools;
@@ -83,7 +84,7 @@ pub struct GameByTeam {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialInformationCompare)]
-// Can't use deny_unknown_fields here because of the prefixed subobjects
+// Can't use deny_unknown_fields here because of the prefixed sub-objects
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
 pub struct Game {
@@ -249,12 +250,15 @@ impl Game {
             EventType::FlyOut => self.fielding_out(event),
             EventType::Hit => self.hit(event),
             EventType::HomeRun => self.home_run(event),
-            EventType::Snowflakes => self.snowflakes(event, state),
+            EventType::Snowflakes => self.snowflakes(event),
             EventType::StolenBase => self.stolen_base(event, state),
             EventType::Walk => self.walk(event),
             EventType::InningEnd => self.inning_end(event),
             EventType::BatterSkipped => self.batter_skipped(event),
             EventType::PeanutFlavorText => self.peanut_flavor_text(event),
+            EventType::GameEnd => self.game_end(event),
+            EventType::WinCollectedRegular => self.win_collected_regular(event),
+            EventType::GameOver => self.game_over(event),
             other => {
                 panic!("{:?} event does not apply to Game", other)
             }
@@ -438,7 +442,6 @@ impl Game {
             }
             self.home.score = Some(runs_metadata.home_score);
             self.away.score = Some(runs_metadata.away_score);
-
         } else {
             self.score_update = String::new();
             self.score_ledger = String::new();
@@ -669,7 +672,6 @@ impl Game {
                 }
             }
         }
-
     }
 
     fn hit(&mut self, event: &EventuallyEvent) -> FeedEventChangeResult {
@@ -743,7 +745,7 @@ impl Game {
         FeedEventChangeResult::Ok
     }
 
-    fn snowflakes(&mut self, event: &EventuallyEvent, state: &StateInterface) -> FeedEventChangeResult {
+    fn snowflakes(&mut self, event: &EventuallyEvent) -> FeedEventChangeResult {
         let (snow_event, _) = event.metadata.siblings.split_first()
             .expect("Snowflakes event is missing metadata.siblings");
 
@@ -758,11 +760,22 @@ impl Game {
             MaybeKnown::Known(Some(x)) => { MaybeKnown::Known(Some(x + 1)) }
         };
 
+        let frozen_players: HashSet<_> = event.metadata.siblings.iter()
+            .flat_map(|event| {
+                if let Some(serde_json::Value::String(mod_name)) = event.metadata.other.get("mod") {
+                    if mod_name == "FROZEN" {
+                        return Some(event_utils::get_one_id(&event.player_tags, "playerTags"));
+                    }
+                }
+
+                None
+            })
+            .collect();
+
         // The Player entity will take care of adding the Frozen mod, but the Game entity needs to
         // check if the current batter or pitcher just got Frozen
         if let Some(batter_id) = self.team_at_bat().batter {
-            let batter: Player = state.entity(batter_id, event.created);
-            if batter.game_attr.iter().any(|mod_name| mod_name == "FROZEN") {
+            if frozen_players.contains(&batter_id) {
                 self.team_at_bat().batter = None;
                 self.team_at_bat().batter_name = Some("".to_string());
             }
@@ -772,8 +785,7 @@ impl Game {
             let pitcher_id = pitcher_id.known()
                 .expect("Pitcher must be Known in Snowfall event");
 
-            let pitcher: Player = state.entity(*pitcher_id, event.created);
-            if pitcher.game_attr.iter().any(|mod_name| mod_name == "FROZEN") {
+            if frozen_players.contains(pitcher_id) {
                 self.team_at_bat().pitcher = None;
                 self.team_at_bat().pitcher_name = Some("".to_string().into());
             }
@@ -873,6 +885,40 @@ impl Game {
 
     fn peanut_flavor_text(&mut self, event: &EventuallyEvent) -> FeedEventChangeResult {
         self.game_event(event);
+        FeedEventChangeResult::Ok
+    }
+
+    fn game_end(&mut self, event: &EventuallyEvent) -> FeedEventChangeResult {
+        self.phase = 7;
+        self.end_phase = 3;
+
+        self.game_event(event);
+
+        FeedEventChangeResult::Ok
+    }
+
+    fn win_collected_regular(&mut self, event: &EventuallyEvent) -> FeedEventChangeResult {
+        self.end_phase = 4;
+        self.game_event(event);
+
+        FeedEventChangeResult::Ok
+    }
+
+    fn game_over(&mut self, event: &EventuallyEvent) -> FeedEventChangeResult {
+        self.end_phase = 5;
+        self.finalized = true;
+        self.game_complete = true;
+
+        if self.home.score.unwrap() > self.away.score.unwrap() {
+            self.winner = Some(self.home.team);
+            self.loser = Some(self.away.team);
+        } else {
+            self.loser = Some(self.home.team);
+            self.winner = Some(self.away.team);
+        };
+
+        self.game_event(event);
+
         FeedEventChangeResult::Ok
     }
 }
