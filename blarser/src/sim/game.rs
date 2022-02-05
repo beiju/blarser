@@ -1,10 +1,10 @@
 use std::iter;
-use chrono::{DateTime, Utc, Duration};
+use chrono::{DateTime, Duration, Utc};
 use itertools::Itertools;
 use serde::Deserialize;
 use serde_with::with_prefix;
 use uuid::Uuid;
-use partial_information::{PartialInformationCompare, Ranged, MaybeKnown};
+use partial_information::{MaybeKnown, PartialInformationCompare, Ranged};
 use partial_information_derive::PartialInformationCompare;
 
 use crate::api::{EventType, EventuallyEvent};
@@ -12,7 +12,7 @@ use crate::{api, event_utils};
 use crate::sim::{Entity, FeedEventChangeResult, parse, Player, Sim, Team};
 use crate::sim::entity::EarliestEvent;
 use crate::sim::parse::Base;
-use crate::state::{StateInterface, GenericEvent, GenericEventType};
+use crate::state::{GenericEvent, GenericEventType, StateInterface};
 
 #[derive(Clone, Debug, Deserialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]
@@ -254,6 +254,7 @@ impl Game {
             EventType::Walk => self.walk(event),
             EventType::InningEnd => self.inning_end(event),
             EventType::BatterSkipped => self.batter_skipped(event),
+            EventType::PeanutFlavorText => self.peanut_flavor_text(event),
             other => {
                 panic!("{:?} event does not apply to Game", other)
             }
@@ -475,7 +476,7 @@ impl Game {
                        "Batter in GroundOut/Flyout event didn't match batter in game state");
         }
 
-        let (scoring_runners, other_events) = separate_scoring_events(&event.metadata.siblings, &batter_id);
+        let (scoring_runners, other_events) = event_utils::separate_scoring_events(&event.metadata.siblings, &batter_id);
 
         let out = match other_events.len() {
             1 => parse::parse_simple_out(&batter_name, &other_events[0].description)
@@ -485,13 +486,11 @@ impl Game {
             more => panic!("Unexpected fielding out with {} non-score siblings", more)
         };
 
+        let outs_added = if let parse::FieldingOut::DoublePlay = out { 2 } else { 1 };
+
         for runner_id in scoring_runners {
             self.score_runner(runner_id);
         }
-
-        let outs_added = if let parse::FieldingOut::DoublePlay = out { 2 } else { 1 };
-        self.out(event, outs_added);
-        self.end_at_bat();
 
         if let parse::FieldingOut::FieldersChoice(runner_name_parsed, out_at_base) = out {
             let runner_idx = self.get_baserunner_with_name(runner_name_parsed, out_at_base);
@@ -503,7 +502,7 @@ impl Game {
         } else if let parse::FieldingOut::DoublePlay = out {
             if self.baserunner_count == 1 {
                 self.remove_base_runner(0);
-            } else if self.half_inning_outs < 3 {
+            } else if self.half_inning_outs + 2 < 3 {
                 // Need to figure out how to handle double plays with multiple people on base
                 todo!()
             }
@@ -511,6 +510,9 @@ impl Game {
         } else {
             self.advance_runners(0);
         }
+
+        self.out(event, outs_added);
+        self.end_at_bat();
 
         FeedEventChangeResult::Ok
     }
@@ -683,7 +685,7 @@ impl Game {
         let hit_type = parse::parse_hit(&batter_name, &event.description)
             .expect("Error parsing Hit description");
 
-        let (scoring_runners, _) = separate_scoring_events(&event.metadata.siblings, &batter_id);
+        let (scoring_runners, _) = event_utils::separate_scoring_events(&event.metadata.siblings, &batter_id);
         for runner_id in scoring_runners {
             self.score_runner(runner_id);
         }
@@ -792,29 +794,39 @@ impl Game {
                 self.apply_successful_steal(event, thief, base)
             }
             parse::BaseSteal::CaughtStealing(base) => {
-                self.apply_caught_stealing(thief, base)
+                self.apply_caught_stealing(event, thief, base)
             }
         }
     }
 
     fn apply_successful_steal(&mut self, event: &EventuallyEvent, thief: Player, base: Base) -> FeedEventChangeResult {
         let baserunner_index = self.get_baserunner_with_id(&thief.id, base);
-        self.bases_occupied[baserunner_index] += 1;
+
+        if let Base::Fourth = base {
+            self.score_runner(&thief.id);
+        } else {
+            self.bases_occupied[baserunner_index] += 1;
+        }
 
         self.game_event(event);
 
         FeedEventChangeResult::Ok
     }
 
-    fn apply_caught_stealing(&mut self, thief: Player, base: Base) -> FeedEventChangeResult {
+    fn apply_caught_stealing(&mut self, event: &EventuallyEvent, thief: Player, base: Base) -> FeedEventChangeResult {
         let baserunner_index = self.get_baserunner_with_id(&thief.id, base);
         self.remove_base_runner(baserunner_index);
 
-        if self.team_at_bat().outs == 3 {
+        self.game_event(event);
+
+        self.half_inning_outs += 1;
+        if self.half_inning_outs >= self.team_at_bat().outs {
             self.end_at_bat();
             // Weird thing the game does when the inning ends but the PA doesn't
             *self.team_at_bat().team_batter_count.as_mut()
                 .expect("Team batter count must not be null during a CaughtStealing event") -= 1;
+            self.phase = 3;
+            self.half_inning_outs = 0;
         }
 
         FeedEventChangeResult::Ok
@@ -830,7 +842,7 @@ impl Game {
         assert_eq!(event_batter_id, &batter_id,
                    "Batter in Walk event didn't match batter in game state");
 
-        let (scoring_runners, _) = separate_scoring_events(&event.metadata.siblings, &batter_id);
+        let (scoring_runners, _) = event_utils::separate_scoring_events(&event.metadata.siblings, &batter_id);
 
         for scoring_runner in scoring_runners {
             self.score_runner(scoring_runner);
@@ -858,6 +870,11 @@ impl Game {
 
         FeedEventChangeResult::Ok
     }
+
+    fn peanut_flavor_text(&mut self, event: &EventuallyEvent) -> FeedEventChangeResult {
+        self.game_event(event);
+        FeedEventChangeResult::Ok
+    }
 }
 
 fn plural(n: f32) -> &'static str {
@@ -866,24 +883,4 @@ fn plural(n: f32) -> &'static str {
     } else {
         "s"
     }
-}
-
-
-fn separate_scoring_events<'a>(siblings: &'a Vec<EventuallyEvent>, hitter_id: &'a Uuid) -> (Vec<&'a Uuid>, Vec<&'a EventuallyEvent>) {
-    // The first event is never a scoring event, and it mixes up the rest of the logic because the
-    // "hit" or "walk" event type is reused
-    let (first, rest) = siblings.split_first()
-        .expect("Event's siblings array is empty");
-    let mut scores = Vec::new();
-    let mut others = vec![first];
-
-    for event in rest {
-        if event.r#type == EventType::Hit || event.r#type == EventType::Walk {
-            scores.push(event_utils::get_one_id_excluding(&event.player_tags, "playerTags", Some(hitter_id)));
-        } else if event.r#type != EventType::RunsScored {
-            others.push(event);
-        }
-    }
-
-    (scores, others)
 }

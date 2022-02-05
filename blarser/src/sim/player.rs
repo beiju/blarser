@@ -6,7 +6,8 @@ use partial_information_derive::PartialInformationCompare;
 
 use crate::api::{EventType, EventuallyEvent};
 use crate::event_utils;
-use crate::sim::{Entity, FeedEventChangeResult};
+use crate::event_utils::separate_scoring_events;
+use crate::sim::{Entity, FeedEventChangeResult, parse};
 use crate::state::{StateInterface, GenericEvent, GenericEventType};
 
 #[derive(Clone, Debug, Deserialize, PartialInformationCompare)]
@@ -108,11 +109,14 @@ impl Player {
                 self.consecutive_hits += 1;
                 FeedEventChangeResult::Ok
             }
-            EventType::FlyOut => {
-                self.fielding_out(event, "flyout")
+            EventType::Strikeout => {
+                assert_eq!(&self.id, event_utils::get_one_id(&event.player_tags, "playerTags"),
+                           "Can't apply Strikeout event to this player: Unexpected ID");
+                self.consecutive_hits  = 0;
+                FeedEventChangeResult::Ok
             }
-            EventType::GroundOut => {
-                self.fielding_out(event, "ground out")
+            EventType::FlyOut | EventType::GroundOut => {
+                self.fielding_out(event)
             }
             EventType::PlayerStatReroll => {
                 // This event is normally a child (or in events that use siblings, a non-first
@@ -123,7 +127,7 @@ impl Player {
                            "Unexpected top-level PlayerStatReroll event");
 
                 // TODO: Find the actual range
-                self.adjust_attributes(Ranged::Range(-0.025, 0.025));
+                self.adjust_attributes(Ranged::Range(-0.03, 0.03));
 
                 FeedEventChangeResult::DidNotApply
             }
@@ -133,9 +137,19 @@ impl Player {
         }
     }
 
-    fn fielding_out(&mut self, event: &EventuallyEvent, out_str: &'static str) -> FeedEventChangeResult {
-        // TODO Parse flyout description for more robust check
-        if event.description.starts_with(&format!("{} hit a {} to ", self.name, out_str)) {
+    fn fielding_out(&mut self, event: &EventuallyEvent) -> FeedEventChangeResult {
+        let (_, other_events) = separate_scoring_events(&event.metadata.siblings, &self.id);
+
+        let out = match other_events.len() {
+            1 => parse::parse_simple_out(&self.name, &other_events[0].description),
+            2 => parse::parse_complex_out(&self.name, &other_events[0].description, &other_events[1].description),
+            more => panic!("Unexpected fielding out with {} non-score siblings", more)
+        };
+
+        // Assume that any parse error is because this isn't the correct batter, and not because of
+        // unexpected text in the event. It's not ideal but the unexpected text will be found when
+        // the game entity tries to parse it, so it should be ok.
+        if out.is_ok() {
             self.consecutive_hits = 0;
             FeedEventChangeResult::Ok
         } else {

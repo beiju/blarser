@@ -53,6 +53,10 @@ pub fn changes_for_event(event: &EventuallyEvent) -> Vec<(&'static str, Option<U
         EventType::InningEnd => vec![change_game(event)], // Losing triple threat not implemented yet
         EventType::BatterSkipped => vec![change_game(event)],
         EventType::PeanutFlavorText => vec![change_game(event)],
+        EventType::GameEnd => vec![change_game(event)],
+        EventType::WinCollectedRegular => vec![change_game(event),
+                                               ("team", Some(*event_utils::get_one_id(&event.team_tags, "teamTags")))],
+        EventType::GameOver => vec![change_game(event)],
         unknown_type => {
             error!("Don't know changes for event {:?}", unknown_type);
             todo!()
