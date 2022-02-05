@@ -308,6 +308,7 @@ fn find_placement(state: &StateInterface, this_update: &InsertChronUpdate) -> Pl
         "player" => find_placement_typed::<sim::Player>(state, this_update),
         "sim" => find_placement_typed::<sim::Sim>(state, this_update),
         "game" => find_placement_typed::<sim::Game>(state, this_update),
+        "standings" => find_placement_typed::<sim::Standings>(state, this_update),
         other => panic!("Unknown entity type {}", other)
     }
 }
