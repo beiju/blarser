@@ -111,7 +111,6 @@ impl<'conn, 'state, EntityT: Entity> Iterator for VersionsIter<'conn, 'state, En
                 None
             };
 
-            self.last_applied_event_debug = format!("{:?}", next_event);
             info!("Applying {} event", self.last_applied_event_debug);
             match self.current_version.apply_event(&next_event, self.state) {
                 FeedEventChangeResult::DidNotApply => {
@@ -120,6 +119,7 @@ impl<'conn, 'state, EntityT: Entity> Iterator for VersionsIter<'conn, 'state, En
                     process_time = next_event.time;
                 }
                 FeedEventChangeResult::Ok => {
+                    self.last_applied_event_debug = format!("{:?}", next_event);
                     self.current_version_valid_from = next_event.time;
                     process_time = next_event.time;
                     if let Some(ref print_version) = version {

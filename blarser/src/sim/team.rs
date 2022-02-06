@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use uuid::Uuid;
-use partial_information::PartialInformationCompare;
+use partial_information::{PartialInformationCompare, Spurious};
 use partial_information_derive::PartialInformationCompare;
 
 use crate::api::{EventType, EventuallyEvent};
@@ -43,7 +43,7 @@ pub struct Team {
     pub main_color: String,
     pub shame_runs: i32,
     pub shorthand: String,
-    pub win_streak: i32,
+    pub win_streak: Spurious<i32>,
     pub division_id: Option<Uuid>,
     pub team_spirit: i32,
     pub subleague_id: Option<Uuid>,
@@ -78,7 +78,7 @@ impl Entity for Team {
 }
 
 impl Team {
-    fn apply_feed_event(&mut self, event: &EventuallyEvent, state: &StateInterface) -> FeedEventChangeResult {
+    fn apply_feed_event(&mut self, event: &EventuallyEvent, _state: &StateInterface) -> FeedEventChangeResult {
         match event.r#type {
             EventType::LetsGo => {
                 if event.day > 0 {
