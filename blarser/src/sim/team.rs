@@ -1,7 +1,7 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use serde::Deserialize;
 use uuid::Uuid;
-use partial_information::{PartialInformationCompare, Spurious};
+use partial_information::{PartialInformationCompare, Cached};
 use partial_information_derive::PartialInformationCompare;
 
 use crate::api::{EventType, EventuallyEvent};
@@ -43,7 +43,7 @@ pub struct Team {
     pub main_color: String,
     pub shame_runs: i32,
     pub shorthand: String,
-    pub win_streak: Spurious<i32>,
+    pub win_streak: Cached<i32>,
     pub division_id: Option<Uuid>,
     pub team_spirit: i32,
     pub subleague_id: Option<Uuid>,
@@ -98,9 +98,9 @@ impl Team {
                     .expect("Winner property of GameEnd event must be a uuid");
 
                 if self.id == winner_id {
-                    self.win_streak += 1;
+                    self.win_streak.add(1, event.created + Duration::minutes(5));
                 } else {
-                    self.win_streak -= 1;
+                    self.win_streak.add(-1, event.created + Duration::minutes(5));
                 };
 
                 FeedEventChangeResult::Ok

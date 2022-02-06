@@ -1,11 +1,11 @@
 mod ranged;
 mod maybe_known;
 mod compare;
-mod delayed_update;
-mod spurious;
+mod cached;
+mod cached_map;
 
 pub use ranged::Ranged;
 pub use maybe_known::MaybeKnown;
-pub use delayed_update::DelayedUpdateMap;
-pub use spurious::Spurious;
+pub use cached::Cached;
+pub use cached_map::CachedMap;
 pub use compare::{PartialInformationCompare};
