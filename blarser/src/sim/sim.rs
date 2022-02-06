@@ -19,11 +19,11 @@ pub struct SimState {}
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
 pub struct Sim {
+    pub phase: i32,
     pub id: String,
     pub day: i32,
     pub attr: Vec<String>,
     pub menu: String,
-    pub phase: i32,
     pub rules: Uuid,
     pub state: SimState,
     pub league: Uuid,

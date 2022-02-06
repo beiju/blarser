@@ -6,7 +6,7 @@ use partial_information_derive::PartialInformationCompare;
 
 use crate::api::{EventType, EventuallyEvent};
 use crate::event_utils;
-use crate::event_utils::separate_scoring_events;
+use crate::event_utils::{get_one_id, separate_scoring_events};
 use crate::sim::{Entity, FeedEventChangeResult, parse};
 use crate::state::{StateInterface, GenericEvent, GenericEventType};
 
@@ -110,10 +110,11 @@ impl Player {
                 FeedEventChangeResult::Ok
             }
             EventType::Strikeout => {
-                assert_eq!(&self.id, event_utils::get_one_id(&event.player_tags, "playerTags"),
-                           "Can't apply Strikeout event to this player: Unexpected ID");
-                self.consecutive_hits  = 0;
-                FeedEventChangeResult::Ok
+                // assert_eq!(&self.id, event_utils::get_one_id(&event.player_tags, "playerTags"),
+                //            "Can't apply Strikeout event to this player: Unexpected ID");
+                // self.consecutive_hits  = 0;
+                // FeedEventChangeResult::Ok
+                FeedEventChangeResult::DidNotApply
             }
             EventType::FlyOut | EventType::GroundOut => {
                 self.fielding_out(event)
@@ -129,7 +130,19 @@ impl Player {
                 // TODO: Find the actual range
                 self.adjust_attributes(Ranged::Range(-0.03, 0.03));
 
-                FeedEventChangeResult::DidNotApply
+                FeedEventChangeResult::Ok
+            }
+            EventType::Snowflakes => {
+                let event_applies = event.metadata.siblings.iter()
+                    .any(|event| {
+                        event.r#type == EventType::AddedMod &&
+                            *get_one_id(&event.player_tags, "playerTags") == self.id
+                    });
+                assert!(event_applies, "Got Snowflakes event for player that doesn't apply");
+
+                self.game_attr.push("FROZEN".to_string());
+
+                FeedEventChangeResult::Ok
             }
             other => {
                 panic!("{:?} event does not apply to Player", other)

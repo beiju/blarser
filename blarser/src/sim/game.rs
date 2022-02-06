@@ -208,6 +208,7 @@ impl Entity for Game {
                 self.phase = 2;
                 self.play_count += 1;
                 self.last_update = String::new();
+                self.last_update_full = Some(Vec::new());
                 FeedEventChangeResult::Ok
             }
             GenericEventType::FeedEvent(feed_event) => {
@@ -386,6 +387,17 @@ impl Game {
 
         // last_update_full is a subset of the event
         self.last_update_full = Some(events.iter().map(|event| {
+            let team_tags = match event.r#type {
+                EventType::AddedMod | EventType::RunsScored | EventType::WinCollectedRegular => {
+                    // There's a chance it's always the first id... but I doubt it. Probably have
+                    // to check which team the player from playerTags is on
+                    vec![*event.team_tags.first()
+                        .expect("teamTags must be populated in AddedMod event")]
+                }
+                EventType::GameEnd => { event.team_tags.clone() }
+                _ => Vec::new()
+            };
+
             let metadata = serde_json::from_value(event.metadata.other.clone())
                 .expect("Couldn't get metadata from event");
             UpdateFull {
@@ -398,8 +410,8 @@ impl Game {
                 season: event.season,
                 created: event.created,
                 category: event.category,
-                game_tags: event.game_tags.clone(),
-                team_tags: event.team_tags.clone(),
+                game_tags: Vec::new(),
+                team_tags,
                 player_tags: event.player_tags.clone(),
                 tournament: event.tournament,
                 description: event.description.clone(),

@@ -1,7 +1,8 @@
 use std::fmt::Debug;
 use std::ops;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Deserializer};
-use crate::PartialInformationFieldCompare;
+use crate::PartialInformationCompare;
 
 #[derive(Debug, Clone)]
 pub enum Ranged<UnderlyingType: Clone + Debug + PartialOrd> {
@@ -95,24 +96,26 @@ impl<UnderlyingType> ops::AddAssign<UnderlyingType> for Ranged<UnderlyingType>
     }
 }
 
-impl<T> PartialInformationFieldCompare for Ranged<T>
+impl<T> PartialInformationCompare for Ranged<T>
     where T: Clone + Debug + PartialOrd {
-    fn get_conflicts(field_path: String, expected: &Self, actual: &Self) -> Vec<String> {
-        match actual {
+    fn get_conflicts_internal(&self, other: &Self, time: DateTime<Utc>, field_path: &str) -> Option<String> {
+        match other {
             Ranged::Known(actual) => {
-                match expected {
+                match self {
                     Ranged::Known(expected) => {
                         if actual == expected {
-                            vec![]
+                            None
                         } else {
-                            vec![format!("{}: Expected {:?}, but value was {:?}", field_path, expected, actual)]
+                            Some(format!("- {}: Expected {:?}, but value was {:?}",
+                                         field_path, expected, actual))
                         }
                     }
                     Ranged::Range(lower, upper) => {
                         if lower <= actual && actual <= upper {
-                            vec![]
+                            None
                         } else {
-                            vec![format!("{}: Expected value between {:?} and {:?}, but value was {:?}", field_path, lower, upper, actual)]
+                            Some(format!("- {}: Expected value between {:?} and {:?}, but value was {:?}",
+                                         field_path, lower, upper, actual))
                         }
                     }
                 }

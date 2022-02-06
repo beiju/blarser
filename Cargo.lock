@@ -1395,6 +1395,7 @@ name = "partial_information"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "itertools",
  "serde",
  "serde_json",
  "serde_repr",

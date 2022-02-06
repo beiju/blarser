@@ -309,6 +309,7 @@ fn find_placement(state: &StateInterface, this_update: &InsertChronUpdate) -> Pl
         "sim" => find_placement_typed::<sim::Sim>(state, this_update),
         "game" => find_placement_typed::<sim::Game>(state, this_update),
         "standings" => find_placement_typed::<sim::Standings>(state, this_update),
+        "team" => find_placement_typed::<sim::Team>(state, this_update),
         other => panic!("Unknown entity type {}", other)
     }
 }
@@ -331,37 +332,42 @@ fn find_placement_typed<'a, EntityT>(state: &StateInterface, this_update: &Inser
                                                  this_update.latest_time);
     let expected_entity = EntityT::new(this_update.data.clone());
     // Before calling next(), current_entity() returns the previous resolved version
-    let starting_conflicts = versions.current_entity().get_conflicts(&expected_entity);
+    let starting_conflicts = versions.current_entity().get_conflicts(&expected_entity, this_update.earliest_time);
 
-    let (oks, fails): (Vec<_>, Vec<_>) = versions
-        .map(|version| {
-            let conflicts = version.entity.get_conflicts(&expected_entity);
-            (version, conflicts)
-        })
-        .partition(|(_, conflicts)| conflicts.is_empty());
-    match (oks.len(), fails.len()) {
+    let mut conflicts = Vec::new();
+    let mut valid_versions = Vec::new();
+    while let Some(version) = versions.next() {
+        let conflict_str = version.entity.get_conflicts(&expected_entity, version.valid_from);
+        if let Some(conflict_str) = conflict_str {
+            conflicts.push((version, conflict_str))
+        } else {
+            valid_versions.push(version)
+        }
+    }
+
+    match (valid_versions.len(), conflicts.len()) {
         (0, 0) => {
-            if starting_conflicts.is_empty() {
+            if let Some(starting_conflicts) = starting_conflicts {
+                panic!("{} update differs from previous value and there are no events to explain why:\n{}",
+                       this_update.entity_type, starting_conflicts);
+            } else {
                 panic!("Expected two consecutive Chron records for {} {} to differ, but they did not",
                        this_update.entity_type, this_update.entity_id);
-            } else {
-                panic!("{} update differs from previous value and there are no events to explain why:\n{}",
-                       this_update.entity_type, to_bulleted_list(starting_conflicts));
             }
         }
         (0, _) => {
-            let placement_reasons = fails.into_iter().map(|(version, conflicts)| {
+            let placement_reasons = conflicts.into_iter().map(|(version, conflicts)| {
                 format!("Between {:#?} and {:#?}, after event {}:\n{}",
                         version.valid_from,
                         version.valid_until.map(|t| format!("{:?}", t)).unwrap_or("(unknown)".to_string()),
                         version.from_event_debug,
-                        to_bulleted_list(conflicts))
+                        conflicts)
             }).join("\n");
             panic!("{} update cannot ever be placed -- no valid placements:\n{}", this_update.entity_type, placement_reasons);
         }
         (1, _) => {
             info!("{} update can be placed", this_update.entity_type);
-            let placed_version = oks.into_iter().exactly_one().ok().unwrap().0;
+            let placed_version = valid_versions.into_iter().exactly_one().ok().unwrap();
             Some((placed_version.valid_from, placed_version.valid_until))
         }
         (_, _) => {

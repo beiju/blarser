@@ -5,7 +5,8 @@ use partial_information::PartialInformationCompare;
 use partial_information_derive::PartialInformationCompare;
 
 use crate::api::{EventType, EventuallyEvent};
-use crate::sim::{Entity, FeedEventChangeResult};
+use crate::event_utils;
+use crate::sim::{Entity, FeedEventChangeResult, Game};
 use crate::state::{StateInterface, GenericEvent, GenericEventType};
 
 #[derive(Clone, Debug, Deserialize, PartialInformationCompare)]
@@ -66,9 +67,9 @@ impl Entity for Team {
         None
     }
 
-    fn apply_event(&mut self, event: &GenericEvent, _state: &StateInterface) -> FeedEventChangeResult {
+    fn apply_event(&mut self, event: &GenericEvent, state: &StateInterface) -> FeedEventChangeResult {
         match &event.event_type {
-            GenericEventType::FeedEvent(event) => self.apply_feed_event(event),
+            GenericEventType::FeedEvent(event) => self.apply_feed_event(event, state),
             other => {
                 panic!("{:?} event does not apply to Team", other)
             }
@@ -77,7 +78,7 @@ impl Entity for Team {
 }
 
 impl Team {
-    fn apply_feed_event(&mut self, event: &EventuallyEvent) -> FeedEventChangeResult {
+    fn apply_feed_event(&mut self, event: &EventuallyEvent, state: &StateInterface) -> FeedEventChangeResult {
         match event.r#type {
             EventType::LetsGo => {
                 if event.day > 0 {
@@ -86,6 +87,23 @@ impl Team {
                 } else {
                     FeedEventChangeResult::DidNotApply
                 }
+            }
+            EventType::GameEnd => {
+                assert!(event.team_tags.contains(&self.id),
+                        "Tried to apply GameEnd event to the wrong team");
+                let winner_id: Uuid = serde_json::from_value(
+                    event.metadata.other.get("winner")
+                        .expect("GameEnd event must have a winner in the metadata")
+                        .clone())
+                    .expect("Winner property of GameEnd event must be a uuid");
+
+                if self.id == winner_id {
+                    self.win_streak += 1;
+                } else {
+                    self.win_streak -= 1;
+                };
+
+                FeedEventChangeResult::Ok
             }
             other => {
                 panic!("{:?} event does not apply to Team", other)

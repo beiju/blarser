@@ -1,12 +1,13 @@
 use std::collections::HashMap;
-use chrono::{DateTime, Utc};
+use std::fmt::Debug;
+use chrono::{DateTime, Duration, Utc};
+use itertools::Itertools;
 use serde::Deserialize;
 use uuid::Uuid;
-use partial_information::PartialInformationCompare;
+use partial_information::{DelayedUpdateMap, PartialInformationCompare};
 use partial_information_derive::PartialInformationCompare;
 
 use crate::api::{EventType, EventuallyEvent};
-use crate::event_utils;
 use crate::sim::{Entity, FeedEventChangeResult, Game};
 use crate::state::{StateInterface, GenericEvent, GenericEventType};
 
@@ -16,10 +17,10 @@ use crate::state::{StateInterface, GenericEvent, GenericEventType};
 #[allow(dead_code)]
 pub struct Standings {
     pub id: Uuid,
-    pub runs: HashMap<Uuid, f32>,
-    pub wins: HashMap<Uuid, i32>,
-    pub losses: HashMap<Uuid, i32>,
-    pub games_played: HashMap<Uuid, i32>,
+    pub runs: DelayedUpdateMap<Uuid, f32>,
+    pub wins: DelayedUpdateMap<Uuid, i32>,
+    pub losses: DelayedUpdateMap<Uuid, i32>,
+    pub games_played: DelayedUpdateMap<Uuid, i32>,
 }
 
 impl Entity for Standings {
@@ -44,24 +45,37 @@ impl Entity for Standings {
 impl Standings {
     fn apply_feed_event(&mut self, event: &EventuallyEvent, state: &StateInterface) -> FeedEventChangeResult {
         match event.r#type {
-            EventType::GameOver => {
-                let game_id = event_utils::get_one_id(&event.game_tags, "gameTags");
-                let game: Game = state.entity(*game_id, event.created);
+            EventType::GameEnd => {
+                let winner_id: Uuid = serde_json::from_value(
+                    event.metadata.other.get("winner")
+                        .expect("GameEnd event must have a winner in the metadata")
+                        .clone())
+                    .expect("Winner property of GameEnd event must be a uuid");
 
-                let (winner_id, loser_id) = if game.away.score.unwrap() > game.home.score.unwrap() {
-                    (game.away.team, game.home.team)
-                } else {
-                    (game.home.team, game.away.team)
-                };
+                let loser_id = *event.team_tags.iter()
+                    .filter(|&id| *id != winner_id)
+                    .exactly_one()
+                    .expect("gameTags of GameEnd event must contain exactly one winner and one loser");
 
-                *self.games_played.entry(winner_id).or_insert(0) += 1;
-                *self.games_played.entry(loser_id).or_insert(0) += 1;
-                *self.wins.entry(winner_id).or_insert(0) += 1;
-                *self.losses.entry(loser_id).or_insert(0) += 1;
-                *self.runs.entry(game.away.team).or_insert(0.0) += game.away.score
-                    .expect("Away team must have a score during GameOver event");
-                *self.runs.entry(game.home.team).or_insert(0.0) += game.home.score
-                    .expect("Home team must have a score during GameOver event");
+                let deadline = event.created + Duration::minutes(5);
+                self.games_played.add_with_default(winner_id, 1, deadline);
+                self.games_played.add_with_default(loser_id, 1, deadline);
+                self.wins.add_with_default(winner_id, 1, deadline);
+                self.wins.add_with_default(loser_id, 0, deadline);
+                self.losses.add_with_default(winner_id, 0, deadline);
+                self.losses.add_with_default(loser_id, 1, deadline);
+
+                let game: Game = state.entity(
+                    *event.game_tags.iter().exactly_one()
+                        .expect("GameEnd event must have exactly one game tag"),
+                    event.created);
+
+                self.runs.add_with_default(game.away.team,
+                                           game.away.score.expect("Away team must have a score during GameOver event"),
+                                           deadline);
+                self.runs.add_with_default(game.home.team,
+                                           game.home.score.expect("Home team must have a score during GameOver event"),
+                                           deadline);
 
                 FeedEventChangeResult::Ok
             }

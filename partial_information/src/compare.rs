@@ -3,81 +3,82 @@ use std::fmt::{Debug, Display};
 use std::hash::Hash;
 use uuid::Uuid;
 use std::iter::Iterator;
+use itertools::Itertools;
 use chrono::{DateTime, Utc};
 
 pub trait PartialInformationCompare {
-    fn get_conflicts(&self, other: &Self) -> Vec<String>;
-}
-
-pub trait PartialInformationFieldCompare {
-    fn get_conflicts(field_path: String, expected: &Self, observed: &Self) -> Vec<String>;
-}
-
-impl<T> PartialInformationFieldCompare for T where T: PartialInformationCompare {
-    fn get_conflicts(field_path: String, expected: &Self, observed: &Self) -> Vec<String> {
-        expected.get_conflicts(observed).into_iter()
-            .map(|s| format!("{}/{}", field_path, s))
-            .collect()
+    fn get_conflicts(&self, other: &Self, time: DateTime<Utc>) -> Option<String> {
+        self.get_conflicts_internal(other, time, &String::new())
     }
+
+    fn get_conflicts_internal(&self, other: &Self, time: DateTime<Utc>, field_path: &str) -> Option<String>;
 }
 
-impl<K, V> PartialInformationFieldCompare for HashMap<K, V>
-    where V: PartialInformationFieldCompare, K: Eq + Hash + Display {
-    fn get_conflicts(field_path: String, expected: &Self, observed: &Self) -> Vec<String> {
-        let expected_keys: HashSet<_> = expected.keys().collect();
-        let observed_keys: HashSet<_> = expected.keys().collect();
+impl<K, V> PartialInformationCompare for HashMap<K, V>
+    where V: PartialInformationCompare, K: Eq + Hash + Display {
+    fn get_conflicts_internal(&self, observed: &Self, time: DateTime<Utc>, field_path: &str) -> Option<String> {
+        let expected_keys: HashSet<_> = self.keys().collect();
+        let observed_keys: HashSet<_> = observed.keys().collect();
 
         let iter1 = expected_keys.difference(&observed_keys)
-            .map(|key| format!("{}/{} expected but was not observed", field_path, key));
+            .map(|key| format!("- {}/{} expected but was not observed", field_path, key));
         let iter2 = observed_keys.difference(&expected_keys)
-            .map(|key| format!("{}/{} observed but was not expected", field_path, key));
-        let iter3 = observed_keys.union(&expected_keys)
-            .flat_map(|key| PartialInformationFieldCompare::get_conflicts(
-                format!("{}/{}", field_path, key),
-                expected.get(key).unwrap(),
-                observed.get(key).unwrap()));
+            .map(|key| format!("- {}/{} observed but was not expected", field_path, key));
+        let iter3 = observed_keys.intersection(&expected_keys)
+            .filter_map(|key| self.get(key).unwrap().get_conflicts_internal(
+                observed.get(key).unwrap(),
+                time, &format!("{}/{}", field_path, key)));
 
-        iter1.chain(iter2).chain(iter3).collect()
-    }
-}
-
-impl<ItemT> PartialInformationFieldCompare for Option<ItemT> where ItemT: PartialInformationFieldCompare + Debug {
-    fn get_conflicts(field_path: String, expected: &Self, observed: &Self) -> Vec<String> {
-        match (expected, observed) {
-            (None, None) => vec![],
-            (None, Some(val)) => vec![format!("{} Expected null, but observed {:?}", field_path, val)],
-            (Some(val), None) => vec![format!("{} Expected {:?}, but observed null", field_path, val)],
-            (Some(a), Some(b)) => PartialInformationFieldCompare::get_conflicts(field_path, a, b)
+        let output = iter1.chain(iter2).chain(iter3).join("\n");
+        if output.is_empty() {
+            None
+        } else {
+            Some(output)
         }
     }
 }
 
-impl<ItemT> PartialInformationFieldCompare for Vec<ItemT> where ItemT: PartialInformationFieldCompare {
-    fn get_conflicts(field_path: String, expected: &Self, observed: &Self) -> Vec<String> {
-        if expected.len() != observed.len() {
-            vec![format!("{}: Expected length was {}, but observed length was {}", field_path, expected.len(), observed.len())];
+impl<ItemT> PartialInformationCompare for Option<ItemT> where ItemT: PartialInformationCompare + Debug {
+    fn get_conflicts_internal(&self, other: &Self, time: DateTime<Utc>, field_path: &str) -> Option<String> {
+        match (self, other) {
+            (None, None) => None,
+            (None, Some(val)) => Some(format!("- {} Expected null, but observed {:?}", field_path, val)),
+            (Some(val), None) => Some(format!("- {} Expected {:?}, but observed null", field_path, val)),
+            (Some(a), Some(b)) => a.get_conflicts_internal(b, time, field_path)
+        }
+    }
+}
+
+impl<ItemT> PartialInformationCompare for Vec<ItemT> where ItemT: PartialInformationCompare {
+    fn get_conflicts_internal(&self, other: &Self, time: DateTime<Utc>, field_path: &str) -> Option<String> {
+        if self.len() != other.len() {
+            return Some(format!("- {}: Expected length was {}, but observed length was {}", field_path, self.len(), other.len()));
         }
 
-        Iterator::zip(expected.iter(), observed.iter())
+        let output = Iterator::zip(self.iter(), other.iter())
             .enumerate()
-            .map(|(i, (a, b))| {
-                PartialInformationFieldCompare::get_conflicts(format!("{}/{}", field_path, i), a, b)
+            .filter_map(|(i, (a, b))| {
+                a.get_conflicts_internal(b, time, &format!("{}/{}", field_path, i))
             })
-            .flatten()
-            .collect()
+            .join("\n");
+        if output.is_empty() {
+            None
+        } else {
+            Some(output)
+        }
     }
 }
 
 
 macro_rules! trivial_compare {
     ($($t:ty),+) => {
-        $(impl PartialInformationFieldCompare for $t {
-            fn get_conflicts(field_path: String, expected: &Self, observed: &Self) -> Vec<String> {
-                if observed.eq(expected) {
-                    return vec![];
+        $(impl PartialInformationCompare for $t {
+            fn get_conflicts_internal(&self, other: &Self, _: DateTime<Utc>, field_path: &str) -> Option<String> {
+                if self.eq(other) {
+                    None
+                } else {
+                    Some(format!("- {}: Expected {:?}, but observed {:?}", field_path, self, other))
                 }
-
-                vec![format!("{}: Expected {:?}, but observed {:?}", field_path, expected, observed)]
             }
         })+
     }

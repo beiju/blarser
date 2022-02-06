@@ -99,7 +99,8 @@ impl<'conn, 'state, EntityT: Entity> Iterator for VersionsIter<'conn, 'state, En
 
             // Version represents the previous version, so need to clone the entity before applying
             // the event
-            let version = if next_event.time >= self.start_time {
+            // must be >, not >=, because a version becomes invalid exactly at its end time
+            let version = if next_event.time > self.start_time {
                 Some(EntityVersion {
                     valid_from: self.current_version_valid_from,
                     valid_until: Some(next_event.time),

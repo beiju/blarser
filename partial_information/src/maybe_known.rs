@@ -1,6 +1,7 @@
 use std::fmt::Debug;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Deserializer};
-use crate::PartialInformationFieldCompare;
+use crate::PartialInformationCompare;
 
 #[derive(Clone, Debug)]
 pub enum MaybeKnown<UnderlyingType: Clone + Debug + PartialOrd > {
@@ -34,18 +35,18 @@ impl<UnderlyingType> From<UnderlyingType> for MaybeKnown<UnderlyingType>
     }
 }
 
-impl<T> PartialInformationFieldCompare for MaybeKnown<T>
+impl<T> PartialInformationCompare for MaybeKnown<T>
     where T: Clone + Debug + PartialOrd {
-    fn get_conflicts(field_path: String, expected: &Self, actual: &Self) -> Vec<String> {
-        match actual {
+    fn get_conflicts_internal(&self, other: &Self, time: DateTime<Utc>, field_path: &str) -> Option<String> {
+        match other {
             MaybeKnown::Known(actual) => {
-                match expected {
-                    MaybeKnown::Unknown => { vec![] }
+                match self {
+                    MaybeKnown::Unknown => { None }
                     MaybeKnown::Known(expected) => {
                         if actual == expected {
-                            vec![]
+                            None
                         } else {
-                            vec![format!("{}: Expected {:?}, but value was {:?}", field_path, expected, actual)]
+                            Some(format!("- {}: Expected {:?}, but value was {:?}", field_path, expected, actual))
                         }
                     }
                 }
