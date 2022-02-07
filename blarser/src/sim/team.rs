@@ -104,6 +104,10 @@ impl Team {
 
                 FeedEventChangeResult::Ok
             }
+            EventType::PitcherChange => {
+                // TODO: Fill in actual changes, or delete this if it turns out they don't apply
+                FeedEventChangeResult::DidNotApply
+            }
             other => {
                 panic!("{:?} event does not apply to Team", other)
             }

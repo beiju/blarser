@@ -1,5 +1,4 @@
 use std::collections::HashSet;
-use std::fmt::format;
 use std::iter;
 use chrono::{DateTime, Duration, Utc};
 use itertools::Itertools;
@@ -252,6 +251,7 @@ impl Game {
             EventType::GameEnd => self.game_end(event),
             EventType::WinCollectedRegular => self.win_collected_regular(event),
             EventType::GameOver => self.game_over(event),
+            EventType::PitcherChange => self.pitcher_change(event, state),
             other => {
                 panic!("{:?} event does not apply to Game", other)
             }
@@ -303,7 +303,7 @@ impl Game {
         self.half_inning_score = 0.0;
 
         // The first halfInning event re-sets the data that PlayBall clears
-        if self.inning == 0 {
+        if self.inning == 0 && self.top_of_inning {
             for self_by_team in [&mut self.home, &mut self.away] {
                 let team: Team = state.entity(self_by_team.team, event.created);
                 let pitcher_id = team.active_pitcher();
@@ -312,7 +312,6 @@ impl Game {
                 self_by_team.pitcher_name = Some(MaybeKnown::Known(pitcher.name));
             }
         }
-
 
         self.game_event(event);
         FeedEventChangeResult::Ok
@@ -761,8 +760,6 @@ impl Game {
             })
             .collect();
 
-        // The Player entity will take care of adding the Frozen mod, but the Game entity needs to
-        // check if the current batter or pitcher just got Frozen
         if let Some(batter_id) = self.team_at_bat().batter {
             if frozen_players.contains(&batter_id) {
                 self.team_at_bat().batter = None;
@@ -770,13 +767,13 @@ impl Game {
             }
         }
 
-        if let Some(pitcher_id) = &self.team_at_bat().pitcher {
+        if let Some(pitcher_id) = &self.team_fielding().pitcher {
             let pitcher_id = pitcher_id.known()
                 .expect("Pitcher must be Known in Snowfall event");
 
             if frozen_players.contains(pitcher_id) {
-                self.team_at_bat().pitcher = None;
-                self.team_at_bat().pitcher_name = Some("".to_string().into());
+                self.team_fielding().pitcher = None;
+                self.team_fielding().pitcher_name = Some("".to_string().into());
             }
         }
 
@@ -828,6 +825,13 @@ impl Game {
                 .expect("Team batter count must not be null during a CaughtStealing event") -= 1;
             self.phase = 3;
             self.half_inning_outs = 0;
+
+            // Reset both top and bottom inning scored only when the bottom half ends
+            if !self.top_of_inning {
+                self.top_inning_score = 0.0;
+                self.bottom_inning_score = 0.0;
+                self.half_inning_score = 0.0;
+            }
         }
 
         FeedEventChangeResult::Ok
@@ -905,6 +909,29 @@ impl Game {
             self.loser = Some(self.home.team);
             self.winner = Some(self.away.team);
         };
+
+        self.game_event(event);
+
+        FeedEventChangeResult::Ok
+    }
+
+    fn pitcher_change(&mut self, event: &EventuallyEvent, state: &StateInterface) -> FeedEventChangeResult {
+        let new_pitcher_id = event_utils::get_one_id(&event.player_tags, "playerTags");
+        let new_pitcher: Player = state.entity(*new_pitcher_id, event.created);
+
+        assert!(self.home.pitcher.is_none() || self.away.pitcher.is_none(),
+                "Expected one of the pitchers to be null in PitcherChange event");
+
+        assert!(self.home.pitcher.is_some() || self.away.pitcher.is_some(),
+                "Expected only one of the pitchers to be null in PitcherChange event, not both");
+
+        if self.home.pitcher.is_none() {
+            self.home.pitcher = Some(MaybeKnown::Known(*new_pitcher_id));
+            self.home.pitcher_name = Some(MaybeKnown::Known(new_pitcher.name));
+        } else {
+            self.away.pitcher = Some(MaybeKnown::Known(*new_pitcher_id));
+            self.away.pitcher_name = Some(MaybeKnown::Known(new_pitcher.name));
+        }
 
         self.game_event(event);
 
