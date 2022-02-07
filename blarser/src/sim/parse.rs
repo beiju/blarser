@@ -38,7 +38,7 @@ pub enum Base {
 #[repr(i64)]
 pub enum BaseSteal {
     Steal(Base),
-    CaughtStealing(Base)
+    CaughtStealing(Base),
 }
 
 impl Base {
@@ -254,7 +254,6 @@ fn home_run(batter_name: &str) -> impl Fn(&str) -> IResult<&str, i64, VerboseErr
         let (input, _) = tag(batter_name.as_bytes())(input)?;
         let (input, _) = tag(" hits a ")(input)?;
         let (input, home_run_type) = home_run_type(input)?;
-        let (input, _) = tag(" home run!")(input)?;
         let (input, _) = eof(input)?;
 
         IResult::Ok((input, home_run_type))
@@ -262,13 +261,16 @@ fn home_run(batter_name: &str) -> impl Fn(&str) -> IResult<&str, i64, VerboseErr
 }
 
 fn home_run_type(input: &str) -> IResult<&str, i64, VerboseError<&str>> {
-    let (input, home_run_type_name) = alt((tag("solo"), tag("2-run"), tag("3-run"), tag("4-run")))(input)?;
+    let (input, home_run_type_name) = alt((tag("solo home run!"),
+                                           tag("2-run home run!"),
+                                           tag("3-run home run!"),
+                                           tag("grand slam!")))(input)?;
 
     let result = match home_run_type_name {
-        "solo" => 1,
-        "2-run" => 2,
-        "3-run" => 3,
-        "4-run" => 4,
+        "solo home run!" => 1,
+        "2-run home run!" => 2,
+        "3-run home run!" => 3,
+        "grand slam!" => 4,
         _ => panic!("Invalid home_run type {}", home_run_type_name)
     };
 
