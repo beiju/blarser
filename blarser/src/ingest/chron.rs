@@ -2,7 +2,7 @@ use std::cmp::{min, max, Ordering};
 use std::collections::BinaryHeap;
 use std::iter;
 use std::pin::Pin;
-use chrono::{DateTime, Duration, NaiveDateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use diesel::{self, Connection, insert_into, RunQueryDsl};
 use futures::{stream, Stream, StreamExt};
 use rocket::{info};
@@ -46,24 +46,13 @@ struct InsertChronUpdate {
 
 impl InsertChronUpdate {
     fn from_chron(ingest_id: i32, entity_type: &'static str, item: ChroniclerItem, resolved: bool, canonical: bool) -> Self {
-        // Optimization: Game updates are timestamped after they are recorded, so valid_from is
-        // the upper bound. This optimization could be performed on the other types, too, I just
-        // need to look it up (and it relies on Chron's order of fetch vs. timestamp being stable,
-        // which might not be the case). Game events are so numerous and close together that it's
-        // worth it.
-        let latest_time = if entity_type == "game" {
-            item.valid_from
-        } else {
-            item.valid_from + Duration::seconds(15)
-        };
-
         InsertChronUpdate {
             ingest_id,
             entity_type,
             entity_id: item.entity_id,
             perceived_at: item.valid_from,
             earliest_time: item.valid_from - Duration::seconds(15),
-            latest_time,
+            latest_time: item.valid_from + Duration::seconds(15),
             resolved,
             canonical,
             data: item.data,
@@ -115,6 +104,79 @@ async fn fetch_initial_state(ingest: IngestState, start_at_time: &'static str) -
 
 type ChronUpdateStreamPin = Pin<Box<dyn Stream<Item=InsertChronUpdate> + Send>>;
 
+struct GameUpdateSortable {
+    item: InsertChronUpdate,
+    play_count: i64,
+}
+
+impl GameUpdateSortable {
+    pub fn new(mut item: InsertChronUpdate) -> GameUpdateSortable {
+        let last_update_full = item.data.get("lastUpdateFull")
+            .expect("Game updates must have lastUpdateFull");
+        if let Some(updates) = last_update_full.as_array() {
+            if let Some(first_update) = updates.first() {
+                let created = first_update.get("created")
+                    .expect("lastUpdateFull entry must have a 'created' property");
+                let created: DateTime<Utc> = serde_json::from_value(created.clone())
+                    .expect("Couldn't deserialize 'created' into a date");
+
+                item.earliest_time = created;
+                item.latest_time = created;
+            }
+        }
+
+        let play_count = item.data.get("playCount")
+            .expect("Game update must have play count")
+            .as_i64()
+            .expect("Play count must be an integer");
+
+        GameUpdateSortable { item, play_count }
+    }
+}
+
+impl Eq for GameUpdateSortable {}
+
+impl PartialEq<Self> for GameUpdateSortable {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other).is_eq()
+    }
+}
+
+impl PartialOrd<Self> for GameUpdateSortable {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for GameUpdateSortable {
+    fn cmp(&self, other: &Self) -> Ordering {
+        if self.play_count == other.play_count {
+            other.item.perceived_at.cmp(&self.item.perceived_at)
+        } else {
+            other.play_count.cmp(&self.play_count)
+        }
+    }
+}
+
+fn reorder_game_updates<StreamT: Stream<Item=InsertChronUpdate>>(stream: StreamT) -> impl Stream<Item=InsertChronUpdate> {
+    let stream = Box::pin(stream
+        .map(GameUpdateSortable::new)
+        .peekable());
+    stream::unfold((BinaryHeap::new(), stream), move |(mut buf, mut stream)| async move {
+        if buf.is_empty() {
+            buf.push(stream.as_mut().next().await.expect("Chron stream ended! Not implemented yet"))
+        }
+
+        let buffer_until = buf.peek().unwrap().item.latest_time + Duration::minutes(5);
+        while let Some(next_item) = stream.as_mut().next_if(
+            |item| item.item.latest_time < buffer_until).await {
+            buf.push(next_item)
+        }
+
+        Some((buf.pop().unwrap().item, (buf, stream)))
+    })
+}
+
 pub async fn ingest_chron(ingest: IngestState, start_at_time: &'static str) {
     info!("Started Chron ingest task");
 
@@ -133,24 +195,25 @@ pub async fn ingest_chron(ingest: IngestState, start_at_time: &'static str) {
             Box::pin(stream) as ChronUpdateStreamPin
         })
         .chain(iter::once(
-            Box::pin(chronicler::game_updates(start_at_time)
-                .map(move |entity| {
-                    InsertChronUpdate::from_chron(ingest.ingest_id, "game", entity, false, false)
-                })
-            ) as ChronUpdateStreamPin
+            Box::pin(reorder_game_updates(
+                chronicler::game_updates(start_at_time)
+                    .map(move |entity| {
+                        InsertChronUpdate::from_chron(ingest.ingest_id, "game", entity, false, false)
+                    })
+            )) as ChronUpdateStreamPin
         ));
 
     kmerge_chron_updates(streams)
         .fold(ingest, |mut ingest, update| async {
+            // I sort of redefined the semantics of this as chron asking for the feed to be
+            // up to date to a given time and now the name isn't a great match
+            ingest.notify_progress.send(update.latest_time)
+                .expect("Error communicating with Eventually ingest");
+            info!("Chron ingest requested Feed updates up to {}", update.latest_time);
+
             wait_for_feed_ingest(&mut ingest, update.latest_time).await;
 
-            let (update_time, ingest) = do_ingest(ingest, update).await;
-
-            ingest.notify_progress.send(update_time)
-                .expect("Error communicating with Eventually ingest");
-            info!("Chron ingest sent progress {}", update_time);
-
-            ingest
+            do_ingest(ingest, update).await
         }).await;
 }
 
@@ -236,10 +299,8 @@ async fn wait_for_feed_ingest(ingest: &mut IngestState, wait_until_time: DateTim
     }
 }
 
-async fn do_ingest(ingest: IngestState, mut update: InsertChronUpdate) -> (DateTime<Utc>, IngestState) {
+async fn do_ingest(ingest: IngestState, mut update: InsertChronUpdate) -> IngestState {
     info!("Starting ingest for {} {} timestamped {}", update.entity_type, update.entity_id, update.perceived_at);
-    let time = update.latest_time;
-
     ingest.db.run(move |c| {
         let state = StateInterface {
             conn: &c,
@@ -296,7 +357,7 @@ async fn do_ingest(ingest: IngestState, mut update: InsertChronUpdate) -> (DateT
         })
     }).await.expect("Database error processing ingest");
 
-    (time, ingest)
+    ingest
 }
 
 fn find_placement(state: &StateInterface, this_update: &InsertChronUpdate) -> Placement {
@@ -308,10 +369,6 @@ fn find_placement(state: &StateInterface, this_update: &InsertChronUpdate) -> Pl
         "team" => find_placement_typed::<sim::Team>(state, this_update),
         other => panic!("Unknown entity type {}", other)
     }
-}
-
-fn to_bulleted_list(vec: Vec<String>) -> String {
-    format!("- {}", vec.join("\n- "))
 }
 
 type Placement = Option<(DateTime<Utc>, Option<DateTime<Utc>>, bool)>;
