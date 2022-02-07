@@ -306,7 +306,7 @@ impl Game {
         if self.inning == 0 && self.top_of_inning {
             for self_by_team in [&mut self.home, &mut self.away] {
                 let team: Team = state.entity(self_by_team.team, event.created);
-                let pitcher_id = team.active_pitcher();
+                let pitcher_id = team.active_pitcher(self.day);
                 let pitcher: Player = state.entity(pitcher_id, event.created);
                 self_by_team.pitcher = Some(MaybeKnown::Known(pitcher_id));
                 self_by_team.pitcher_name = Some(MaybeKnown::Known(pitcher.name));
@@ -823,6 +823,7 @@ impl Game {
             // Weird thing the game does when the inning ends but the PA doesn't
             *self.team_at_bat().team_batter_count.as_mut()
                 .expect("Team batter count must not be null during a CaughtStealing event") -= 1;
+            self.clear_bases();
             self.phase = 3;
             self.half_inning_outs = 0;
 

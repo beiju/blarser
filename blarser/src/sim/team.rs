@@ -79,14 +79,6 @@ impl Entity for Team {
 impl Team {
     fn apply_feed_event(&mut self, event: &EventuallyEvent, _state: &StateInterface) -> FeedEventChangeResult {
         match event.r#type {
-            EventType::LetsGo => {
-                if event.day > 0 {
-                    self.rotation_slot += 1;
-                    FeedEventChangeResult::Ok
-                } else {
-                    FeedEventChangeResult::DidNotApply
-                }
-            }
             EventType::GameEnd => {
                 assert!(event.team_tags.contains(&self.id),
                         "Tried to apply GameEnd event to the wrong team");
@@ -118,7 +110,7 @@ impl Team {
         self.lineup[count % self.lineup.len()]
     }
 
-    pub fn active_pitcher(&self) -> Uuid {
-        self.rotation[self.rotation_slot as usize % self.rotation.len()]
+    pub fn active_pitcher(&self, day: i32) -> Uuid {
+        self.rotation[day as usize % self.rotation.len()]
     }
 }

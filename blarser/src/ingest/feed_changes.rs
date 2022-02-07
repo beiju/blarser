@@ -31,12 +31,7 @@ pub struct LetsGoMetadata {
 
 pub fn changes_for_event(event: &EventuallyEvent) -> Vec<(&'static str, Option<Uuid>)> {
     match event.r#type {
-        EventType::LetsGo => {
-            // LetsGo events change the active pitcher on Team entities
-            let metadata: LetsGoMetadata = serde_json::from_value(event.metadata.other.clone())
-                .expect("Couldn't parse metadata for LetsGo event");
-            vec![change_game(event), ("team", Some(metadata.home)), ("team", Some(metadata.away))]
-        }
+        EventType::LetsGo => vec![change_game(event)],
         EventType::StormWarning => vec![change_game(event)],
         EventType::PlayBall => vec![change_game(event)],
         EventType::HalfInning => vec![change_game(event)],
