@@ -5,7 +5,7 @@ use itertools::Itertools;
 use serde::Deserialize;
 use serde_with::with_prefix;
 use uuid::Uuid;
-use partial_information::{MaybeKnown, PartialInformationCompare, Ranged};
+use partial_information::{Cached, MaybeKnown, PartialInformationCompare, Ranged};
 use partial_information_derive::PartialInformationCompare;
 
 use crate::api::{EventType, EventuallyEvent};
@@ -20,8 +20,7 @@ use crate::state::{GenericEvent, GenericEventType, StateInterface};
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
 pub struct GameState {
-    // :/
-    snowfall_events: MaybeKnown<Option<i32>>,
+    snowfall_events: Cached<Option<i32>>,
 
 }
 
@@ -232,7 +231,7 @@ impl Game {
             Err(_) => return FeedEventChangeResult::DidNotApply,
         };
 
-        let result = match event.r#type {
+        match event.r#type {
             EventType::LetsGo => self.lets_go(),
             EventType::StormWarning => self.storm_warning(event),
             EventType::PlayBall => self.play_ball(event),
@@ -259,22 +258,7 @@ impl Game {
             other => {
                 panic!("{:?} event does not apply to Game", other)
             }
-        };
-        // During Snow games, sometimes snowfall_events gets changed from null to 0. I can't figure
-        // out what triggers it, so I'm just saying that if it's currently null, and the weather is
-        // Snowy, any event might set it to 0
-        if let FeedEventChangeResult::Ok = result {
-            if let MaybeKnown::Known(None) = self.state.snowfall_events {
-                // There's probably an easier way but hey, this works
-                let weather: api::Weather = serde_json::from_value(serde_json::json!(self.weather))
-                    .expect("Unexpected Weather type");
-                if weather == api::Weather::Snowy {
-                    self.state.snowfall_events = MaybeKnown::Unknown;
-                }
-            }
         }
-
-        result
     }
 
     fn strike(&mut self, event: &EventuallyEvent) -> FeedEventChangeResult {
@@ -356,6 +340,7 @@ impl Game {
     fn storm_warning(&mut self, event: &EventuallyEvent) -> FeedEventChangeResult {
         self.game_start_phase = 11; // sure why not
         self.game_event(event);
+        self.state.snowfall_events.set_cached(Some(0), event.created + Duration::minutes(5));
         FeedEventChangeResult::Ok
     }
 
@@ -762,11 +747,9 @@ impl Game {
 
         self.game_event(event);
         self.game_start_phase = 20;
-        self.state.snowfall_events = match self.state.snowfall_events {
-            MaybeKnown::Unknown => { MaybeKnown::Unknown }
-            MaybeKnown::Known(None) => { MaybeKnown::Known(Some(1)) }
-            MaybeKnown::Known(Some(x)) => { MaybeKnown::Known(Some(x + 1)) }
-        };
+        self.state.snowfall_events.update_uncached(|val| {
+            Some(val.expect("snowfallEvents must be set in Snowflakes event") + 1)
+        });
 
         let frozen_players: HashSet<_> = event.metadata.siblings.iter()
             .flat_map(|event| {

@@ -151,8 +151,8 @@ impl<'conn> StateInterface<'conn> {
     pub fn versions<'state, EntityT: Entity + 'state>(&'state self, entity_id: Uuid, start_time: DateTime<Utc>, end_time: DateTime<Utc>)
                                                       -> VersionsIter<'conn, 'state, EntityT> {
         info!("Getting {} {} between {} and {}", EntityT::name(), entity_id, start_time, end_time);
-        let (entity, entity_start_time): (EntityT, _) = self.last_resolved_entity(entity_id, start_time);
-        info!("Most recent resolved entity is at {}", entity_start_time);
+        let (entity, entity_start_time): (EntityT, _) = self.last_canonical_entity(entity_id, start_time);
+        info!("Most recent canonical entity is at {}", entity_start_time);
         let updates = (
             Box::new(self.version_updates(entity_id, entity_start_time, end_time))
                 as Box<(dyn Iterator<Item=(chrono::DateTime<Utc>, EntityT)> + 'state)>
@@ -188,7 +188,7 @@ impl<'conn> StateInterface<'conn> {
             .filter(dsl::ingest_id.eq(self.ingest_id))
             .filter(dsl::entity_type.eq(EntityT::name()))
             .filter(dsl::entity_id.eq(entity_id))
-            .filter(dsl::resolved.eq(true))
+            .filter(dsl::canonical.eq(true))
             .filter(dsl::earliest_time.lt(end_time))
             // ge is important, because sometimes start_time comes from the very object that needs to be
             // returned from this function (that case could be optimized, but it's not worth the effort
@@ -222,7 +222,7 @@ impl<'conn> StateInterface<'conn> {
     }
 
     // Inclusive of start time, exclusive of end time
-    fn last_resolved_entity<EntityT: Entity>(&self, entity_id: Uuid, at_or_before: DateTime<Utc>) -> (EntityT, DateTime<Utc>) {
+    fn last_canonical_entity<EntityT: Entity>(&self, entity_id: Uuid, at_or_before: DateTime<Utc>) -> (EntityT, DateTime<Utc>) {
         use crate::schema::chron_updates::dsl;
 
         let last_known = dsl::chron_updates
@@ -231,6 +231,7 @@ impl<'conn> StateInterface<'conn> {
             .filter(dsl::entity_type.eq(EntityT::name()))
             .filter(dsl::entity_id.eq(entity_id))
             .filter(dsl::resolved.eq(true))
+            .filter(dsl::canonical.eq(true))
             // This has to be le (not lt) and has to be latest_time
             .filter(dsl::latest_time.le(at_or_before))
             .order(dsl::latest_time.desc())
@@ -244,19 +245,21 @@ impl<'conn> StateInterface<'conn> {
             None => {
                 warn!("Didn't find any version of entity after {}, falling back to first version", at_or_before);
                 // Fall back to the first version of the entity, and lie about its time
-                let json = dsl::chron_updates
-                    .select(dsl::data)
+                let (json, resolved, canonical) = dsl::chron_updates
+                    .select((dsl::data, dsl::resolved, dsl::canonical))
                     .filter(dsl::ingest_id.eq(self.ingest_id))
                     .filter(dsl::entity_type.eq(EntityT::name()))
                     .filter(dsl::entity_id.eq(entity_id))
-                    .filter(dsl::resolved.eq(true))
                     .order(dsl::earliest_time.asc())
                     .limit(1)
-                    .load::<serde_json::Value>(*self.conn)
+                    .load::<(serde_json::Value, bool, bool)>(*self.conn)
                     .expect("Error querying first known version of entity")
                     .into_iter()
                     .exactly_one()
                     .expect("Couldn't get first known version of entity");
+
+                assert!(resolved, "Fallback version must be resolved");
+                assert!(canonical, "Fallback version must be canonical");
 
                 (json, at_or_before)
             }

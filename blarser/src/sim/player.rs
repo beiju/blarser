@@ -1,7 +1,7 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use serde::Deserialize;
 use uuid::Uuid;
-use partial_information::{Ranged, PartialInformationCompare, MaybeKnown};
+use partial_information::{Ranged, PartialInformationCompare, MaybeKnown, Cached};
 use partial_information_derive::PartialInformationCompare;
 
 use crate::api::{EventType, EventuallyEvent};
@@ -47,32 +47,32 @@ pub struct Player {
     pub item_attr: Vec<String>,
     pub perm_attr: Vec<String>,
 
-    pub buoyancy: Ranged<f32>,
-    pub cinnamon: Ranged<f32>,
-    pub coldness: Ranged<f32>,
-    pub chasiness: Ranged<f32>,
-    pub divinity: Ranged<f32>,
-    pub martyrdom: Ranged<f32>,
-    pub base_thirst: Ranged<f32>,
-    pub indulgence: Ranged<f32>,
-    pub musclitude: Ranged<f32>,
-    pub tragicness: Ranged<f32>,
-    pub omniscience: Ranged<f32>,
-    pub patheticism: Ranged<f32>,
-    pub suppression: Ranged<f32>,
-    pub continuation: Ranged<f32>,
-    pub ruthlessness: Ranged<f32>,
-    pub watchfulness: Ranged<f32>,
-    pub laserlikeness: Ranged<f32>,
-    pub overpowerment: Ranged<f32>,
-    pub tenaciousness: Ranged<f32>,
-    pub thwackability: Ranged<f32>,
-    pub anticapitalism: Ranged<f32>,
-    pub ground_friction: Ranged<f32>,
-    pub pressurization: Ranged<f32>,
-    pub unthwackability: Ranged<f32>,
-    pub shakespearianism: Ranged<f32>,
-    pub moxie: Ranged<f32>,
+    pub buoyancy: Cached<Ranged<f32>>,
+    pub cinnamon: Cached<Ranged<f32>>,
+    pub coldness: Cached<Ranged<f32>>,
+    pub chasiness: Cached<Ranged<f32>>,
+    pub divinity: Cached<Ranged<f32>>,
+    pub martyrdom: Cached<Ranged<f32>>,
+    pub base_thirst: Cached<Ranged<f32>>,
+    pub indulgence: Cached<Ranged<f32>>,
+    pub musclitude: Cached<Ranged<f32>>,
+    pub tragicness: Cached<Ranged<f32>>,
+    pub omniscience: Cached<Ranged<f32>>,
+    pub patheticism: Cached<Ranged<f32>>,
+    pub suppression: Cached<Ranged<f32>>,
+    pub continuation: Cached<Ranged<f32>>,
+    pub ruthlessness: Cached<Ranged<f32>>,
+    pub watchfulness: Cached<Ranged<f32>>,
+    pub laserlikeness: Cached<Ranged<f32>>,
+    pub overpowerment: Cached<Ranged<f32>>,
+    pub tenaciousness: Cached<Ranged<f32>>,
+    pub thwackability: Cached<Ranged<f32>>,
+    pub anticapitalism: Cached<Ranged<f32>>,
+    pub ground_friction: Cached<Ranged<f32>>,
+    pub pressurization: Cached<Ranged<f32>>,
+    pub unthwackability: Cached<Ranged<f32>>,
+    pub shakespearianism: Cached<Ranged<f32>>,
+    pub moxie: Cached<Ranged<f32>>,
     pub total_fingers: i32,
 
     pub defense_rating: MaybeKnown<f32>,
@@ -128,7 +128,8 @@ impl Player {
                            "Unexpected top-level PlayerStatReroll event");
 
                 // TODO: Find the actual range
-                self.adjust_attributes(Ranged::Range(-0.03, 0.03));
+                self.adjust_attributes(Ranged::Range(-0.03, 0.03),
+                                       event.created + Duration::minutes(5));
 
                 FeedEventChangeResult::Ok
             }
@@ -170,53 +171,53 @@ impl Player {
         }
     }
 
-    fn adjust_attributes(&mut self, range: Ranged<f32>) {
-        self.adjust_batting(range);
-        self.adjust_pitching(range);
-        self.adjust_baserunning(range);
-        self.adjust_defense(range);
+    fn adjust_attributes(&mut self, range: Ranged<f32>, deadline: DateTime<Utc>) {
+        self.adjust_batting(range, deadline);
+        self.adjust_pitching(range, deadline);
+        self.adjust_baserunning(range, deadline);
+        self.adjust_defense(range, deadline);
     }
 
-    fn adjust_batting(&mut self, range: Ranged<f32>) {
-        self.buoyancy += range;
-        self.divinity += range;
-        self.martyrdom += range;
-        self.moxie += range;
-        self.musclitude += range;
-        self.patheticism += range;
-        self.thwackability += range;
-        self.tragicness += range;
+    fn adjust_batting(&mut self, range: Ranged<f32>, deadline: DateTime<Utc>) {
+        self.buoyancy.add_cached(range, deadline);
+        self.divinity.add_cached(range, deadline);
+        self.martyrdom.add_cached(range, deadline);
+        self.moxie.add_cached(range, deadline);
+        self.musclitude.add_cached(range, deadline);
+        self.patheticism.add_cached(range, deadline);
+        self.thwackability.add_cached(range, deadline);
+        self.tragicness.add_cached(range, deadline);
 
         self.hitting_rating = MaybeKnown::Unknown;
     }
 
-    fn adjust_pitching(&mut self, range: Ranged<f32>) {
-        self.coldness += range;
-        self.overpowerment += range;
-        self.ruthlessness += range;
-        self.shakespearianism += range;
-        self.suppression += range;
-        self.unthwackability += range;
+    fn adjust_pitching(&mut self, range: Ranged<f32>, deadline: DateTime<Utc>) {
+        self.coldness.add_cached(range, deadline);
+        self.overpowerment.add_cached(range, deadline);
+        self.ruthlessness.add_cached(range, deadline);
+        self.shakespearianism.add_cached(range, deadline);
+        self.suppression.add_cached(range, deadline);
+        self.unthwackability.add_cached(range, deadline);
 
         self.pitching_rating = MaybeKnown::Unknown;
     }
 
-    fn adjust_baserunning(&mut self, range: Ranged<f32>) {
-        self.base_thirst += range;
-        self.continuation += range;
-        self.ground_friction += range;
-        self.indulgence += range;
-        self.laserlikeness += range;
+    fn adjust_baserunning(&mut self, range: Ranged<f32>, deadline: DateTime<Utc>) {
+        self.base_thirst.add_cached(range, deadline);
+        self.continuation.add_cached(range, deadline);
+        self.ground_friction.add_cached(range, deadline);
+        self.indulgence.add_cached(range, deadline);
+        self.laserlikeness.add_cached(range, deadline);
 
         self.baserunning_rating = MaybeKnown::Unknown;
     }
 
-    fn adjust_defense(&mut self, range: Ranged<f32>) {
-        self.anticapitalism += range;
-        self.chasiness += range;
-        self.omniscience += range;
-        self.tenaciousness += range;
-        self.watchfulness += range;
+    fn adjust_defense(&mut self, range: Ranged<f32>, deadline: DateTime<Utc>) {
+        self.anticapitalism.add_cached(range, deadline);
+        self.chasiness.add_cached(range, deadline);
+        self.omniscience.add_cached(range, deadline);
+        self.tenaciousness.add_cached(range, deadline);
+        self.watchfulness.add_cached(range, deadline);
 
         self.defense_rating = MaybeKnown::Unknown;
     }

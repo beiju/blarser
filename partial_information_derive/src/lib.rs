@@ -47,8 +47,10 @@ fn impl_partial_information_compare(ast: DeriveInput) -> Result<TokenStream2> {
             let field_name_stringified = LitStr::new(&field_name.to_string(), span);
             quote_spanned! { span=>
                 {
-                    let conflicts = self.#field_name.get_conflicts_internal(&other.#field_name, time,
-                            &format!(concat!("{}/", #field_name_stringified), field_path));
+                    let (conflicts, canonical) = self.#field_name.get_conflicts_internal(&other.#field_name, time,
+                            &format!(concat!("{}/", #field_name_stringified), field_path.clone() /* TEMP */));
+                    all_canonical &= canonical;
+                    if !canonical { println!(concat!("{}/", #field_name_stringified, " not canonical"), field_path); }
                     output = match (output, conflicts) {
                         (None, None) => { None }
                         (None, Some(c)) => { Some(c) }
@@ -61,10 +63,11 @@ fn impl_partial_information_compare(ast: DeriveInput) -> Result<TokenStream2> {
 
         quote! {
             impl PartialInformationCompare for #name {
-                fn get_conflicts_internal(&self, other: &Self, time: DateTime<Utc>, field_path: &str) -> Option<String> {
+                fn get_conflicts_internal(&self, other: &Self, time: DateTime<Utc>, field_path: &str) -> (Option<String>, bool) {
                     let mut output = None;
+                    let mut all_canonical = true;
                     #(#get_conflicts);*
-                    output
+                    (output, all_canonical)
                 }
             }
         }

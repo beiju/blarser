@@ -98,9 +98,9 @@ impl Team {
                     .expect("Winner property of GameEnd event must be a uuid");
 
                 if self.id == winner_id {
-                    self.win_streak.add(1, event.created + Duration::minutes(5));
+                    self.win_streak.add_cached(1, event.created + Duration::minutes(5));
                 } else {
-                    self.win_streak.add(-1, event.created + Duration::minutes(5));
+                    self.win_streak.add_cached(-1, event.created + Duration::minutes(5));
                 };
 
                 FeedEventChangeResult::Ok

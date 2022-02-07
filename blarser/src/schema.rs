@@ -11,6 +11,7 @@ table! {
         earliest_time -> Timestamptz,
         latest_time -> Timestamptz,
         resolved -> Bool,
+        canonical -> Bool,
         data -> Jsonb,
     }
 }

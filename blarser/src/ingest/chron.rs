@@ -26,20 +26,7 @@ struct ChronUpdate {
     earliest_time: DateTime<Utc>,
     latest_time: DateTime<Utc>,
     resolved: bool,
-    data: serde_json::Value,
-}
-
-#[derive(Queryable)]
-#[allow(dead_code)]
-struct FeedEventChange {
-    id: i32,
-    ingest_id: i32,
-    entity_type: String,
-    entity_id: Uuid,
-    perceived_at: NaiveDateTime,
-    earliest_time: NaiveDateTime,
-    latest_time: NaiveDateTime,
-    resolved: bool,
+    canonical: bool,
     data: serde_json::Value,
 }
 
@@ -53,11 +40,12 @@ struct InsertChronUpdate {
     earliest_time: DateTime<Utc>,
     latest_time: DateTime<Utc>,
     resolved: bool,
+    canonical: bool,
     data: serde_json::Value,
 }
 
 impl InsertChronUpdate {
-    fn from_chron(ingest_id: i32, entity_type: &'static str, item: ChroniclerItem, resolved: bool) -> Self {
+    fn from_chron(ingest_id: i32, entity_type: &'static str, item: ChroniclerItem, resolved: bool, canonical: bool) -> Self {
         // Optimization: Game updates are timestamped after they are recorded, so valid_from is
         // the upper bound. This optimization could be performed on the other types, too, I just
         // need to look it up (and it relies on Chron's order of fetch vs. timestamp being stable,
@@ -77,6 +65,7 @@ impl InsertChronUpdate {
             earliest_time: item.valid_from - Duration::seconds(15),
             latest_time,
             resolved,
+            canonical,
             data: item.data,
         }
     }
@@ -89,7 +78,8 @@ async fn fetch_initial_state(ingest: IngestState, start_at_time: &'static str) -
         .map(move |entity_type| {
             let stream = chronicler::entities(entity_type, start_at_time)
                 .map(move |entity| {
-                    InsertChronUpdate::from_chron(ingest_id, entity_type, entity, true)
+                    // Initial state is presumed resolved and canonical
+                    InsertChronUpdate::from_chron(ingest_id, entity_type, entity, true, true)
                 });
 
             Box::pin(stream) as Pin<Box<dyn Stream<Item=InsertChronUpdate> + Send>>
@@ -97,7 +87,8 @@ async fn fetch_initial_state(ingest: IngestState, start_at_time: &'static str) -
         .chain(iter::once(
             Box::pin(chronicler::schedule(start_at_time)
                 .map(move |entity| {
-                    InsertChronUpdate::from_chron(ingest_id, "game", entity, true)
+                    // Initial state is presumed resolved and canonical
+                    InsertChronUpdate::from_chron(ingest_id, "game", entity, true, true)
                 })
             ) as Pin<Box<dyn Stream<Item=InsertChronUpdate> + Send>>
         ));
@@ -136,7 +127,7 @@ pub async fn ingest_chron(ingest: IngestState, start_at_time: &'static str) {
         .map(move |entity_type| {
             let stream = chronicler::versions(entity_type, start_at_time)
                 .map(move |entity| {
-                    InsertChronUpdate::from_chron(ingest.ingest_id, entity_type, entity, true)
+                    InsertChronUpdate::from_chron(ingest.ingest_id, entity_type, entity, false, false)
                 });
 
             Box::pin(stream) as ChronUpdateStreamPin
@@ -144,7 +135,7 @@ pub async fn ingest_chron(ingest: IngestState, start_at_time: &'static str) {
         .chain(iter::once(
             Box::pin(chronicler::game_updates(start_at_time)
                 .map(move |entity| {
-                    InsertChronUpdate::from_chron(ingest.ingest_id, "game", entity, true)
+                    InsertChronUpdate::from_chron(ingest.ingest_id, "game", entity, false, false)
                 })
             ) as ChronUpdateStreamPin
         ));
@@ -271,18 +262,20 @@ async fn do_ingest(ingest: IngestState, mut update: InsertChronUpdate) -> (DateT
         }
 
         state.conn.transaction(|| {
-            if let Some((start, maybe_end)) = find_placement(&state, &update) {
+            if let Some((start, maybe_end, is_canonical)) = find_placement(&state, &update) {
                 update.earliest_time = max(update.earliest_time, start);
                 if let Some(end) = maybe_end {
                     update.latest_time = min(update.latest_time, end);
                 }
                 update.resolved = true;
+                update.canonical = is_canonical;
                 info!("Inserting resolved {} update", update.entity_type);
             } else {
                 info!("Inserting unresolved {} update", update.entity_type);
             }
 
             // Copy these out before moving update
+            let resolved = update.resolved;
             let entity_type = update.entity_type;
             let entity_id = update.entity_id;
             let perceived_at = update.perceived_at;
@@ -290,10 +283,13 @@ async fn do_ingest(ingest: IngestState, mut update: InsertChronUpdate) -> (DateT
 
             insert_into(crate::schema::chron_updates::dsl::chron_updates).values(update).execute(c)?;
 
-            let should_re_resolve = state.bound_previous_update(
-                entity_type, entity_id, perceived_at, earliest_time);
-            if let Some(_re_resolve_id) = should_re_resolve {
-                todo!();
+            // TODO Isn't there some amount of bounding I can do even if the update isn't resolved?
+            if resolved {
+                let should_re_resolve = state.bound_previous_update(
+                    entity_type, entity_id, perceived_at, earliest_time);
+                if let Some(_re_resolve_id) = should_re_resolve {
+                    todo!();
+                }
             }
 
             Ok::<_, diesel::result::Error>(())
@@ -318,7 +314,7 @@ fn to_bulleted_list(vec: Vec<String>) -> String {
     format!("- {}", vec.join("\n- "))
 }
 
-type Placement = Option<(DateTime<Utc>, Option<DateTime<Utc>>)>;
+type Placement = Option<(DateTime<Utc>, Option<DateTime<Utc>>, bool)>;
 
 fn find_placement_typed<'a, EntityT>(state: &StateInterface, this_update: &InsertChronUpdate) -> Placement
     where EntityT: sim::Entity {
@@ -332,16 +328,17 @@ fn find_placement_typed<'a, EntityT>(state: &StateInterface, this_update: &Inser
                                                  this_update.latest_time);
     let expected_entity = EntityT::new(this_update.data.clone());
     // Before calling next(), current_entity() returns the previous resolved version
-    let starting_conflicts = versions.current_entity().get_conflicts(&expected_entity, this_update.earliest_time);
+    let (starting_conflicts, canonical) = versions.current_entity().get_conflicts(&expected_entity, this_update.earliest_time);
+    assert!(canonical, "The starting version for a version iteration must be canonical");
 
     let mut conflicts = Vec::new();
     let mut valid_versions = Vec::new();
     while let Some(version) = versions.next() {
-        let conflict_str = version.entity.get_conflicts(&expected_entity, version.valid_from);
+        let (conflict_str, is_canonical) = version.entity.get_conflicts(&expected_entity, version.valid_from);
         if let Some(conflict_str) = conflict_str {
             conflicts.push((version, conflict_str))
         } else {
-            valid_versions.push(version)
+            valid_versions.push((version, is_canonical))
         }
     }
 
@@ -367,8 +364,8 @@ fn find_placement_typed<'a, EntityT>(state: &StateInterface, this_update: &Inser
         }
         (1, _) => {
             info!("{} update can be placed", this_update.entity_type);
-            let placed_version = valid_versions.into_iter().exactly_one().ok().unwrap();
-            Some((placed_version.valid_from, placed_version.valid_until))
+            let (placed_version, is_canonical) = valid_versions.into_iter().exactly_one().ok().unwrap();
+            Some((placed_version.valid_from, placed_version.valid_until, is_canonical))
         }
         (_, _) => {
             info!("{} update cannot currently be placed -- multiple valid placements", this_update.entity_type);

@@ -37,8 +37,8 @@ impl<UnderlyingType> From<UnderlyingType> for MaybeKnown<UnderlyingType>
 
 impl<T> PartialInformationCompare for MaybeKnown<T>
     where T: Clone + Debug + PartialOrd {
-    fn get_conflicts_internal(&self, other: &Self, time: DateTime<Utc>, field_path: &str) -> Option<String> {
-        match other {
+    fn get_conflicts_internal(&self, other: &Self, _: DateTime<Utc>, field_path: &str) -> (Option<String>, bool) {
+        (match other {
             MaybeKnown::Known(actual) => {
                 match self {
                     MaybeKnown::Unknown => { None }
@@ -54,6 +54,6 @@ impl<T> PartialInformationCompare for MaybeKnown<T>
             _ => {
                 panic!("Actual value must be Known")
             }
-        }
+        }, true) // MaybeKnown is always canonical
     }
 }

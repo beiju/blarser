@@ -9,6 +9,7 @@ CREATE TABLE chron_updates
     earliest_time   TIMESTAMP WITH TIME ZONE NOT NULL,
     latest_time     TIMESTAMP WITH TIME ZONE NOT NULL,
     resolved        BOOLEAN NOT NULL,
+    canonical       BOOLEAN NOT NULL,
 
     data            JSONB NOT NULL,
 

@@ -7,16 +7,16 @@ use itertools::Itertools;
 use chrono::{DateTime, Utc};
 
 pub trait PartialInformationCompare {
-    fn get_conflicts(&self, other: &Self, time: DateTime<Utc>) -> Option<String> {
+    fn get_conflicts(&self, other: &Self, time: DateTime<Utc>) -> (Option<String>, bool) {
         self.get_conflicts_internal(other, time, &String::new())
     }
 
-    fn get_conflicts_internal(&self, other: &Self, time: DateTime<Utc>, field_path: &str) -> Option<String>;
+    fn get_conflicts_internal(&self, other: &Self, time: DateTime<Utc>, field_path: &str) -> (Option<String>, bool);
 }
 
 impl<K, V> PartialInformationCompare for HashMap<K, V>
     where V: PartialInformationCompare, K: Eq + Hash + Display {
-    fn get_conflicts_internal(&self, observed: &Self, time: DateTime<Utc>, field_path: &str) -> Option<String> {
+    fn get_conflicts_internal(&self, observed: &Self, time: DateTime<Utc>, field_path: &str) -> (Option<String>, bool) {
         let expected_keys: HashSet<_> = self.keys().collect();
         let observed_keys: HashSet<_> = observed.keys().collect();
 
@@ -24,47 +24,58 @@ impl<K, V> PartialInformationCompare for HashMap<K, V>
             .map(|key| format!("- {}/{} expected but was not observed", field_path, key));
         let iter2 = observed_keys.difference(&expected_keys)
             .map(|key| format!("- {}/{} observed but was not expected", field_path, key));
+        let all_canonical = &mut true;
         let iter3 = observed_keys.intersection(&expected_keys)
-            .filter_map(|key| self.get(key).unwrap().get_conflicts_internal(
-                observed.get(key).unwrap(),
-                time, &format!("{}/{}", field_path, key)));
+            .filter_map(|key| {
+                let (conflicts, canonical) = self.get(key).unwrap().get_conflicts_internal(
+                    observed.get(key).unwrap(),
+                    time, &format!("{}/{}", field_path, key));
+                *all_canonical &= canonical;
+                conflicts
+            });
+
 
         let output = iter1.chain(iter2).chain(iter3).join("\n");
+        if !*all_canonical { println!("Vec not canonical") };
         if output.is_empty() {
-            None
+            (None, *all_canonical)
         } else {
-            Some(output)
+            (Some(output), *all_canonical)
         }
     }
 }
 
 impl<ItemT> PartialInformationCompare for Option<ItemT> where ItemT: PartialInformationCompare + Debug {
-    fn get_conflicts_internal(&self, other: &Self, time: DateTime<Utc>, field_path: &str) -> Option<String> {
+    fn get_conflicts_internal(&self, other: &Self, time: DateTime<Utc>, field_path: &str) -> (Option<String>, bool) {
         match (self, other) {
-            (None, None) => None,
-            (None, Some(val)) => Some(format!("- {} Expected null, but observed {:?}", field_path, val)),
-            (Some(val), None) => Some(format!("- {} Expected {:?}, but observed null", field_path, val)),
+            (None, None) => (None, true),
+            (None, Some(val)) => (Some(format!("- {} Expected null, but observed {:?}", field_path, val)), true),
+            (Some(val), None) => (Some(format!("- {} Expected {:?}, but observed null", field_path, val)), true),
             (Some(a), Some(b)) => a.get_conflicts_internal(b, time, field_path)
         }
     }
 }
 
 impl<ItemT> PartialInformationCompare for Vec<ItemT> where ItemT: PartialInformationCompare {
-    fn get_conflicts_internal(&self, other: &Self, time: DateTime<Utc>, field_path: &str) -> Option<String> {
+    fn get_conflicts_internal(&self, other: &Self, time: DateTime<Utc>, field_path: &str) -> (Option<String>, bool) {
         if self.len() != other.len() {
-            return Some(format!("- {}: Expected length was {}, but observed length was {}", field_path, self.len(), other.len()));
+            return (Some(format!("- {}: Expected length was {}, but observed length was {}", field_path, self.len(), other.len())), true);
         }
 
+        let mut all_canonical = true;
+        let all_canonical_ref = &mut all_canonical;
         let output = Iterator::zip(self.iter(), other.iter())
             .enumerate()
             .filter_map(|(i, (a, b))| {
-                a.get_conflicts_internal(b, time, &format!("{}/{}", field_path, i))
+                let (conflicts, canonical) = a.get_conflicts_internal(b, time, &format!("{}/{}", field_path, i));
+                *all_canonical_ref &= canonical;
+                conflicts
             })
             .join("\n");
         if output.is_empty() {
-            None
+            (None, all_canonical)
         } else {
-            Some(output)
+            (Some(output), all_canonical)
         }
     }
 }
@@ -73,11 +84,11 @@ impl<ItemT> PartialInformationCompare for Vec<ItemT> where ItemT: PartialInforma
 macro_rules! trivial_compare {
     ($($t:ty),+) => {
         $(impl PartialInformationCompare for $t {
-            fn get_conflicts_internal(&self, other: &Self, _: DateTime<Utc>, field_path: &str) -> Option<String> {
+            fn get_conflicts_internal(&self, other: &Self, _: DateTime<Utc>, field_path: &str) -> (Option<String>, bool) {
                 if self.eq(other) {
-                    None
+                    (None, true)
                 } else {
-                    Some(format!("- {}: Expected {:?}, but observed {:?}", field_path, self, other))
+                    (Some(format!("- {}: Expected {:?}, but observed {:?}", field_path, self, other)), true)
                 }
             }
         })+

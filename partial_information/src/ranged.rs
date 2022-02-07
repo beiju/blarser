@@ -58,6 +58,30 @@ impl<UnderlyingType> ops::Add<Ranged<UnderlyingType>> for Ranged<UnderlyingType>
     }
 }
 
+impl<'a, UnderlyingType> ops::Add<Ranged<UnderlyingType>> for &'a Ranged<UnderlyingType>
+    where UnderlyingType: Copy + Debug + PartialOrd,
+          &'a UnderlyingType: ops::Add<UnderlyingType, Output=UnderlyingType> {
+    type Output = Ranged<UnderlyingType>;
+
+    //noinspection DuplicatedCode
+    fn add(self, rhs: Ranged<UnderlyingType>) -> Ranged<UnderlyingType> {
+        match (self, rhs) {
+            (Ranged::Known(a), Ranged::Known(b)) => {
+                Ranged::Known(a + b)
+            }
+            (Ranged::Known(a), Ranged::Range(b1, b2)) => {
+                Ranged::Range(a + b1, a + b2)
+            }
+            (Ranged::Range(a1, a2), Ranged::Known(b)) => {
+                Ranged::Range(a1 + b, a2 + b)
+            }
+            (Ranged::Range(a1, a2), Ranged::Range(b1, b2)) => {
+                Ranged::Range(a1 + b1, a2 + b2)
+            }
+        }
+    }
+}
+
 impl<UnderlyingType> ops::AddAssign<Ranged<UnderlyingType>> for Ranged<UnderlyingType>
     where UnderlyingType: ops::Add<UnderlyingType, Output=UnderlyingType> + Copy + Debug + PartialOrd {
     fn add_assign(&mut self, rhs: Ranged<UnderlyingType>) {
@@ -98,8 +122,8 @@ impl<UnderlyingType> ops::AddAssign<UnderlyingType> for Ranged<UnderlyingType>
 
 impl<T> PartialInformationCompare for Ranged<T>
     where T: Clone + Debug + PartialOrd {
-    fn get_conflicts_internal(&self, other: &Self, time: DateTime<Utc>, field_path: &str) -> Option<String> {
-        match other {
+    fn get_conflicts_internal(&self, other: &Self, _: DateTime<Utc>, field_path: &str) -> (Option<String>, bool) {
+        (match other {
             Ranged::Known(actual) => {
                 match self {
                     Ranged::Known(expected) => {
@@ -123,6 +147,6 @@ impl<T> PartialInformationCompare for Ranged<T>
             _ => {
                 panic!("Actual value must be Known")
             }
-        }
+        }, true) // Ranged is always canonical
     }
 }
