@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::fmt::format;
 use std::iter;
 use chrono::{DateTime, Duration, Utc};
 use itertools::Itertools;
@@ -160,12 +161,7 @@ impl Entity for Game {
         let mut earliest = EarliestEvent::new();
 
         let sim: Sim = state.get_sim(from_time);
-        if from_time < sim.earlseason_date && sim.earlseason_date <= to_time {
-            earliest.push(GenericEvent {
-                time: sim.earlseason_date,
-                event_type: GenericEventType::EarlseasonStart,
-            })
-        }
+        earliest.push_opt(sim.get_earlseason_start(from_time, to_time));
 
         // There's a game update without a corresponding game event. It happens at the end of the
         // first half of each inning, and from a cursory look at the game event json it appears to
@@ -233,7 +229,7 @@ impl Game {
         };
 
         match event.r#type {
-            EventType::LetsGo => self.lets_go(),
+            EventType::LetsGo => self.lets_go(event),
             EventType::StormWarning => self.storm_warning(event),
             EventType::PlayBall => self.play_ball(event),
             EventType::HalfInning => self.half_inning(event, state),
@@ -345,15 +341,16 @@ impl Game {
         FeedEventChangeResult::Ok
     }
 
-    fn lets_go(&mut self) -> FeedEventChangeResult {
+    fn lets_go(&mut self, event: &EventuallyEvent) -> FeedEventChangeResult {
         self.game_start = true;
         self.game_start_phase = -1;
         self.home.team_batter_count = Some(-1);
         self.away.team_batter_count = Some(-1);
 
+        self.game_event(event);
+
         FeedEventChangeResult::Ok
     }
-
 
     fn game_event(&mut self, first_event: &EventuallyEvent) {
         let events = &first_event.metadata.siblings;

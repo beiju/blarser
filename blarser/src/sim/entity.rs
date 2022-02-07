@@ -43,6 +43,12 @@ impl EarliestEvent {
         }
     }
 
+    pub fn push_opt(&mut self, opt: Option<GenericEvent>) {
+        if let Some(event) = opt {
+            self.push(event);
+        }
+    }
+
     pub fn into_inner(self) -> Option<GenericEvent> {
         self.0
     }
