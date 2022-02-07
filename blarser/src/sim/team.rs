@@ -5,8 +5,7 @@ use partial_information::{PartialInformationCompare, Cached};
 use partial_information_derive::PartialInformationCompare;
 
 use crate::api::{EventType, EventuallyEvent};
-use crate::event_utils;
-use crate::sim::{Entity, FeedEventChangeResult, Game};
+use crate::sim::{Entity, FeedEventChangeResult};
 use crate::state::{StateInterface, GenericEvent, GenericEventType};
 
 #[derive(Clone, Debug, Deserialize, PartialInformationCompare)]

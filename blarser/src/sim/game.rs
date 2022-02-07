@@ -9,7 +9,7 @@ use partial_information::{Cached, MaybeKnown, PartialInformationCompare, Ranged}
 use partial_information_derive::PartialInformationCompare;
 
 use crate::api::{EventType, EventuallyEvent};
-use crate::{api, event_utils};
+use crate::event_utils;
 use crate::sim::{Entity, FeedEventChangeResult, parse, Player, Sim, Team};
 use crate::sim::entity::EarliestEvent;
 use crate::sim::parse::Base;
@@ -188,6 +188,7 @@ impl Entity for Game {
     }
 
     fn apply_event(&mut self, event: &GenericEvent, state: &StateInterface) -> FeedEventChangeResult {
+        #[allow(unreachable_patterns)]
         match &event.event_type {
             GenericEventType::EarlseasonStart => {
                 // This event generates odds and sets a bunch of properties
@@ -911,13 +912,5 @@ impl Game {
         self.game_event(event);
 
         FeedEventChangeResult::Ok
-    }
-}
-
-fn plural(n: f32) -> &'static str {
-    if n == 1.0 {
-        ""
-    } else {
-        "s"
     }
 }

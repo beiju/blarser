@@ -145,6 +145,29 @@ impl Player {
 
                 FeedEventChangeResult::Ok
             }
+            EventType::ModExpires => {
+                let mods: Vec<String> = serde_json::from_value(event.metadata.other.get("mods")
+                    .expect("ModExpires event must have 'mods' property in metadata").clone())
+                    .expect("Failed to parse 'mods' property in metadata");
+                let type_i = event.metadata.other.get("type")
+                    .expect("ModExpires event must have 'type' property in metadata").clone()
+                    .as_i64()
+                    .expect("Failed to parse 'type' property in metadata");
+
+                let list = match type_i {
+                    0 => &mut self.perm_attr,
+                    2 => &mut self.seas_attr,
+                    3 => &mut self.game_attr,
+                    4 => &mut self.item_attr,
+                    i => panic!("Unexpected value {} for mod type", i),
+                };
+
+                for mod_name in mods {
+                    list.retain(|m| m != &mod_name);
+                }
+
+                FeedEventChangeResult::Ok
+            }
             other => {
                 panic!("{:?} event does not apply to Player", other)
             }

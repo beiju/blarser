@@ -8,10 +8,6 @@ fn change_game(event: &EventuallyEvent) -> (&'static str, Option<Uuid>) {
     ("game", Some(*event_utils::get_one_id(&event.game_tags, "gameTags")))
 }
 
-fn change_team(event: &EventuallyEvent) -> (&'static str, Option<Uuid>) {
-    ("team", Some(*event_utils::get_one_id(&event.team_tags, "teamTags")))
-}
-
 fn change_team_i(event: &EventuallyEvent, i: usize) -> (&'static str, Option<Uuid>) {
     ("team", Some(event.team_tags[i]))
 }
