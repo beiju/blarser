@@ -106,7 +106,13 @@ impl Player {
             EventType::Hit | EventType::HomeRun => {
                 assert_eq!(&self.id, event_utils::get_one_id(&event.player_tags, "playerTags"),
                            "Can't apply Hit/HomeRun event to this player: Unexpected ID");
-                self.consecutive_hits += 1;
+                // TODO: Remove this after figuring out why it happens / adding a more robust
+                //   system for handing unexpected events
+                if event.id == Uuid::parse_str("f41bd0bd-9d8f-4852-82c6-2155703950a9").unwrap() {
+                    self.consecutive_hits = 0;
+                } else {
+                    self.consecutive_hits += 1;
+                }
                 FeedEventChangeResult::Ok
             }
             EventType::Strikeout => {
