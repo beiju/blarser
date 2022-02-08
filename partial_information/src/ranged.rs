@@ -1,7 +1,6 @@
 use std::fmt::Debug;
 use std::ops;
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Deserializer};
 use crate::PartialInformationCompare;
 
 #[derive(Debug, Clone)]
@@ -23,15 +22,6 @@ impl<UnderlyingType> Ranged<UnderlyingType>
                 lower <= other && other <= upper
             }
         }
-    }
-}
-
-impl<'de, UnderlyingType> Deserialize<'de> for Ranged<UnderlyingType>
-    where UnderlyingType: for<'de2> Deserialize<'de2> + Clone + Debug + PartialOrd {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where D: Deserializer<'de> {
-        let val: UnderlyingType = Deserialize::deserialize(deserializer)?;
-        Ok(Ranged::Known(val))
     }
 }
 
@@ -120,28 +110,16 @@ impl<UnderlyingType> ops::AddAssign<UnderlyingType> for Ranged<UnderlyingType>
     }
 }
 
-impl<T> PartialInformationCompare for Ranged<T>
-    where T: Clone + Debug + PartialOrd + for<'de> Deserialize<'de> {
+impl<'exp, 'obs, T: 'exp + 'obs> PartialInformationCompare<'exp, 'obs> for Ranged<T>
+    where T: Clone + Debug + Ord {
     type Raw = T;
+    type Diff = Option<(&'exp Self, &'obs T)>;
 
-    fn get_conflicts_internal(&self, other: &T, _: DateTime<Utc>, field_path: &str) -> (Option<String>, bool) {
-        (match self {
-            Ranged::Known(expected) => {
-                if other == expected {
-                    None
-                } else {
-                    Some(format!("- {}: Expected {:?}, but value was {:?}",
-                                 field_path, expected, other))
-                }
-            }
-            Ranged::Range(lower, upper) => {
-                if lower <= other && other <= upper {
-                    None
-                } else {
-                    Some(format!("- {}: Expected value between {:?} and {:?}, but value was {:?}",
-                                 field_path, lower, upper, other))
-                }
-            }
-        }, true) // Ranged is always canonical
+    fn diff(&'exp self, other: &'obs T, _: DateTime<Utc>) -> Self::Diff {
+        if self.could_be(other) {
+            None
+        } else {
+            Some((self, other))
+        }
     }
 }

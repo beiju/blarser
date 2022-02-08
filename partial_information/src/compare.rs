@@ -1,94 +1,92 @@
 use std::collections::{HashMap, HashSet};
-use std::fmt::{Debug, Display};
 use std::hash::Hash;
+use std::iter;
 use uuid::Uuid;
 use std::iter::Iterator;
-use itertools::Itertools;
 use chrono::{DateTime, Utc};
 
-pub trait PartialInformationCompare
-    where Self::Raw: Debug + for<'de> ::serde::Deserialize<'de> {
+pub trait PartialInformationCompare<'exp, 'obs> {
     type Raw;
+    type Diff;
 
-    fn get_conflicts(&self, other: &Self::Raw, time: DateTime<Utc>) -> (Option<String>, bool) {
-        self.get_conflicts_internal(other, time, &String::new())
-    }
-
-    fn get_conflicts_internal(&self, other: &Self::Raw, time: DateTime<Utc>, field_path: &str) -> (Option<String>, bool);
+    fn diff(&'exp self, other: &'obs Self::Raw, time: DateTime<Utc>) -> Self::Diff;
 }
 
-impl<K, V> PartialInformationCompare for HashMap<K, V>
-    where V: PartialInformationCompare,
-          K: Eq + Hash + Display + Debug + for<'de> ::serde::Deserialize<'de>,
-          V::Raw: for<'de> ::serde::Deserialize<'de> {
+pub struct HashMapDiff<'exp, 'obs, KeyT, ValT: PartialInformationCompare<'exp, 'obs>> {
+    missing: HashMap<KeyT, &'exp ValT>,
+    extra: HashMap<KeyT, &'obs ValT::Raw>,
+    common: HashMap<KeyT, ValT::Diff>,
+}
+
+impl<'exp, 'obs, K, V> PartialInformationCompare<'exp, 'obs> for HashMap<K, V>
+    where K: 'exp + 'obs + Eq + Hash + Clone,
+          V: 'exp + PartialInformationCompare<'exp, 'obs>,
+          V::Raw: 'obs {
     type Raw = HashMap<K, V::Raw>;
+    type Diff = HashMapDiff<'exp, 'obs, K, V>;
 
-    fn get_conflicts_internal(&self, observed: &Self::Raw, time: DateTime<Utc>, field_path: &str) -> (Option<String>, bool) {
-        let expected_keys: HashSet<_> = self.keys().collect();
-        let observed_keys: HashSet<_> = observed.keys().collect();
+    fn diff(&'exp self, other: &'obs Self::Raw, time: DateTime<Utc>) -> Self::Diff {
+        let self_keys: HashSet<_> = self.keys().collect();
+        let other_keys: HashSet<_> = other.keys().collect();
 
-        let iter1 = expected_keys.difference(&observed_keys)
-            .map(|key| format!("- {}/{} expected but was not observed", field_path, key));
-        let iter2 = observed_keys.difference(&expected_keys)
-            .map(|key| format!("- {}/{} observed but was not expected", field_path, key));
-        let all_canonical = &mut true;
-        let iter3 = observed_keys.intersection(&expected_keys)
-            .filter_map(|key| {
-                let (conflicts, canonical) = self.get(key).unwrap().get_conflicts_internal(
-                    observed.get(key).unwrap(),
-                    time, &format!("{}/{}", field_path, key));
-                *all_canonical &= canonical;
-                conflicts
-            });
-
-
-        let output = iter1.chain(iter2).chain(iter3).join("\n");
-        if !*all_canonical { println!("Vec not canonical") };
-        if output.is_empty() {
-            (None, *all_canonical)
-        } else {
-            (Some(output), *all_canonical)
+        HashMapDiff {
+            missing: self_keys.difference(&other_keys)
+                .map(|&key| (key.clone(), self.get(key).unwrap()))
+                .collect(),
+            extra: other_keys.difference(&self_keys)
+                .map(|&key| (key.clone(), other.get(key).unwrap()))
+                .collect(),
+            common: other_keys.intersection(&self_keys)
+                .map(|&key| {
+                    (key.clone(), self.get(key).unwrap().diff(other.get(key).unwrap(), time))
+                })
+                .collect(),
         }
     }
 }
 
-impl<ItemT> PartialInformationCompare for Option<ItemT>
-    where ItemT: PartialInformationCompare + Debug,
-          ItemT::Raw: Debug {
+pub enum OptionDiff<'exp, 'obs, ItemT: 'exp + PartialInformationCompare<'exp, 'obs>> {
+    ExpectedNoneGotNone,
+    ExpectedNoneGotSome(&'obs ItemT::Raw),
+    ExpectedSomeGotNone(&'exp ItemT),
+    ExpectedSomeGotSome(ItemT::Diff),
+}
+
+impl<'exp, 'obs, ItemT> PartialInformationCompare<'exp, 'obs> for Option<ItemT>
+    where ItemT: 'exp + PartialInformationCompare<'exp, 'obs>,
+          ItemT::Raw: 'obs {
     type Raw = Option<ItemT::Raw>;
+    type Diff = OptionDiff<'exp, 'obs, ItemT>;
 
-    fn get_conflicts_internal(&self, other: &Self::Raw, time: DateTime<Utc>, field_path: &str) -> (Option<String>, bool) {
+    fn diff(&'exp self, other: &'obs Self::Raw, time: DateTime<Utc>) -> Self::Diff {
         match (self, other) {
-            (None, None) => (None, true),
-            (None, Some(val)) => (Some(format!("- {} Expected null, but observed {:?}", field_path, val)), true),
-            (Some(val), None) => (Some(format!("- {} Expected {:?}, but observed null", field_path, val)), true),
-            (Some(a), Some(b)) => a.get_conflicts_internal(b, time, field_path)
+            (None, None) => OptionDiff::ExpectedNoneGotNone,
+            (None, Some(val)) => OptionDiff::ExpectedNoneGotSome(val),
+            (Some(val), None) => OptionDiff::ExpectedSomeGotNone(val),
+            (Some(a), Some(b)) => OptionDiff::ExpectedSomeGotSome(a.diff(b, time))
         }
     }
 }
 
-impl<ItemT> PartialInformationCompare for Vec<ItemT> where ItemT: PartialInformationCompare {
+pub struct VecDiff<'exp, 'obs, ItemT: PartialInformationCompare<'exp, 'obs>> {
+    missing: &'exp [ItemT],
+    extra: &'obs [ItemT::Raw],
+    common: Vec<ItemT::Diff>,
+}
+
+impl<'exp, 'obs, ItemT> PartialInformationCompare<'exp, 'obs> for Vec<ItemT>
+    where ItemT: 'exp + PartialInformationCompare<'exp, 'obs>,
+          ItemT::Raw: 'obs {
     type Raw = Vec<ItemT::Raw>;
+    type Diff = VecDiff<'exp, 'obs, ItemT>;
 
-    fn get_conflicts_internal(&self, other: &Self::Raw, time: DateTime<Utc>, field_path: &str) -> (Option<String>, bool) {
-        if self.len() != other.len() {
-            return (Some(format!("- {}: Expected length was {}, but observed length was {}", field_path, self.len(), other.len())), true);
-        }
-
-        let mut all_canonical = true;
-        let all_canonical_ref = &mut all_canonical;
-        let output = Iterator::zip(self.iter(), other.iter())
-            .enumerate()
-            .filter_map(|(i, (a, b))| {
-                let (conflicts, canonical) = a.get_conflicts_internal(b, time, &format!("{}/{}", field_path, i));
-                *all_canonical_ref &= canonical;
-                conflicts
-            })
-            .join("\n");
-        if output.is_empty() {
-            (None, all_canonical)
-        } else {
-            (Some(output), all_canonical)
+    fn diff(&'exp self, other: &'obs Self::Raw, time: DateTime<Utc>) -> Self::Diff {
+        VecDiff {
+            missing: &self[other.len()..],
+            extra: &other[self.len()..],
+            common: iter::zip(self, other)
+                .map(|(self_item, other_item)| self_item.diff(other_item, time))
+                .collect(),
         }
     }
 }
@@ -96,13 +94,15 @@ impl<ItemT> PartialInformationCompare for Vec<ItemT> where ItemT: PartialInforma
 
 macro_rules! trivial_compare {
     ($($t:ty),+) => {
-        $(impl PartialInformationCompare for $t {
+        $(impl<'exp, 'obs> PartialInformationCompare<'exp, 'obs> for $t {
             type Raw = Self;
-            fn get_conflicts_internal(&self, other: &Self, _: DateTime<Utc>, field_path: &str) -> (Option<String>, bool) {
+            type Diff = Option<(&'exp $t, &'obs $t)>;
+
+            fn diff(&'exp self, other: &'obs Self, _: DateTime<Utc>) -> Self::Diff {
                 if self.eq(other) {
-                    (None, true)
+                    None
                 } else {
-                    (Some(format!("- {}: Expected {:?}, but observed {:?}", field_path, self, other)), true)
+                    Some((self, other))
                 }
             }
         })+

@@ -35,20 +35,21 @@ impl<UnderlyingType> From<UnderlyingType> for MaybeKnown<UnderlyingType>
     }
 }
 
-impl<T> PartialInformationCompare for MaybeKnown<T>
+impl<'exp, 'obs, T: 'exp + 'obs> PartialInformationCompare<'exp, 'obs> for MaybeKnown<T>
     where T: Clone + Debug + PartialOrd + for<'de> Deserialize<'de> {
     type Raw = T;
+    type Diff = Option<(&'exp T, &'obs T)>;
 
-    fn get_conflicts_internal(&self, other: &T, _: DateTime<Utc>, field_path: &str) -> (Option<String>, bool) {
-        (match self {
+    fn diff(&'exp self, other: &'obs T, _: DateTime<Utc>) -> Self::Diff {
+        match self {
             MaybeKnown::Unknown => { None }
             MaybeKnown::Known(expected) => {
                 if expected == other {
                     None
                 } else {
-                    Some(format!("- {}: Expected {:?}, but value was {:?}", field_path, expected, other))
+                    Some((expected, other))
                 }
             }
-        }, true) // MaybeKnown is always canonical
+        }
     }
 }
