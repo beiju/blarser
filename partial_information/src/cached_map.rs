@@ -29,11 +29,13 @@ impl<'de, KeyType, ValType> Deserialize<'de> for CachedMap<KeyType, ValType>
 }
 
 impl<KeyType, ValType> PartialInformationCompare for CachedMap<KeyType, ValType>
-    where KeyType: Hash + Eq + Display,
+    where KeyType: Hash + Eq + Display + Debug + for<'de> ::serde::Deserialize<'de>,
           ValType: Clone + Debug + PartialOrd + PartialInformationCompare {
-    fn get_conflicts_internal(&self, other: &Self, time: DateTime<Utc>, field_path: &str) -> (Option<String>, bool) {
+    type Raw = HashMap<KeyType, ValType::Raw>;
+
+    fn get_conflicts_internal(&self, other: &Self::Raw, time: DateTime<Utc>, field_path: &str) -> (Option<String>, bool) {
         let self_keys: HashSet<_> = self.values.keys().collect();
-        let other_keys: HashSet<_> = other.values.keys().collect();
+        let other_keys: HashSet<_> = other.keys().collect();
 
         let missing_keys = self_keys.difference(&other_keys)
             .map(|&key| {
@@ -65,7 +67,7 @@ impl<KeyType, ValType> PartialInformationCompare for CachedMap<KeyType, ValType>
 
         let invalid_values = other_keys.iter()
             .map(|&key| {
-                let observed_val = other.values.get(key)
+                let observed_val = other.get(key)
                     .expect("Observed values must be known");
 
                 match (self.values.get(key), self.cached_values.get(key)) {

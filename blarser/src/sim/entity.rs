@@ -12,7 +12,7 @@ pub enum FeedEventChangeResult {
 pub trait Entity: for<'de> Deserialize<'de> + PartialInformationCompare + Clone + Debug {
     fn name() -> &'static str;
 
-    fn new(json: serde_json::Value) -> Self where Self: Sized {
+    fn new(json: serde_json::Value) -> Self::Raw where Self::Raw: Sized {
         serde_json::from_value(json)
             .expect("Error converting entity JSON to entity type")
     }

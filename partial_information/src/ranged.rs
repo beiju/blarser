@@ -121,31 +121,26 @@ impl<UnderlyingType> ops::AddAssign<UnderlyingType> for Ranged<UnderlyingType>
 }
 
 impl<T> PartialInformationCompare for Ranged<T>
-    where T: Clone + Debug + PartialOrd {
-    fn get_conflicts_internal(&self, other: &Self, _: DateTime<Utc>, field_path: &str) -> (Option<String>, bool) {
-        (match other {
-            Ranged::Known(actual) => {
-                match self {
-                    Ranged::Known(expected) => {
-                        if actual == expected {
-                            None
-                        } else {
-                            Some(format!("- {}: Expected {:?}, but value was {:?}",
-                                         field_path, expected, actual))
-                        }
-                    }
-                    Ranged::Range(lower, upper) => {
-                        if lower <= actual && actual <= upper {
-                            None
-                        } else {
-                            Some(format!("- {}: Expected value between {:?} and {:?}, but value was {:?}",
-                                         field_path, lower, upper, actual))
-                        }
-                    }
+    where T: Clone + Debug + PartialOrd + for<'de> Deserialize<'de> {
+    type Raw = T;
+
+    fn get_conflicts_internal(&self, other: &T, _: DateTime<Utc>, field_path: &str) -> (Option<String>, bool) {
+        (match self {
+            Ranged::Known(expected) => {
+                if other == expected {
+                    None
+                } else {
+                    Some(format!("- {}: Expected {:?}, but value was {:?}",
+                                 field_path, expected, other))
                 }
             }
-            _ => {
-                panic!("Actual value must be Known")
+            Ranged::Range(lower, upper) => {
+                if lower <= other && other <= upper {
+                    None
+                } else {
+                    Some(format!("- {}: Expected value between {:?} and {:?}, but value was {:?}",
+                                 field_path, lower, upper, other))
+                }
             }
         }, true) // Ranged is always canonical
     }

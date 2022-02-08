@@ -6,17 +6,24 @@ use std::iter::Iterator;
 use itertools::Itertools;
 use chrono::{DateTime, Utc};
 
-pub trait PartialInformationCompare {
-    fn get_conflicts(&self, other: &Self, time: DateTime<Utc>) -> (Option<String>, bool) {
+pub trait PartialInformationCompare
+    where Self::Raw: Debug + for<'de> ::serde::Deserialize<'de> {
+    type Raw;
+
+    fn get_conflicts(&self, other: &Self::Raw, time: DateTime<Utc>) -> (Option<String>, bool) {
         self.get_conflicts_internal(other, time, &String::new())
     }
 
-    fn get_conflicts_internal(&self, other: &Self, time: DateTime<Utc>, field_path: &str) -> (Option<String>, bool);
+    fn get_conflicts_internal(&self, other: &Self::Raw, time: DateTime<Utc>, field_path: &str) -> (Option<String>, bool);
 }
 
 impl<K, V> PartialInformationCompare for HashMap<K, V>
-    where V: PartialInformationCompare, K: Eq + Hash + Display {
-    fn get_conflicts_internal(&self, observed: &Self, time: DateTime<Utc>, field_path: &str) -> (Option<String>, bool) {
+    where V: PartialInformationCompare,
+          K: Eq + Hash + Display + Debug + for<'de> ::serde::Deserialize<'de>,
+          V::Raw: for<'de> ::serde::Deserialize<'de> {
+    type Raw = HashMap<K, V::Raw>;
+
+    fn get_conflicts_internal(&self, observed: &Self::Raw, time: DateTime<Utc>, field_path: &str) -> (Option<String>, bool) {
         let expected_keys: HashSet<_> = self.keys().collect();
         let observed_keys: HashSet<_> = observed.keys().collect();
 
@@ -45,8 +52,12 @@ impl<K, V> PartialInformationCompare for HashMap<K, V>
     }
 }
 
-impl<ItemT> PartialInformationCompare for Option<ItemT> where ItemT: PartialInformationCompare + Debug {
-    fn get_conflicts_internal(&self, other: &Self, time: DateTime<Utc>, field_path: &str) -> (Option<String>, bool) {
+impl<ItemT> PartialInformationCompare for Option<ItemT>
+    where ItemT: PartialInformationCompare + Debug,
+          ItemT::Raw: Debug {
+    type Raw = Option<ItemT::Raw>;
+
+    fn get_conflicts_internal(&self, other: &Self::Raw, time: DateTime<Utc>, field_path: &str) -> (Option<String>, bool) {
         match (self, other) {
             (None, None) => (None, true),
             (None, Some(val)) => (Some(format!("- {} Expected null, but observed {:?}", field_path, val)), true),
@@ -57,7 +68,9 @@ impl<ItemT> PartialInformationCompare for Option<ItemT> where ItemT: PartialInfo
 }
 
 impl<ItemT> PartialInformationCompare for Vec<ItemT> where ItemT: PartialInformationCompare {
-    fn get_conflicts_internal(&self, other: &Self, time: DateTime<Utc>, field_path: &str) -> (Option<String>, bool) {
+    type Raw = Vec<ItemT::Raw>;
+
+    fn get_conflicts_internal(&self, other: &Self::Raw, time: DateTime<Utc>, field_path: &str) -> (Option<String>, bool) {
         if self.len() != other.len() {
             return (Some(format!("- {}: Expected length was {}, but observed length was {}", field_path, self.len(), other.len())), true);
         }
@@ -84,6 +97,7 @@ impl<ItemT> PartialInformationCompare for Vec<ItemT> where ItemT: PartialInforma
 macro_rules! trivial_compare {
     ($($t:ty),+) => {
         $(impl PartialInformationCompare for $t {
+            type Raw = Self;
             fn get_conflicts_internal(&self, other: &Self, _: DateTime<Utc>, field_path: &str) -> (Option<String>, bool) {
                 if self.eq(other) {
                     (None, true)

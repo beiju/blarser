@@ -26,12 +26,14 @@ impl<'de, UnderlyingType> Deserialize<'de> for Cached<UnderlyingType>
 
 impl<T> PartialInformationCompare for Cached<T>
     where T: Clone + Debug + PartialInformationCompare {
-    fn get_conflicts_internal(&self, other: &Self, time: DateTime<Utc>, field_path: &str) -> (Option<String>, bool) {
-        let (primary_val_conflicts, primary_val_canonical) = self.value.get_conflicts_internal(&other.value, time, field_path);
+    type Raw = T::Raw;
+
+    fn get_conflicts_internal(&self, other: &Self::Raw, time: DateTime<Utc>, field_path: &str) -> (Option<String>, bool) {
+        let (primary_val_conflicts, primary_val_canonical) = self.value.get_conflicts_internal(other, time, field_path);
         if let Some(primary_val_conflicts) = primary_val_conflicts {
             if let Some((cached_val, expiry)) = &self.cached {
                 // Cached value is always non-canonical, no matter what its descendants say
-                let (cached_val_conflicts, _) = cached_val.get_conflicts_internal(&other.value, time, field_path);
+                let (cached_val_conflicts, _) = cached_val.get_conflicts_internal(other, time, field_path);
                 if let Some(cached_val_conflicts) = cached_val_conflicts {
                     // Neither primary nor cached match
                     let expired_txt = if expiry < &time {
