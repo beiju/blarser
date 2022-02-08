@@ -1,4 +1,3 @@
-#![feature(trivial_bounds)]
 // Modified from https://users.rust-lang.org/t/syn-how-do-i-iterate-on-the-fields-of-a-struct/42600/5
 #![allow(unused_imports)]
 extern crate proc_macro;
@@ -100,6 +99,7 @@ fn impl_partial_information_compare(ast: DeriveInput) -> Result<TokenStream2> {
                 #(#raw_members),*
             }
 
+            // This requires #![feature(trivial_bounds)] in the consumer crate
             impl Default for #name_plus_raw where #name: Default {
                 fn default() -> Self { todo!() }
             }
