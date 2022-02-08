@@ -4,10 +4,11 @@ use serde::Serialize;
 use rocket::form::{Form, FromForm};
 use rocket::response::Redirect;
 use rocket::{State, uri};
-
+use uuid::Uuid;
 
 use blarser::db::{BlarserDbConn, get_pending_approvals, get_latest_ingest, get_logs_for, IngestApproval, set_approval, IngestLogAndApproval};
 use blarser::ingest::IngestTask;
+use blarser::StateInterface;
 
 #[derive(rocket::Responder)]
 pub enum ServerError {
@@ -91,4 +92,15 @@ pub async fn approve(_task: &State<IngestTask>, conn: BlarserDbConn, approval: F
     // task.notify_callback(approval_id);
 
     Ok(Redirect::to(redirect_to))
+}
+
+#[rocket::get("/changes/<entity_type>/<entity_id>")]
+pub async fn changes(conn: BlarserDbConn, entity_type: String, entity_id: Uuid) {
+    let _x = conn.run(|c| {
+        // TODO Store "last complete ingest" somewhere
+        let state = StateInterface::latest_ingest(&c)
+            .expect("There were no ingests");
+
+        ()
+    }).await;
 }

@@ -13,3 +13,5 @@ pub mod db_types;
 mod sim;
 mod state;
 mod event_utils;
+
+pub use state::StateInterface;

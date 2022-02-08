@@ -7,6 +7,7 @@ use diesel::{
     PgConnection,
     QueryDsl,
 };
+use diesel::dsl::max;
 use itertools::Itertools;
 use rocket::{info, warn};
 
@@ -147,6 +148,18 @@ impl<'conn, 'state, EntityT: Entity> VersionsIter<'conn, 'state, EntityT> {
 }
 
 impl<'conn> StateInterface<'conn> {
+    pub fn latest_ingest(c: &'conn &'conn mut PgConnection) -> Option<StateInterface<'conn>> {
+        use crate::schema::ingests::dsl;
+        dsl::ingests.select(max(dsl::id)).get_result::<Option<i32>>(*c)
+            .expect("Query to get latest ID failed")
+            .map(move |latest_id| {
+                StateInterface {
+                    ingest_id: latest_id,
+                    conn: c,
+                }
+            })
+    }
+
     // Inclusive of start time, exclusive of end time
     pub fn versions<'state, EntityT: Entity + 'state>(&'state self, entity_id: Uuid, start_time: DateTime<Utc>, end_time: DateTime<Utc>)
                                                       -> VersionsIter<'conn, 'state, EntityT> {
