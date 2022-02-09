@@ -1,13 +1,15 @@
 use std::collections::{HashMap};
+use std::fmt::Debug;
 use std::hash::Hash;
-use std::marker::PhantomData;
 use std::ops::Add;
 use chrono::{DateTime, Utc};
+use serde::Deserialize;
 use crate::compare::PartialInformationDiff;
 use crate::PartialInformationCompare;
 
+#[derive(Clone, Debug, Deserialize)]
 pub struct CachedMap<K, V>
-    where K: Hash + Eq + Clone,
+    where K: Hash + Eq + Clone + Debug,
           V: PartialInformationCompare {
     pub values: HashMap<K, V>,
     // Cached values also needs to cache the non-existence of a property, so it holds an option
@@ -15,7 +17,7 @@ pub struct CachedMap<K, V>
 }
 
 impl<KeyType, ValType> CachedMap<KeyType, ValType>
-    where KeyType: Hash + Eq + Clone,
+    where KeyType: Hash + Eq + Clone + Debug,
           ValType: PartialInformationCompare {
     pub fn insert(&mut self, key: KeyType, value: ValType, expiry: DateTime<Utc>) {
         let old_val = self.values.insert(key.clone(), value);
@@ -32,25 +34,26 @@ impl<KeyType, ValType> CachedMap<KeyType, ValType>
 }
 
 // TODO This will be easier to write once I start writing the methods on Diff types
-pub struct CachedMapDiff<'exp, 'obs, K, V: PartialInformationCompare> {
-    dummy1: HashMap<K, &'exp V>,
-    dummy2: HashMap<K, &'obs V::Raw>,
+#[derive(Debug)]
+pub struct CachedMapDiff<'d, K, V: PartialInformationCompare> {
+    dummy1: HashMap<K, &'d V>,
+    dummy2: HashMap<K, &'d V::Raw>,
 }
 
 impl<K, V> PartialInformationCompare for CachedMap<K, V>
-    where K: Hash + Eq + Clone,
-          V: PartialInformationCompare {
+    where K: 'static + Hash + Eq + Clone + for<'de> Deserialize<'de> + Debug,
+          V: 'static + PartialInformationCompare {
     type Raw = HashMap<K, V::Raw>;
-    type Diff<'exp, 'obs> = CachedMapDiff<'exp, 'obs, K, V>;
+    type Diff<'d> = CachedMapDiff<'d, K, V>;
 
-    fn diff<'exp, 'obs>(&'exp self, _observed: &'obs HashMap<K, V>, _: DateTime<Utc>) -> Self::Diff<'exp, 'obs> {
+    fn diff(&self, _observed: &HashMap<K, V::Raw>, _: DateTime<Utc>) -> Self::Diff<'_> {
         todo!()
     }
 }
 
-impl<'exp, 'obs, K, V> PartialInformationDiff<'exp, 'obs> for CachedMapDiff<'exp, 'obs, K, V>
-    where K: 'exp + Hash + Eq + Clone,
-          V: 'exp + PartialInformationCompare {
+impl<'d, K, V> PartialInformationDiff<'d> for CachedMapDiff<'d, K, V>
+    where K: 'd + Hash + Eq + Clone + Debug,
+          V: 'd + PartialInformationCompare {
     fn is_empty(&self) -> bool {
         todo!()
     }

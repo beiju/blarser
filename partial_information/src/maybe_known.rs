@@ -1,16 +1,17 @@
 use std::fmt::Debug;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Deserializer};
+use crate::compare::PartialInformationDiff;
 use crate::PartialInformationCompare;
 
 #[derive(Clone, Debug)]
-pub enum MaybeKnown<UnderlyingType: PartialOrd> {
+pub enum MaybeKnown<UnderlyingType> {
     Unknown,
     Known(UnderlyingType),
 }
 
 impl<UnderlyingType> MaybeKnown<UnderlyingType>
-    where UnderlyingType: Clone + Debug + PartialOrd {
+    where UnderlyingType: Clone + Debug {
     pub fn known(&self) -> Option<&UnderlyingType> {
         match self {
             MaybeKnown::Unknown => { None }
@@ -20,7 +21,7 @@ impl<UnderlyingType> MaybeKnown<UnderlyingType>
 }
 
 impl<'de, UnderlyingType> Deserialize<'de> for MaybeKnown<UnderlyingType>
-    where UnderlyingType: for<'de2> Deserialize<'de2> + Clone + Debug + PartialOrd {
+    where UnderlyingType: for<'de2> Deserialize<'de2> + Clone + Debug {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
         where D: Deserializer<'de> {
         let val: UnderlyingType = Deserialize::deserialize(deserializer)?;
@@ -29,32 +30,39 @@ impl<'de, UnderlyingType> Deserialize<'de> for MaybeKnown<UnderlyingType>
 }
 
 impl<UnderlyingType> From<UnderlyingType> for MaybeKnown<UnderlyingType>
-    where UnderlyingType: Clone + Debug + PartialOrd {
+    where UnderlyingType: Clone + Debug {
     fn from(item: UnderlyingType) -> Self {
         Self::Known(item)
     }
 }
 
-enum MaybeKnownDiff<'exp, 'obs, T: PartialInformationCompare> {
+#[derive(Debug)]
+pub enum MaybeKnownDiff<'d, T: 'd + PartialInformationCompare> {
     NoDiff,
-    Diff(T::Diff<'exp, 'obs>)
+    Diff(T::Diff<'d>),
 }
 
 impl<T> PartialInformationCompare for MaybeKnown<T>
-    where T: PartialOrd + PartialInformationCompare {
-    type Raw = T;
-    type Diff<'exp, 'obs> = MaybeKnownDiff<'exp, 'obs, T>;
+    where T: 'static + PartialInformationCompare {
+    type Raw = T::Raw;
+    type Diff<'d> = MaybeKnownDiff<'d, T>;
 
-    fn diff<'exp, 'obs>(&'exp self, observed: &'obs T, _: DateTime<Utc>) -> Self::Diff<'exp, 'obs> {
+    fn diff<'d>(&'d self, observed: &'d Self::Raw, time: DateTime<Utc>) -> Self::Diff<'d> {
         match self {
             MaybeKnown::Unknown => { MaybeKnownDiff::NoDiff }
             MaybeKnown::Known(expected) => {
-                if expected == observed {
-                    MaybeKnownDiff::NoDiff
-                } else {
-                    MaybeKnownDiff::Diff((expected, observed))
-                }
+                MaybeKnownDiff::Diff(expected.diff(observed, time))
             }
+        }
+    }
+}
+
+impl<'d, T> PartialInformationDiff<'d> for MaybeKnownDiff<'d, T>
+    where T: PartialInformationCompare {
+    fn is_empty(&self) -> bool {
+        match self {
+            MaybeKnownDiff::NoDiff => { true }
+            MaybeKnownDiff::Diff(nested) => { nested.is_empty() }
         }
     }
 }

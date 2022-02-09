@@ -8,9 +8,10 @@ use futures::{stream, Stream, StreamExt};
 use rocket::{info};
 use uuid::Uuid;
 use itertools::{Itertools};
+use partial_information::{PartialInformationDiff};
+
 use crate::api::{chronicler, ChroniclerItem};
 use crate::ingest::task::IngestState;
-
 use crate::sim;
 use crate::schema::*;
 use crate::state::{StateInterface};
@@ -385,48 +386,50 @@ fn find_placement_typed<'a, EntityT>(state: &StateInterface, this_update: &Inser
                                                  this_update.latest_time);
     let expected_entity = EntityT::new(this_update.data.clone());
     // Before calling next(), current_entity() returns the previous resolved version
-    let (starting_conflicts, canonical) = versions.current_entity().get_conflicts(&expected_entity, this_update.earliest_time);
-    assert!(canonical, "The starting version for a version iteration must be canonical");
+    let starting_diff = versions.current_entity().diff(&expected_entity, this_update.earliest_time);
 
-    let mut conflicts = Vec::new();
-    let mut valid_versions = Vec::new();
-    while let Some(version) = versions.next() {
-        let (conflict_str, is_canonical) = version.entity.get_conflicts(&expected_entity, version.valid_from);
-        if let Some(conflict_str) = conflict_str {
-            conflicts.push((version, conflict_str))
-        } else {
-            valid_versions.push((version, is_canonical))
-        }
-    }
+    info!("{:?}", starting_diff);
 
-    match (valid_versions.len(), conflicts.len()) {
-        (0, 0) => {
-            if let Some(starting_conflicts) = starting_conflicts {
-                panic!("{} update differs from previous value and there are no events to explain why:\n{}",
-                       this_update.entity_type, starting_conflicts);
-            } else {
-                panic!("Expected two consecutive Chron records for {} {} to differ, but they did not",
-                       this_update.entity_type, this_update.entity_id);
-            }
-        }
-        (0, _) => {
-            let placement_reasons = conflicts.into_iter().map(|(version, conflicts)| {
-                format!("Between {:#?} and {:#?}, after event {}:\n{}",
-                        version.valid_from,
-                        version.valid_until.map(|t| format!("{:?}", t)).unwrap_or("(unknown)".to_string()),
-                        version.from_event_debug,
-                        conflicts)
-            }).join("\n");
-            panic!("{} update cannot ever be placed -- no valid placements:\n{}", this_update.entity_type, placement_reasons);
-        }
-        (1, _) => {
-            info!("{} update can be placed", this_update.entity_type);
-            let (placed_version, is_canonical) = valid_versions.into_iter().exactly_one().ok().unwrap();
-            Some((placed_version.valid_from, placed_version.valid_until, is_canonical))
-        }
-        (_, _) => {
-            info!("{} update cannot currently be placed -- multiple valid placements", this_update.entity_type);
-            None
-        }
-    }
+    todo!()
+    // let mut conflicts = Vec::new();
+    // let mut valid_versions = Vec::new();
+    // while let Some(version) = versions.next() {
+    //     let diff = version.entity.diff(&expected_entity, version.valid_from);
+    //     if diff.is_empty() {
+    //         todo!()
+    //     } else {
+    //         conflicts.push((version, diff))
+    //     }
+    // }
+    //
+    // match (valid_versions.len(), conflicts.len()) {
+    //     (0, 0) => {
+    //         if starting_diff.is_empty() {
+    //             panic!("Expected two consecutive Chron records for {} {} to differ, but they did not",
+    //                    this_update.entity_type, this_update.entity_id);
+    //         } else {
+    //             panic!("{} update differs from previous value and there are no events to explain why:\n{:?}",
+    //                    this_update.entity_type, starting_diff);
+    //         }
+    //     }
+    //     (0, _) => {
+    //         let placement_reasons = conflicts.into_iter().map(|(version, conflicts)| {
+    //             format!("Between {:#?} and {:#?}, after event {}:\n{:?}",
+    //                     version.valid_from,
+    //                     version.valid_until.map(|t| format!("{:?}", t)).unwrap_or("(unknown)".to_string()),
+    //                     version.from_event_debug,
+    //                     conflicts)
+    //         }).join("\n");
+    //         panic!("{} update cannot ever be placed -- no valid placements:\n{}", this_update.entity_type, placement_reasons);
+    //     }
+    //     (1, _) => {
+    //         info!("{} update can be placed", this_update.entity_type);
+    //         let (placed_version, is_canonical) = valid_versions.into_iter().exactly_one().ok().unwrap();
+    //         Some((placed_version.valid_from, placed_version.valid_until, is_canonical))
+    //     }
+    //     (_, _) => {
+    //         info!("{} update cannot currently be placed -- multiple valid placements", this_update.entity_type);
+    //         None
+    //     }
+    // }
 }

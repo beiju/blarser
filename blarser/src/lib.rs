@@ -1,5 +1,6 @@
 #![feature(let_chains)]
 #![feature(trivial_bounds)] // Necessary for partial_information
+#![feature(generic_associated_types)] // Necessary for partial_information
 
 #[macro_use]
 extern crate diesel;

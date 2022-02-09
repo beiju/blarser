@@ -1,28 +1,30 @@
 use std::fmt::Debug;
 use std::ops::Add;
 use chrono::{DateTime, Utc};
+use serde::Deserialize;
 use crate::compare::PartialInformationDiff;
 
 use crate::PartialInformationCompare;
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct Cached<UnderlyingType>
-    where UnderlyingType: Clone {
+    where UnderlyingType: Clone + Debug {
     value: UnderlyingType,
     history: Vec<(UnderlyingType, DateTime<Utc>)>,
 }
 
-pub struct CachedDiff<'exp, 'obs, T: PartialInformationCompare> {
-    value_diff: T::Diff<'exp, 'obs>,
-    history_diffs: Vec<(T::Diff<'exp, 'obs>, DateTime<Utc>)>,
+#[derive(Debug)]
+pub struct CachedDiff<'d, T: 'd + PartialInformationCompare> {
+    value_diff: T::Diff<'d>,
+    history_diffs: Vec<(T::Diff<'d>, DateTime<Utc>)>,
 }
 
 impl<T> PartialInformationCompare for Cached<T>
-    where T: Clone + PartialInformationCompare {
+    where T: 'static + Clone + PartialInformationCompare {
     type Raw = T::Raw;
-    type Diff<'exp, 'obs> = CachedDiff<'exp, 'obs, T>;
+    type Diff<'d> = CachedDiff<'d, T>;
 
-    fn diff<'exp, 'obs>(&'exp self, observed: &'obs T, time: DateTime<Utc>) -> Self::Diff<'exp, 'obs> {
+    fn diff<'d>(&'d self, observed: &'d Self::Raw, time: DateTime<Utc>) -> Self::Diff<'d> {
         CachedDiff {
             value_diff: self.value.diff(observed, time),
             history_diffs: self.history.iter()
@@ -38,10 +40,10 @@ impl<T> PartialInformationCompare for Cached<T>
     }
 }
 
-impl<'exp, 'obs, T: 'exp> PartialInformationDiff<'exp, 'obs> for CachedDiff<'exp, 'obs, T>
+impl<'d, T: 'd> PartialInformationDiff<'d> for CachedDiff<'d, T>
     where T: Clone + PartialInformationCompare {
     fn is_empty(&self) -> bool {
-        self.value_diff.is_empty() && self.history_diffs.iter().all(|diff| diff.is_empty())
+        self.value_diff.is_empty() && self.history_diffs.iter().all(|(diff, _)| diff.is_empty())
     }
 }
 
