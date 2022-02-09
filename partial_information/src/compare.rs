@@ -5,61 +5,72 @@ use uuid::Uuid;
 use std::iter::Iterator;
 use chrono::{DateTime, Utc};
 
-pub trait PartialInformationCompare<'exp, 'obs> {
-    type Raw;
-    type Diff;
-
-    fn diff(&'exp self, other: &'obs Self::Raw, time: DateTime<Utc>) -> Self::Diff;
+pub trait PartialInformationDiff<'exp, 'obs> {
+    fn is_empty(&self) -> bool;
 }
 
-pub struct HashMapDiff<'exp, 'obs, KeyT, ValT: PartialInformationCompare<'exp, 'obs>> {
+pub trait PartialInformationCompare: Sized {
+    type Raw;
+    type Diff<'exp, 'obs>: PartialInformationDiff<'exp, 'obs> where Self: 'exp;
+
+    fn diff<'exp, 'obs>(&'exp self, observed: &'obs Self::Raw, time: DateTime<Utc>) -> Self::Diff<'exp, 'obs>;
+}
+
+
+pub struct HashMapDiff<'exp, 'obs, KeyT, ValT: PartialInformationCompare> {
     missing: HashMap<KeyT, &'exp ValT>,
     extra: HashMap<KeyT, &'obs ValT::Raw>,
-    common: HashMap<KeyT, ValT::Diff>,
+    common: HashMap<KeyT, ValT::Diff<'exp, 'obs>>,
 }
 
-impl<'exp, 'obs, K, V> PartialInformationCompare<'exp, 'obs> for HashMap<K, V>
-    where K: 'exp + 'obs + Eq + Hash + Clone,
-          V: 'exp + PartialInformationCompare<'exp, 'obs>,
-          V::Raw: 'obs {
+impl<K, V> PartialInformationCompare for HashMap<K, V>
+    where K: Eq + Hash + Clone,
+          V: PartialInformationCompare {
     type Raw = HashMap<K, V::Raw>;
-    type Diff = HashMapDiff<'exp, 'obs, K, V>;
+    type Diff<'exp, 'obs> = HashMapDiff<'exp, 'obs, K, V>;
 
-    fn diff(&'exp self, other: &'obs Self::Raw, time: DateTime<Utc>) -> Self::Diff {
-        let self_keys: HashSet<_> = self.keys().collect();
-        let other_keys: HashSet<_> = other.keys().collect();
+    fn diff<'exp, 'obs>(&'exp self, observed: &'obs HashMap<K, V::Raw>, time: DateTime<Utc>) -> Self::Diff<'exp, 'obs> {
+        let expected_keys: HashSet<_> = self.keys().collect();
+        let observed_keys: HashSet<_> = observed.keys().collect();
 
         HashMapDiff {
-            missing: self_keys.difference(&other_keys)
+            missing: expected_keys.difference(&observed_keys)
                 .map(|&key| (key.clone(), self.get(key).unwrap()))
                 .collect(),
-            extra: other_keys.difference(&self_keys)
-                .map(|&key| (key.clone(), other.get(key).unwrap()))
+            extra: observed_keys.difference(&expected_keys)
+                .map(|&key| (key.clone(), observed.get(key).unwrap()))
                 .collect(),
-            common: other_keys.intersection(&self_keys)
+            common: observed_keys.intersection(&expected_keys)
                 .map(|&key| {
-                    (key.clone(), self.get(key).unwrap().diff(other.get(key).unwrap(), time))
+                    (key.clone(), self.get(key).unwrap().diff(observed.get(key).unwrap(), time))
                 })
                 .collect(),
         }
     }
 }
 
-pub enum OptionDiff<'exp, 'obs, ItemT: 'exp + PartialInformationCompare<'exp, 'obs>> {
+impl<'exp, 'obs, K, V> PartialInformationDiff<'exp, 'obs> for HashMapDiff<'exp, 'obs, K, V>
+    where K: Eq + Hash + Clone,
+          V: PartialInformationCompare {
+    fn is_empty(&self) -> bool {
+        self.extra.is_empty() && self.missing.is_empty() && self.common.iter().all(|(_, diff)| diff.is_empty())
+    }
+}
+
+pub enum OptionDiff<'exp, 'obs, ItemT: 'exp + PartialInformationCompare> {
     ExpectedNoneGotNone,
     ExpectedNoneGotSome(&'obs ItemT::Raw),
     ExpectedSomeGotNone(&'exp ItemT),
-    ExpectedSomeGotSome(ItemT::Diff),
+    ExpectedSomeGotSome(ItemT::Diff<'exp, 'obs>),
 }
 
-impl<'exp, 'obs, ItemT> PartialInformationCompare<'exp, 'obs> for Option<ItemT>
-    where ItemT: 'exp + PartialInformationCompare<'exp, 'obs>,
-          ItemT::Raw: 'obs {
-    type Raw = Option<ItemT::Raw>;
-    type Diff = OptionDiff<'exp, 'obs, ItemT>;
+impl<T> PartialInformationCompare for Option<T>
+    where T: PartialInformationCompare {
+    type Raw = Option<T::Raw>;
+    type Diff<'exp, 'obs> = OptionDiff<'exp, 'obs, T>;
 
-    fn diff(&'exp self, other: &'obs Self::Raw, time: DateTime<Utc>) -> Self::Diff {
-        match (self, other) {
+    fn diff<'exp, 'obs>(&'exp self, observed: &'obs Option<T::Raw>, time: DateTime<Utc>) -> Self::Diff<'exp, 'obs> {
+        match (self, observed) {
             (None, None) => OptionDiff::ExpectedNoneGotNone,
             (None, Some(val)) => OptionDiff::ExpectedNoneGotSome(val),
             (Some(val), None) => OptionDiff::ExpectedSomeGotNone(val),
@@ -68,41 +79,72 @@ impl<'exp, 'obs, ItemT> PartialInformationCompare<'exp, 'obs> for Option<ItemT>
     }
 }
 
-pub struct VecDiff<'exp, 'obs, ItemT: PartialInformationCompare<'exp, 'obs>> {
-    missing: &'exp [ItemT],
-    extra: &'obs [ItemT::Raw],
-    common: Vec<ItemT::Diff>,
+impl<'exp, 'obs, T> PartialInformationDiff<'exp, 'obs> for OptionDiff<'exp, 'obs, T>
+    where T: PartialInformationCompare {
+    fn is_empty(&self) -> bool {
+        match self {
+            OptionDiff::ExpectedNoneGotNone => { true }
+            OptionDiff::ExpectedNoneGotSome(_) => { false }
+            OptionDiff::ExpectedSomeGotNone(_) => { false }
+            OptionDiff::ExpectedSomeGotSome(diff) => { diff.is_empty() }
+        }
+    }
 }
 
-impl<'exp, 'obs, ItemT> PartialInformationCompare<'exp, 'obs> for Vec<ItemT>
-    where ItemT: 'exp + PartialInformationCompare<'exp, 'obs>,
-          ItemT::Raw: 'obs {
-    type Raw = Vec<ItemT::Raw>;
-    type Diff = VecDiff<'exp, 'obs, ItemT>;
+pub struct VecDiff<'exp, 'obs, T: PartialInformationCompare> {
+    missing: &'exp [T],
+    extra: &'obs [T::Raw],
+    common: Vec<T>,
+}
 
-    fn diff(&'exp self, other: &'obs Self::Raw, time: DateTime<Utc>) -> Self::Diff {
+impl<ItemT> PartialInformationCompare for Vec<ItemT>
+    where ItemT: PartialInformationCompare {
+    type Raw = Vec<ItemT::Raw>;
+    type Diff<'exp, 'obs> = VecDiff<'exp, 'obs, ItemT>;
+
+    fn diff<'exp, 'obs>(&'exp self, observed: &'obs Vec<ItemT::Raw>, time: DateTime<Utc>) -> Self::Diff<'exp, 'obs> {
         VecDiff {
-            missing: &self[other.len()..],
-            extra: &other[self.len()..],
-            common: iter::zip(self, other)
+            missing: &self[observed.len()..],
+            extra: &observed[self.len()..],
+            common: iter::zip(self, observed)
                 .map(|(self_item, other_item)| self_item.diff(other_item, time))
                 .collect(),
         }
     }
 }
 
+impl<'exp, 'obs, T> PartialInformationDiff<'exp, 'obs> for VecDiff<'exp, 'obs, T>
+    where T: PartialInformationCompare {
+    fn is_empty(&self) -> bool {
+        self.extra.is_empty() && self.missing.is_empty() && self.common.iter().all(|diff| diff.is_empty())
+    }
+}
+
+enum PrimitiveDiff<'exp, 'obs, T> {
+    NoDiff,
+    Diff(&'exp T, &'obs T),
+}
+
+impl<'exp, 'obs, T> PartialInformationDiff<'exp, 'obs> for PrimitiveDiff<'exp, 'obs, T> {
+    fn is_empty(&self) -> bool {
+        match self {
+            PrimitiveDiff::NoDiff => { true }
+            PrimitiveDiff::Diff(_, _) => { false }
+        }
+    }
+}
 
 macro_rules! trivial_compare {
     ($($t:ty),+) => {
-        $(impl<'exp, 'obs> PartialInformationCompare<'exp, 'obs> for $t {
+        $(impl PartialInformationCompare for $t {
             type Raw = Self;
-            type Diff = Option<(&'exp $t, &'obs $t)>;
+            type Diff<'exp, 'obs> = PrimitiveDiff<'exp, 'obs, $t>;
 
-            fn diff(&'exp self, other: &'obs Self, _: DateTime<Utc>) -> Self::Diff {
-                if self.eq(other) {
-                    None
+            fn diff<'exp, 'obs>(&'exp self, observed: &'obs $t, time: DateTime<Utc>) -> Self::Diff<'exp, 'obs> {
+                if self.eq(observed) {
+                    PrimitiveDiff::NoDiff
                 } else {
-                    Some((self, other))
+                    PrimitiveDiff::Diff((self, observed))
                 }
             }
         })+

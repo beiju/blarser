@@ -1,39 +1,47 @@
 use std::fmt::Debug;
 use std::ops::Add;
 use chrono::{DateTime, Utc};
+use crate::compare::PartialInformationDiff;
 
 use crate::PartialInformationCompare;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Cached<UnderlyingType>
-    where UnderlyingType: Clone + Debug {
+    where UnderlyingType: Clone {
     value: UnderlyingType,
     history: Vec<(UnderlyingType, DateTime<Utc>)>,
 }
 
-pub struct CachedDiff<'exp, 'obs, T: PartialInformationCompare<'exp, 'obs>> {
-    value_diff: T::Diff,
-    history_diffs: Vec<(T::Diff, DateTime<Utc>)>,
+pub struct CachedDiff<'exp, 'obs, T: PartialInformationCompare> {
+    value_diff: T::Diff<'exp, 'obs>,
+    history_diffs: Vec<(T::Diff<'exp, 'obs>, DateTime<Utc>)>,
 }
 
-impl<'exp, 'obs, T> PartialInformationCompare<'exp, 'obs> for Cached<T>
-    where T: Clone + Debug + PartialInformationCompare<'exp, 'obs> {
+impl<T> PartialInformationCompare for Cached<T>
+    where T: Clone + PartialInformationCompare {
     type Raw = T::Raw;
-    type Diff = CachedDiff<'exp, 'obs, T>;
+    type Diff<'exp, 'obs> = CachedDiff<'exp, 'obs, T>;
 
-    fn diff(&'exp self, other: &'obs Self::Raw, time: DateTime<Utc>) -> Self::Diff {
+    fn diff<'exp, 'obs>(&'exp self, observed: &'obs T, time: DateTime<Utc>) -> Self::Diff<'exp, 'obs> {
         CachedDiff {
-            value_diff: self.value.diff(other, time),
+            value_diff: self.value.diff(observed, time),
             history_diffs: self.history.iter()
                 .flat_map(|(value, expiry)| {
                     if time < *expiry {
-                        Some((value.diff(other, time), *expiry))
+                        Some((value.diff(observed, time), *expiry))
                     } else {
                         None
                     }
                 })
                 .collect()
         }
+    }
+}
+
+impl<'exp, 'obs, T: 'exp> PartialInformationDiff<'exp, 'obs> for CachedDiff<'exp, 'obs, T>
+    where T: Clone + PartialInformationCompare {
+    fn is_empty(&self) -> bool {
+        self.value_diff.is_empty() && self.history_diffs.iter().all(|diff| diff.is_empty())
     }
 }
 

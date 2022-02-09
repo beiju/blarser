@@ -4,7 +4,7 @@ use serde::{Deserialize, Deserializer};
 use crate::PartialInformationCompare;
 
 #[derive(Clone, Debug)]
-pub enum MaybeKnown<UnderlyingType: Clone + Debug + PartialOrd> {
+pub enum MaybeKnown<UnderlyingType: PartialOrd> {
     Unknown,
     Known(UnderlyingType),
 }
@@ -35,19 +35,24 @@ impl<UnderlyingType> From<UnderlyingType> for MaybeKnown<UnderlyingType>
     }
 }
 
-impl<'exp, 'obs, T: 'exp + 'obs> PartialInformationCompare<'exp, 'obs> for MaybeKnown<T>
-    where T: Clone + Debug + PartialOrd + for<'de> Deserialize<'de> {
-    type Raw = T;
-    type Diff = Option<(&'exp T, &'obs T)>;
+enum MaybeKnownDiff<'exp, 'obs, T: PartialInformationCompare> {
+    NoDiff,
+    Diff(T::Diff<'exp, 'obs>)
+}
 
-    fn diff(&'exp self, other: &'obs T, _: DateTime<Utc>) -> Self::Diff {
+impl<T> PartialInformationCompare for MaybeKnown<T>
+    where T: PartialOrd + PartialInformationCompare {
+    type Raw = T;
+    type Diff<'exp, 'obs> = MaybeKnownDiff<'exp, 'obs, T>;
+
+    fn diff<'exp, 'obs>(&'exp self, observed: &'obs T, _: DateTime<Utc>) -> Self::Diff<'exp, 'obs> {
         match self {
-            MaybeKnown::Unknown => { None }
+            MaybeKnown::Unknown => { MaybeKnownDiff::NoDiff }
             MaybeKnown::Known(expected) => {
-                if expected == other {
-                    None
+                if expected == observed {
+                    MaybeKnownDiff::NoDiff
                 } else {
-                    Some((expected, other))
+                    MaybeKnownDiff::Diff((expected, observed))
                 }
             }
         }

@@ -1,3 +1,5 @@
+#![feature(generic_associated_types)]
+
 mod ranged;
 mod maybe_known;
 mod compare;

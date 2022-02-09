@@ -1,20 +1,31 @@
 use std::fmt::Debug;
 use std::ops;
 use chrono::{DateTime, Utc};
+use crate::compare::PartialInformationDiff;
 use crate::PartialInformationCompare;
 
-#[derive(Debug, Clone)]
-pub enum Ranged<UnderlyingType: Clone + Debug + PartialOrd> {
+pub enum Ranged<UnderlyingType: PartialOrd> {
     Known(UnderlyingType),
     Range(UnderlyingType, UnderlyingType),
 }
 
+// Ranged is Clone if underlying type is Clone
+impl<UnderlyingType> Clone for Ranged<UnderlyingType>
+    where UnderlyingType: Clone + PartialOrd {
+    fn clone(&self) -> Self {
+        match self {
+            Ranged::Known(x) => { Ranged::Known(x.clone()) }
+            Ranged::Range(a, b) => { Ranged::Range(a.clone(), b.clone()) }
+        }
+    }
+}
+
 // Ranged is Copy if underlying type is Copy
 impl<UnderlyingType> Copy for Ranged<UnderlyingType>
-    where UnderlyingType: Copy + Clone + Debug + PartialOrd {}
+    where UnderlyingType: Copy + Clone + PartialOrd {}
 
 impl<UnderlyingType> Ranged<UnderlyingType>
-    where UnderlyingType: Ord + Clone + Debug + PartialOrd {
+    where UnderlyingType: Ord + Clone + PartialOrd {
     pub fn could_be(&self, other: &UnderlyingType) -> bool {
         match self {
             Ranged::Known(a) => { a == other }
@@ -110,16 +121,44 @@ impl<UnderlyingType> ops::AddAssign<UnderlyingType> for Ranged<UnderlyingType>
     }
 }
 
-impl<'exp, 'obs, T: 'exp + 'obs> PartialInformationCompare<'exp, 'obs> for Ranged<T>
-    where T: Clone + Debug + Ord {
-    type Raw = T;
-    type Diff = Option<(&'exp Self, &'obs T)>;
+enum RangedDiff<'exp, 'obs, T> {
+    NoDiff,
+    KnownDiff(&'exp T, &'obs T),
+    RangeDiff((&'exp T, &'exp T), &'obs T)
+}
 
-    fn diff(&'exp self, other: &'obs T, _: DateTime<Utc>) -> Self::Diff {
-        if self.could_be(other) {
-            None
-        } else {
-            Some((self, other))
+impl<T> PartialInformationCompare for Ranged<T>
+    where T: Ord {
+    type Raw = T;
+    type Diff<'exp, 'obs> = RangedDiff<'exp, 'obs, T>;
+
+    fn diff<'exp, 'obs>(&'exp self, observed: &'obs T, _: DateTime<Utc>) -> Self::Diff<'exp, 'obs> {
+        match self {
+            Ranged::Known(value) => {
+                if value == observed {
+                    Self::NoDiff
+                } else {
+                    Self::KnownDiff(value, observed)
+                }
+            }
+            Ranged::Range(low, high) => {
+                if low <= observed && observed <= high {
+                    Self::NoDiff
+                } else {
+                    Self::RangeDiff((low, high), observed)
+                }
+            }
+        }
+    }
+}
+
+impl<'exp, 'obs, T> PartialInformationDiff<'exp, 'obs> for RangedDiff<'exp, 'obs, T>
+    where T: PartialInformationCompare + Ord {
+    fn is_empty(&self) -> bool {
+        match self {
+            RangedDiff::NoDiff => { true }
+            RangedDiff::KnownDiff(_, _) => { false }
+            RangedDiff::RangeDiff(_, _) => { false }
         }
     }
 }
