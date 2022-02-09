@@ -170,6 +170,8 @@ implemented yet.
 
 ### Update: Revised ingest plan
 
+\[NOTE this is also out of date. Read on\]
+
 Revised the whole ingest plan because the handling of chron update timestamp 
 fuzziness wasn't robust enough, and the previous plan wasn't database-friendly.
 
@@ -221,3 +223,84 @@ fuzziness wasn't robust enough, and the previous plan wasn't database-friendly.
       update was not resolved, apply the resolution process again using the 
       updated end-of-range. Apply this recursively until you fail to resolve an
       update or until you hit an already-resolved update.
+   
+### Update update: Revised ingest plan 2
+
+The previous ingest plan doesn't work well with cached values and the story for
+real-time ingest is muddy. New plan: 
+
+- Initialize: Pull the entire Chron state at time T (user-selected, should 
+  be in the middle of a period of Blaseball dormancy so the state is 
+  definitely faithful to the site and not affected by network delay or 
+  caching). Convert that state to a fully-known `PartialInformation` (this 
+  is the only time a `PartialInformationRaw` should be directly converted 
+  into a `PartialInformation`).
+- Pull Feed: Concurrently with Chron, pull the Feed. The Feed stream yields 
+  tuples of (ingest_time, Option<event>). The timestamp of an item is the 
+  event's timestamp if there is an event, otherwise the ingest_time.
+  1. Loop:
+     1. If there is a next timed event, apply it. Otherwise break.
+  2. If there is an event:
+     1. Store it in the DB for later
+     2. Apply it
+  
+  "Applying" an event, timed or feed, means to run through the effects of 
+  the event on every currently-possible version of the entities it affects. 
+  When an event modifies or observes an entity, it must fetch all currently-
+  possible versions of that entity and apply the changes to all of them. For 
+  each version of each entity, it must produce either:
+  - No change - this entity state was definitely not changed by this event. No 
+    action is taken on this entity in the database.
+  - Incompatible - the event could not be applied to this entity state. This 
+    possible state should be marked as terminated, meaning it will no longer 
+    be included in the list of every currently-possible version of this 
+    entity. One example of "incompatible" is if this state has a player on 
+    3rd, a single is hit, and the player on 3rd does not score. This means 
+    that it was incorrect to put the player on 3rd.
+  - Change(s) - the entity could be in one of these possible states. There 
+    could be one successor, if the effects are fully known, or multiple 
+    successors if there were multiple possible outcomes.
+  
+  If all versions lead to Incompatible that is a fatal error. Otherwise, 
+  identical successors should be merged (easier said than done) and all 
+  successors should be saved to the database. Some care will have to be 
+  taken to ensure "maybe modified, maybe not" is handled correctly.
+- Pull Chron: Concurrently with the Feed, pull Chronicler versions. For each 
+  new version seen:
+  - Split it by cache boundaries. These should be encoded into the type 
+    using the `PartialInformation` derive macro. Each cache boundary, 
+    including the top level, has a range of times in which it could be valid.
+    (This range could be zero, e.g. for game updates where lastUpdateFull 
+    contains a time stamp.)
+  - Shrink the time ranges according to existing information: The time range 
+    cannot overlap with the time range of any other *resolved* update. Get 
+    resolved updates nearby and shrink the time range accordingly. I think 
+    there should never be discontinuities. Hopefully.
+  - Separately for each cache boundary: Get all the versions that are valid 
+    as of the end of the range. For each of those, get its chain of 
+    predecessors up to the start of the range. Diff the observation against 
+    every version in the chain. There are two properties a diff can have: it is
+    "empty" if contains no difference at all, and it is "compatible" if 
+    every difference it contains is going from an unknown or partially-known 
+    value to a known value (which is compatible with the partial knowledge, 
+    if applicable).
+    - If the diff is not compatible with any version in the chain, the chain is 
+      invalid. Terminate the *last* version in the chain and any descendants 
+      it has. If this is the last non-terminated descendant of some other 
+      version, terminate that version as well, recursively.
+    - If the diff is compatible with a single version in the chain, then this 
+      observation is now *resolved*. Shrink its time range to be the time 
+      range of the single version to which it applied (if smaller) and store 
+      it as resolved for this chain (and descendants) only. I don't yet know 
+      how to format that information, but it's important that it not be 
+      magically resolved for all chains. If there is an unresolved version 
+      before or after this one, and this one overlaps its time range, try to 
+      resolve it again (run the whole process as if it was just observed) now 
+      that its time range has shrunk.
+      - If the diff is non-empty, apply the changes to this version and 
+        propagate them forward. I think the best way to propagate them 
+        forward is to just throw away all descendants and compute them again 
+        from the stored feed events.
+    - If the diff is compatible with multiple versions, store this observation 
+      for later resolution.
+  
