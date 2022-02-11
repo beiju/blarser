@@ -1,6 +1,7 @@
 table! {
     use diesel::sql_types::*;
     use crate::db_types::*;
+    use crate::state::Event_type;
 
     chron_updates (id) {
         id -> Int4,
@@ -19,6 +20,7 @@ table! {
 table! {
     use diesel::sql_types::*;
     use crate::db_types::*;
+    use crate::state::Event_type;
 
     feed_event_changes (id) {
         id -> Int4,
@@ -31,6 +33,7 @@ table! {
 table! {
     use diesel::sql_types::*;
     use crate::db_types::*;
+    use crate::state::Event_type;
 
     feed_events (id) {
         id -> Int4,
@@ -43,6 +46,7 @@ table! {
 table! {
     use diesel::sql_types::*;
     use crate::db_types::*;
+    use crate::state::Event_type;
 
     ingest_approvals (id) {
         id -> Int4,
@@ -59,6 +63,7 @@ table! {
 table! {
     use diesel::sql_types::*;
     use crate::db_types::*;
+    use crate::state::Event_type;
 
     ingest_logs (id) {
         id -> Int4,
@@ -74,11 +79,31 @@ table! {
 table! {
     use diesel::sql_types::*;
     use crate::db_types::*;
+    use crate::state::Event_type;
 
     ingests (id) {
         id -> Int4,
         started_at -> Timestamptz,
         events_parsed -> Int4,
+    }
+}
+
+table! {
+    use diesel::sql_types::*;
+    use crate::db_types::*;
+    use crate::state::Event_type;
+
+    versions (id) {
+        id -> Int4,
+        ingest_id -> Int4,
+        entity_type -> Text,
+        entity_id -> Uuid,
+        generation -> Int4,
+        single_parent -> Nullable<Int4>,
+        start_time -> Timestamptz,
+        data -> Jsonb,
+        event_type -> Event_type,
+        feed_event_id -> Nullable<Uuid>,
     }
 }
 
@@ -92,4 +117,5 @@ allow_tables_to_appear_in_same_query!(
     ingest_approvals,
     ingest_logs,
     ingests,
+    versions,
 );

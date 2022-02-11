@@ -77,8 +77,6 @@ pub async fn ingest_feed(db: IngestState, start_at_time: &'static str) {
 }
 
 async fn save_feed_events(ingest: &IngestState, events: Vec<EventuallyEvent>) -> DateTime<Utc> {
-    info!("Got batch of {} events", events.len());
-
     // TODO Update this to use the header from Eventually somehow
     let last_event_date = events.split_last()
         .expect("save_feed_events was called with no events")

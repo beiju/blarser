@@ -210,8 +210,6 @@ async fn game_update_page(schedule: bool, start: &'static str, state: ChronState
         .get("https://api.sibr.dev/chronicler/v1/games".to_string() + if schedule { "" } else { "/updates" })
         .query(&[("after", &start)]);
 
-    info!("Getting page {}", match &state.page { Some(page) => page, None => "<first page>"});
-
     let request = match state.page {
         Some(page) => request.query(&[("page", &page)]),
         None => request

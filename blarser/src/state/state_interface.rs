@@ -2,18 +2,16 @@ use std::fmt::{Debug, Formatter};
 use std::iter::Peekable;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
-use diesel::{
-    prelude::*,
-    PgConnection,
-    QueryDsl,
-};
+use diesel::{prelude::*, PgConnection, QueryDsl, insert_into};
 use diesel::dsl::max;
+use futures::{Stream, StreamExt};
 use itertools::Itertools;
 use rocket::{info, warn};
 
 use crate::sim::{Entity, FeedEventChangeResult, Sim};
-use crate::api::EventuallyEvent;
+use crate::api::{ChroniclerItem, EventuallyEvent};
 use crate::state::{GenericEvent, GenericEventType};
+use crate::state::versions_db::NewVersion;
 
 pub struct StateInterface<'conn> {
     pub conn: &'conn &'conn mut PgConnection,
@@ -21,7 +19,6 @@ pub struct StateInterface<'conn> {
 
     // TODO: Cache parameters
 }
-
 #[derive(Debug)]
 pub struct EntityVersion<EntityT: Entity> {
     pub valid_from: DateTime<Utc>,
@@ -148,6 +145,13 @@ impl<'conn, 'state, EntityT: Entity> VersionsIter<'conn, 'state, EntityT> {
 }
 
 impl<'conn> StateInterface<'conn> {
+    pub fn new(c: &'conn &'conn mut PgConnection, ingest_id: i32) -> StateInterface<'conn> {
+        StateInterface {
+            conn: c,
+            ingest_id
+        }
+    }
+
     pub fn latest_ingest(c: &'conn &'conn mut PgConnection) -> Option<StateInterface<'conn>> {
         use crate::schema::ingests::dsl;
         dsl::ingests.select(max(dsl::id)).get_result::<Option<i32>>(*c)

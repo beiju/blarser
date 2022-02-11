@@ -36,8 +36,8 @@ impl<KeyType, ValType> CachedMap<KeyType, ValType>
 // TODO This will be easier to write once I start writing the methods on Diff types
 #[derive(Debug)]
 pub struct CachedMapDiff<'d, K, V: PartialInformationCompare> {
-    dummy1: HashMap<K, &'d V>,
-    dummy2: HashMap<K, &'d V::Raw>,
+    _dummy1: HashMap<K, &'d V>,
+    _dummy2: HashMap<K, &'d V::Raw>,
 }
 
 impl<K, V> PartialInformationCompare for CachedMap<K, V>
