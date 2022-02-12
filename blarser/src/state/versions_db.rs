@@ -49,7 +49,6 @@ impl NewVersion {
             "player" => Self::for_initial_state_typed::<sim::Player>(ingest_id, start_time, item),
             _ => {
                 // TODO Remove this once all entity types are implemented
-                warn!("Skipping ingest for entity type {}", entity_type);
                 return None
             }
         };
@@ -58,7 +57,6 @@ impl NewVersion {
     }
 
     fn for_initial_state_typed<EntityT: sim::Entity>(ingest_id: i32, start_time: DateTime<Utc>, item: ChroniclerItem) -> NewVersion {
-        info!("Initial state for {} {}", EntityT::name(), item.entity_id);
         let raw: EntityT::Raw = serde_json::from_value(item.data)
             .expect("Couldn't deserialize entity into raw PartialInformation");
 
@@ -90,7 +88,7 @@ pub async fn add_initial_versions(conn: BlarserDbConn, ingest_id: i32, start_tim
                 .flat_map(move |(entity_type, item)| {
                     NewVersion::for_initial_state(ingest_id, start_time, entity_type, item)
                 })
-                .chunks(500); // Diesel can't handle inserting the whole thing in one go
+                .chunks(5000); // Diesel can't handle inserting the whole thing in one go
 
             for chunk in &chunks {
                 use crate::schema::versions::dsl::*;
