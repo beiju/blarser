@@ -16,6 +16,8 @@ CREATE TABLE versions
     event_type         event_type NOT NULL,
     feed_event_id      UUID,
 
+    next_timed_event   TIMESTAMP WITH TIME ZONE,
+
     CONSTRAINT ingest_fk FOREIGN KEY(ingest_id) REFERENCES ingests(id),
     CONSTRAINT single_parent_fk FOREIGN KEY(single_parent) REFERENCES versions(id),
     CONSTRAINT generation_non_negative CHECK (generation >= 0),

@@ -96,11 +96,5 @@ pub async fn approve(_task: &State<IngestTask>, conn: BlarserDbConn, approval: F
 
 #[rocket::get("/changes/<entity_type>/<entity_id>")]
 pub async fn changes(conn: BlarserDbConn, entity_type: String, entity_id: Uuid) {
-    let _x = conn.run(|c| {
-        // TODO Store "last complete ingest" somewhere
-        let state = StateInterface::latest_ingest(&c)
-            .expect("There were no ingests");
-
-        ()
-    }).await;
+    todo!()
 }

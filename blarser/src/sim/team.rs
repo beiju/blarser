@@ -1,5 +1,6 @@
+use std::collections::HashMap;
 use chrono::{DateTime, Duration, Utc};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use partial_information::{PartialInformationCompare, Cached};
 use partial_information_derive::PartialInformationCompare;
@@ -8,27 +9,57 @@ use crate::api::{EventType, EventuallyEvent};
 use crate::sim::{Entity, FeedEventChangeResult};
 use crate::state::{StateInterface, GenericEvent, GenericEventType};
 
-#[derive(Clone, Debug, Deserialize, PartialInformationCompare)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
-pub struct TeamState {}
+pub struct TeamState {
+    pub redacted: Option<bool>,
+    pub nullified: Option<bool>,
+    pub scattered: Option<TeamScatteredInfo>,
+    #[serde(rename = "imp_motion")] // override the rename_all = "camelCase"
+    pub imp_motion: Option<Vec<ImpMotionEntry>>,
+    pub perm_mod_sources: Option<HashMap<String, Vec<Uuid>>>,
+}
 
-#[derive(Clone, Debug, Deserialize, PartialInformationCompare)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialInformationCompare)]
+#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
+pub struct ImpMotionEntry {
+    day: i32,
+    season: i32,
+    // I would like this to be a tuple but I don't want to figure out the macro magic to make that happen
+    im_position: Vec<f32>
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialInformationCompare)]
+#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
+pub struct TeamScatteredInfo {
+    full_name: String,
+    location: String,
+    nickname: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
 pub struct Team {
     pub id: Uuid,
-    pub card: i32,
+    pub card: Option<i32>,
     pub emoji: String,
-    pub level: i32,
-    pub state: TeamState,
+    pub level: Option<i32>,
+    pub state: Option<TeamState>,
     pub lineup: Vec<Uuid>,
     pub slogan: String,
-    pub shadows: Vec<Uuid>,
+    pub shadows: Option<Vec<Uuid>>,
+    pub bench: Option<Vec<Uuid>>,
+    pub bullpen: Option<Vec<Uuid>>,
     pub stadium: Option<Uuid>,
-    pub deceased: bool,
+    pub deceased: Option<bool>,
     pub full_name: String,
     pub game_attr: Vec<String>,
     pub league_id: Option<Uuid>,
@@ -38,11 +69,11 @@ pub struct Team {
     pub rotation: Vec<Uuid>,
     pub seas_attr: Vec<String>,
     pub week_attr: Vec<String>,
-    pub evolution: i32,
+    pub evolution: Option<i32>,
     pub main_color: String,
-    pub shame_runs: i32,
+    pub shame_runs: f32,
     pub shorthand: String,
-    pub win_streak: Cached<i32>,
+    pub win_streak: Option<Cached<i32>>,
     pub division_id: Option<Uuid>,
     pub team_spirit: i32,
     pub subleague_id: Option<Uuid>,
@@ -53,8 +84,8 @@ pub struct Team {
     pub total_shamings: i32,
     pub season_shamings: i32,
     pub secondary_color: String,
-    pub tournament_wins: i32,
-    pub underchampionships: i32,
+    pub tournament_wins: Option<i32>,
+    pub underchampionships: Option<i32>,
 }
 
 impl Entity for Team {
@@ -62,7 +93,7 @@ impl Entity for Team {
         "team"
     }
 
-    fn next_timed_event(&self, _from_time: DateTime<Utc>, _to_time: DateTime<Utc>, _state: &StateInterface) -> Option<GenericEvent> {
+    fn next_timed_event(&self, _: DateTime<Utc>) -> Option<DateTime<Utc>> {
         None
     }
 
@@ -89,9 +120,13 @@ impl Team {
                     .expect("Winner property of GameEnd event must be a uuid");
 
                 if self.id == winner_id {
-                    self.win_streak.add_cached(1, event.created + Duration::minutes(5));
+                    self.win_streak.as_mut()
+                        .expect("GameEnd currently expects Team.win_streak to exist")
+                        .add_cached(1, event.created + Duration::minutes(5));
                 } else {
-                    self.win_streak.add_cached(-1, event.created + Duration::minutes(5));
+                    self.win_streak.as_mut()
+                        .expect("GameEnd currently expects Team.win_streak to exist")
+                        .add_cached(-1, event.created + Duration::minutes(5));
                 };
 
                 FeedEventChangeResult::Ok

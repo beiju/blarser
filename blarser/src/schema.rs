@@ -104,6 +104,7 @@ table! {
         data -> Jsonb,
         event_type -> Event_type,
         feed_event_id -> Nullable<Uuid>,
+        next_timed_event -> Nullable<Timestamptz>,
     }
 }
 

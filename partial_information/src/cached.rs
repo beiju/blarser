@@ -1,12 +1,12 @@
 use std::fmt::Debug;
 use std::ops::Add;
 use chrono::{DateTime, Utc};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use crate::compare::PartialInformationDiff;
 
 use crate::PartialInformationCompare;
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Cached<UnderlyingType>
     where UnderlyingType: Clone + Debug {
     value: UnderlyingType,
@@ -36,6 +36,13 @@ impl<T> PartialInformationCompare for Cached<T>
                     }
                 })
                 .collect()
+        }
+    }
+
+    fn from_raw(raw: Self::Raw) -> Self {
+        Self {
+            value: T::from_raw(raw),
+            history: vec![]
         }
     }
 }

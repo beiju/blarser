@@ -5,17 +5,19 @@ use std::iter;
 use uuid::Uuid;
 use std::iter::Iterator;
 use chrono::{DateTime, Utc};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 pub trait PartialInformationDiff<'d>: Debug {
     fn is_empty(&self) -> bool;
 }
 
-pub trait PartialInformationCompare: Sized + Debug {
+pub trait PartialInformationCompare: Sized + Debug + Serialize {
     type Raw: for<'de> Deserialize<'de> + Debug;
     type Diff<'d>: PartialInformationDiff<'d > where Self: 'd;
 
     fn diff<'d>(&'d self, observed: &'d Self::Raw, time: DateTime<Utc>) -> Self::Diff<'d>;
+
+    fn from_raw(raw: Self::Raw) -> Self;
 }
 
 
@@ -27,7 +29,7 @@ pub struct HashMapDiff<'d, KeyT, ValT: PartialInformationCompare> {
 }
 
 impl<K, V> PartialInformationCompare for HashMap<K, V>
-    where K: 'static + Eq + Hash + Clone + for<'de> Deserialize<'de> + Debug,
+    where K: 'static + Debug + Eq + Hash + Clone + for<'de> Deserialize<'de> + Serialize,
           V: 'static + PartialInformationCompare {
     type Raw = HashMap<K, V::Raw>;
     type Diff<'d> = HashMapDiff<'d, K, V>;
@@ -49,6 +51,12 @@ impl<K, V> PartialInformationCompare for HashMap<K, V>
                 })
                 .collect(),
         }
+    }
+
+    fn from_raw(raw: Self::Raw) -> Self {
+        raw.into_iter()
+            .map(|(key, raw_value)| (key, V::from_raw(raw_value)))
+            .collect()
     }
 }
 
@@ -80,6 +88,10 @@ impl<T> PartialInformationCompare for Option<T>
             (Some(val), None) => OptionDiff::ExpectedSomeGotNone(val),
             (Some(a), Some(b)) => OptionDiff::ExpectedSomeGotSome(a.diff(b, time))
         }
+    }
+
+    fn from_raw(raw: Self::Raw) -> Self {
+        raw.map(|v| T::from_raw(v))
     }
 }
 
@@ -115,6 +127,12 @@ impl<ItemT> PartialInformationCompare for Vec<ItemT>
                 .map(|(self_item, other_item)| self_item.diff(other_item, time))
                 .collect(),
         }
+    }
+
+    fn from_raw(raw: Self::Raw) -> Self {
+        raw.into_iter()
+            .map(|v| ItemT::from_raw(v))
+            .collect()
     }
 }
 
@@ -154,6 +172,8 @@ macro_rules! trivial_compare {
                     PrimitiveDiff::Diff(self, observed)
                 }
             }
+
+            fn from_raw(raw: Self::Raw) -> Self { raw }
         })+
     }
 }

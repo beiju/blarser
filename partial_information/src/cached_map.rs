@@ -3,11 +3,11 @@ use std::fmt::Debug;
 use std::hash::Hash;
 use std::ops::Add;
 use chrono::{DateTime, Utc};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use crate::compare::PartialInformationDiff;
 use crate::PartialInformationCompare;
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct CachedMap<K, V>
     where K: Hash + Eq + Clone + Debug,
           V: PartialInformationCompare {
@@ -41,12 +41,16 @@ pub struct CachedMapDiff<'d, K, V: PartialInformationCompare> {
 }
 
 impl<K, V> PartialInformationCompare for CachedMap<K, V>
-    where K: 'static + Hash + Eq + Clone + for<'de> Deserialize<'de> + Debug,
+    where K: 'static + Clone + Debug + Eq + Hash + for<'de> Deserialize<'de> + Serialize,
           V: 'static + PartialInformationCompare {
     type Raw = HashMap<K, V::Raw>;
     type Diff<'d> = CachedMapDiff<'d, K, V>;
 
     fn diff(&self, _observed: &HashMap<K, V::Raw>, _: DateTime<Utc>) -> Self::Diff<'_> {
+        todo!()
+    }
+
+    fn from_raw(_raw: Self::Raw) -> Self {
         todo!()
     }
 }

@@ -1,20 +1,20 @@
-use chrono::{DateTime, Timelike, Utc};
-use serde::Deserialize;
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use partial_information::PartialInformationCompare;
 use partial_information_derive::PartialInformationCompare;
 
 use crate::sim::{Entity, FeedEventChangeResult};
-use crate::sim::entity::EarliestEvent;
+use crate::sim::entity::Lowest;
 use crate::state::{GenericEvent, GenericEventType, StateInterface};
 
-#[derive(Clone, Debug, Deserialize, PartialInformationCompare)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
 pub struct SimState {}
 
-#[derive(Clone, Debug, Deserialize, PartialInformationCompare)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
@@ -60,11 +60,10 @@ impl Entity for Sim {
         "sim"
     }
 
-    fn next_timed_event(&self, from_time: DateTime<Utc>, to_time: DateTime<Utc>, _state: &StateInterface) -> Option<GenericEvent> {
-        let mut earliest = EarliestEvent::new();
+    fn next_timed_event(&self, after_time: DateTime<Utc>) -> Option<DateTime<Utc>> {
+        let mut earliest = Lowest::new(after_time);
 
-        earliest.push_opt(self.get_earlseason_start(from_time, to_time));
-        earliest.push_opt(self.get_day_advance(from_time, to_time));
+        earliest.push(self.earlseason_date);
 
         earliest.into_inner()
     }
@@ -87,35 +86,6 @@ impl Entity for Sim {
             other => {
                 panic!("{:?} event does not apply to Sim", other)
             }
-        }
-    }
-}
-
-impl Sim {
-    pub fn get_earlseason_start(&self, from_time: DateTime<Utc>, to_time: DateTime<Utc>) -> Option<GenericEvent> {
-        if from_time < self.earlseason_date && self.earlseason_date < to_time  {
-            Some(GenericEvent {
-                time: self.earlseason_date,
-                event_type: GenericEventType::EarlseasonStart,
-            })
-        } else {
-            None
-        }
-    }
-
-    pub fn get_day_advance(&self, from_time: DateTime<Utc>, to_time: DateTime<Utc>) -> Option<GenericEvent> {
-        // I'm sure I'm going to need to add more phases where days advance
-        if self.phase == 2 && from_time.hour() != to_time.hour() {
-            Some(GenericEvent {
-                time: to_time
-                    .with_minute(0).unwrap()
-                    .with_second(0).unwrap()
-                    .with_nanosecond(0).unwrap(),
-                event_type: GenericEventType::DayAdvance,
-            })
-        }
-        else {
-            None
         }
     }
 }

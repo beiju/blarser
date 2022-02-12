@@ -17,39 +17,43 @@ pub trait Entity: for<'de> Deserialize<'de> + PartialInformationCompare + Clone 
             .expect("Error converting entity JSON to entity type")
     }
 
-    fn next_timed_event(&self, from_time: DateTime<Utc>, to_time: DateTime<Utc>, state: &StateInterface) -> Option<GenericEvent>;
+    fn next_timed_event(&self, after_time: DateTime<Utc>) -> Option<DateTime<Utc>>;
 
     fn apply_event(&mut self, event: &GenericEvent, state: &StateInterface) -> FeedEventChangeResult;
 }
 
-pub struct EarliestEvent(Option<GenericEvent>);
+// Helper used in next_timed_event
+pub struct Lowest<T: PartialOrd> {
+    limit: T,
+    lowest: Option<T>
+}
 
-impl EarliestEvent {
-    pub fn new() -> EarliestEvent {
-        EarliestEvent(None)
+impl<T:PartialOrd> Lowest<T> {
+    pub fn new(limit: T) -> Lowest<T> {
+        Lowest { limit, lowest: None }
     }
 
-    pub fn push(&mut self, new_event: GenericEvent) {
-        match &self.0 {
+    pub fn push(&mut self, new_val: T) {
+        if new_val < self.limit { return }
+
+        match &self.lowest {
             None => {
-                self.0 = Some(new_event)
+                self.lowest = Some(new_val)
             }
-            Some(prev_event) if prev_event.time >= new_event.time => {
-                assert_ne!(prev_event.time, new_event.time,
-                           "state.versions() doesn't work properly if multiple timed events fire at the same time");
-                self.0 = Some(new_event)
+            Some(prev_event) if &new_val < prev_event => {
+                self.lowest = Some(new_val)
             }
             _ => {}
         }
     }
 
-    pub fn push_opt(&mut self, opt: Option<GenericEvent>) {
+    pub fn push_opt(&mut self, opt: Option<T>) {
         if let Some(event) = opt {
             self.push(event);
         }
     }
 
-    pub fn into_inner(self) -> Option<GenericEvent> {
-        self.0
+    pub fn into_inner(self) -> Option<T> {
+        self.lowest
     }
 }

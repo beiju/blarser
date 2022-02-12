@@ -88,6 +88,16 @@ fn impl_partial_information_compare(ast: DeriveInput) -> Result<TokenStream2> {
                 }
             })
             .chain(iter::once(quote!{ true }));
+
+        let from_raw_members = fields.named.iter()
+            .map(|field| {
+                let field_name = field.ident.as_ref().expect("Unreachable");
+                let field_type = &field.ty;
+                quote! {
+                    #field_name: <#field_type as PartialInformationCompare>::from_raw(raw.#field_name)
+                }
+            });
+
         quote! {
             impl ::partial_information::PartialInformationCompare for #name {
                 type Raw = #raw_name;
@@ -99,17 +109,18 @@ fn impl_partial_information_compare(ast: DeriveInput) -> Result<TokenStream2> {
                         #(#diff_method_items),*
                     }
                 }
+
+                fn from_raw(raw: Self::Raw) -> Self {
+                    Self {
+                        #(#from_raw_members),*
+                    }
+                }
             }
 
             #[derive(::core::fmt::Debug, ::serde::Deserialize)]
             #(#raw_attrs)*
             #item_vis struct #raw_name {
                 #(#raw_members),*
-            }
-
-            // This requires #![feature(trivial_bounds)] in the consumer crate
-            impl ::std::default::Default for #raw_name where #name: ::std::default::Default {
-                fn default() -> Self { todo!() }
             }
 
             #[derive(::core::fmt::Debug)]

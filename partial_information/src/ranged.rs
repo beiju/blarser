@@ -1,11 +1,11 @@
 use std::fmt::Debug;
 use std::ops;
 use chrono::{DateTime, Utc};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use crate::compare::PartialInformationDiff;
 use crate::PartialInformationCompare;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub enum Ranged<UnderlyingType: PartialOrd> {
     Known(UnderlyingType),
     Range(UnderlyingType, UnderlyingType),
@@ -131,7 +131,7 @@ pub enum RangedDiff<'d, T> {
 }
 
 impl<T> PartialInformationCompare for Ranged<T>
-    where T: 'static + PartialOrd + for<'de> Deserialize<'de> + Debug {
+    where T: 'static + Debug + PartialOrd + for<'de> Deserialize<'de> + Serialize {
     type Raw = T;
     type Diff<'d> = RangedDiff<'d, T>;
 
@@ -152,6 +152,10 @@ impl<T> PartialInformationCompare for Ranged<T>
                 }
             }
         }
+    }
+
+    fn from_raw(raw: Self::Raw) -> Self {
+        Ranged::Known(raw)
     }
 }
 

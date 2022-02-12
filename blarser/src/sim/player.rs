@@ -1,5 +1,6 @@
+use std::collections::HashMap;
 use chrono::{DateTime, Duration, Utc};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use partial_information::{Ranged, PartialInformationCompare, MaybeKnown, Cached};
 use partial_information_derive::PartialInformationCompare;
@@ -10,45 +11,73 @@ use crate::event_utils::{get_one_id, separate_scoring_events};
 use crate::sim::{Entity, FeedEventChangeResult, parse};
 use crate::state::{StateInterface, GenericEvent, GenericEventType};
 
-#[derive(Clone, Debug, Deserialize, PartialInformationCompare)]
-#[serde(deny_unknown_fields)]
-pub struct Item {}
+#[derive(Clone, Debug, Deserialize, Serialize, PartialInformationCompare)]
+pub struct Item {
+    // TODO Implement Item, reinstate deny_unknown_fields
+}
 
-#[derive(Clone, Debug, Deserialize, PartialInformationCompare)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]
-pub struct PlayerState {}
+#[serde(rename_all = "camelCase")]
+pub struct PlayerState {
+    pub cut_this_election: Option<bool>,
+    pub necromancied_this_election: Option<bool>,
+    pub redacted: Option<bool>,
+    pub elsewhere: Option<PlayerElsewhereInfo>,
+    // Detective hunches
+    pub hunches: Option<Vec<i32>>,
+    pub investigations: Option<i32>,
+    // Original player for this Replica
+    pub original: Option<Uuid>,
+    pub perm_mod_sources: Option<HashMap<String, Vec<String>>>,
+    pub seas_mod_sources: Option<HashMap<String, Vec<String>>>,
+    pub game_mod_sources: Option<HashMap<String, Vec<String>>>,
+    pub item_mod_sources: Option<HashMap<String, Vec<Uuid>>>,
+    pub unscattered_name: Option<String>,
+}
 
-#[derive(Clone, Debug, Deserialize, PartialInformationCompare)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialInformationCompare)]
+#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
+pub struct PlayerElsewhereInfo {
+    pub day: i32,
+    pub season: i32,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
 pub struct Player {
     pub id: Uuid,
     pub name: String,
-    pub ritual: String,
-    pub fate: i32,
+    pub ritual: Option<String>,
+    pub fate: Option<i32>,
     pub soul: i32,
-    pub blood: i32,
-    pub coffee: i32,
-    pub peanut_allergy: bool,
+    pub blood: Option<i32>,
+    pub coffee: Option<i32>,
+    pub peanut_allergy: Option<bool>,
 
-    pub league_team_id: Uuid,
+    pub bat: Option<String>,
+    pub armor: Option<String>,
+
+    pub league_team_id: Option<Uuid>,
     pub tournament_team_id: Option<Uuid>,
-    pub deceased: bool,
-    pub evolution: i32,
-    pub items: Vec<Item>,
-    pub state: PlayerState,
-    pub hit_streak: i32,
-    pub consecutive_hits: i32,
+    pub deceased: Option<bool>,
+    pub evolution: Option<i32>,
+    pub items: Option<Vec<Item>>,
+    pub state: Option<PlayerState>,
+    pub hit_streak: Option<i32>,
+    pub consecutive_hits: Option<i32>,
 
-    pub game_attr: Vec<String>,
-    pub week_attr: Vec<String>,
-    pub seas_attr: Vec<String>,
-    pub item_attr: Vec<String>,
-    pub perm_attr: Vec<String>,
+    pub game_attr: Option<Vec<String>>,
+    pub week_attr: Option<Vec<String>>,
+    pub seas_attr: Option<Vec<String>>,
+    pub item_attr: Option<Vec<String>>,
+    pub perm_attr: Option<Vec<String>>,
 
     pub buoyancy: Cached<Ranged<f32>>,
-    pub cinnamon: Cached<Ranged<f32>>,
+    pub cinnamon: Option<Cached<Ranged<f32>>>,
     pub coldness: Cached<Ranged<f32>>,
     pub chasiness: Cached<Ranged<f32>>,
     pub divinity: Cached<Ranged<f32>>,
@@ -75,10 +104,10 @@ pub struct Player {
     pub moxie: Cached<Ranged<f32>>,
     pub total_fingers: i32,
 
-    pub defense_rating: MaybeKnown<f32>,
-    pub hitting_rating: MaybeKnown<f32>,
-    pub pitching_rating: MaybeKnown<f32>,
-    pub baserunning_rating: MaybeKnown<f32>,
+    pub defense_rating: Option<MaybeKnown<f32>>,
+    pub hitting_rating: Option<MaybeKnown<f32>>,
+    pub pitching_rating: Option<MaybeKnown<f32>>,
+    pub baserunning_rating: Option<MaybeKnown<f32>>,
 }
 
 
@@ -87,7 +116,7 @@ impl Entity for Player {
         "player"
     }
 
-    fn next_timed_event(&self, _from_time: DateTime<Utc>, _to_time: DateTime<Utc>, _state: &StateInterface) -> Option<GenericEvent> {
+    fn next_timed_event(&self, _: DateTime<Utc>) -> Option<DateTime<Utc>> {
         None
     }
 
@@ -110,9 +139,9 @@ impl Player {
                 // TODO: Remove this after figuring out why it happens / adding a more robust
                 //   system for handing unexpected events
                 if event.id == Uuid::parse_str("f41bd0bd-9d8f-4852-82c6-2155703950a9").unwrap() {
-                    self.consecutive_hits = 0;
+                    *self.consecutive_hits.as_mut().expect("Everyone but Phantom Sixpack has this") = 0;
                 } else {
-                    self.consecutive_hits += 1;
+                    *self.consecutive_hits.as_mut().expect("Everyone but Phantom Sixpack has this") += 1;
                 }
                 FeedEventChangeResult::Ok
             }
@@ -148,7 +177,7 @@ impl Player {
                     });
                 assert!(event_applies, "Got Snowflakes event for player that doesn't apply");
 
-                self.game_attr.push("FROZEN".to_string());
+                self.game_attr.as_mut().expect("Everyone but Phantom Sixpack has this").push("FROZEN".to_string());
 
                 FeedEventChangeResult::Ok
             }
@@ -170,7 +199,9 @@ impl Player {
                 };
 
                 for mod_name in mods {
-                    list.retain(|m| m != &mod_name);
+                    list.as_mut()
+                        .expect("Everyone but Phantom Sixpack has this")
+                        .retain(|m| m != &mod_name);
                 }
 
                 FeedEventChangeResult::Ok
@@ -194,7 +225,7 @@ impl Player {
         // unexpected text in the event. It's not ideal but the unexpected text will be found when
         // the game entity tries to parse it, so it should be ok.
         if out.is_ok() {
-            self.consecutive_hits = 0;
+            *self.consecutive_hits.as_mut().expect("Everyone but Phantom Sixpack has this") = 0;
             FeedEventChangeResult::Ok
         } else {
             FeedEventChangeResult::DidNotApply
@@ -218,7 +249,7 @@ impl Player {
         self.thwackability.add_cached(range, deadline);
         self.tragicness.add_cached(range, deadline);
 
-        self.hitting_rating = MaybeKnown::Unknown;
+        *self.hitting_rating.as_mut().expect("Everyone but Phantom Sixpack has this") = MaybeKnown::Unknown;
     }
 
     fn adjust_pitching(&mut self, range: Ranged<f32>, deadline: DateTime<Utc>) {
@@ -229,7 +260,7 @@ impl Player {
         self.suppression.add_cached(range, deadline);
         self.unthwackability.add_cached(range, deadline);
 
-        self.pitching_rating = MaybeKnown::Unknown;
+        *self.pitching_rating.as_mut().expect("Everyone but Phantom Sixpack has this") = MaybeKnown::Unknown;
     }
 
     fn adjust_baserunning(&mut self, range: Ranged<f32>, deadline: DateTime<Utc>) {
@@ -239,7 +270,7 @@ impl Player {
         self.indulgence.add_cached(range, deadline);
         self.laserlikeness.add_cached(range, deadline);
 
-        self.baserunning_rating = MaybeKnown::Unknown;
+        *self.baserunning_rating.as_mut().expect("Everyone but Phantom Sixpack has this") = MaybeKnown::Unknown;
     }
 
     fn adjust_defense(&mut self, range: Ranged<f32>, deadline: DateTime<Utc>) {
@@ -249,6 +280,6 @@ impl Player {
         self.tenaciousness.add_cached(range, deadline);
         self.watchfulness.add_cached(range, deadline);
 
-        self.defense_rating = MaybeKnown::Unknown;
+        *self.defense_rating.as_mut().expect("Everyone but Phantom Sixpack has this") = MaybeKnown::Unknown;
     }
 }

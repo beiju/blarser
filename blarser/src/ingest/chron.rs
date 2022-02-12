@@ -1,13 +1,12 @@
 use std::iter;
 use std::pin::Pin;
 use chrono::{DateTime, Utc};
-use diesel::{self, insert_into, RunQueryDsl};
 use futures::{stream, Stream, StreamExt};
 use rocket::{info};
 
 use crate::api::{chronicler, ChroniclerItem};
 use crate::ingest::task::IngestState;
-use crate::state::{add_initial_versions, StateInterface};
+use crate::state::{add_initial_versions};
 
 fn initial_state(start_at_time: &'static str) -> impl Stream<Item=(&'static str, ChroniclerItem)> {
     type ChronUpdateStream = Pin<Box<dyn Stream<Item=(&'static str, ChroniclerItem)> + Send>>;

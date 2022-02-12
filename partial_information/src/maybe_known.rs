@@ -1,10 +1,10 @@
 use std::fmt::Debug;
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 use crate::compare::PartialInformationDiff;
 use crate::PartialInformationCompare;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub enum MaybeKnown<UnderlyingType> {
     Unknown,
     Known(UnderlyingType),
@@ -54,6 +54,10 @@ impl<T> PartialInformationCompare for MaybeKnown<T>
                 MaybeKnownDiff::Diff(expected.diff(observed, time))
             }
         }
+    }
+
+    fn from_raw(raw: Self::Raw) -> Self {
+        MaybeKnown::Known(T::from_raw(raw))
     }
 }
 
