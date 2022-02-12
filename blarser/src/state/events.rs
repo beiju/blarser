@@ -1,21 +1,8 @@
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use crate::api::EventuallyEvent;
+use crate::StateInterface;
 
-#[derive(Debug)]
-pub enum GenericEventType {
-    FeedEvent(EventuallyEvent),
-
-    // Timed events
-    EarlseasonStart,
-    DayAdvance,
-
-    // There's a game update without a feed event, so here's an event for it.
-    EndTopHalf,
+pub trait IngestEvent {
+    fn apply(&self, state: &mut StateInterface);
 }
-
-#[derive(Debug)]
-pub struct GenericEvent {
-    pub time: DateTime<Utc>,
-    pub event_type: GenericEventType,
-}
-

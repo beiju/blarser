@@ -1,121 +1,82 @@
 use chrono::{DateTime, Duration, Utc};
-use diesel::{Connection, insert_into, RunQueryDsl};
+use diesel::PgConnection;
 use rocket::info;
-use futures::StreamExt;
-use uuid::Uuid;
+use futures::{pin_mut, StreamExt};
 
 use crate::api::{eventually, EventuallyEvent};
-use crate::ingest::feed_changes;
 use crate::ingest::task::IngestState;
 
-use crate::schema::*;
+use crate::{sim, StateInterface};
+use crate::state::{get_version_with_next_timed_event, IngestEvent};
 
-#[derive(Insertable)]
-#[table_name = "feed_events"]
-struct InsertFeedEvent {
-    ingest_id: i32,
-    created_at: DateTime<Utc>,
-    data: serde_json::Value,
-}
-
-impl InsertFeedEvent {
-    fn from_eventually(ingest_id: i32, item: EventuallyEvent) -> Self {
-        InsertFeedEvent {
-            ingest_id,
-            created_at: item.created,
-            data: serde_json::value::to_value(item)
-                .expect("Failed to re-serialize Eventually event"),
-        }
-    }
-}
-
-#[derive(Insertable)]
-#[table_name = "feed_event_changes"]
-struct InsertFeedEventChange {
-    feed_event_id: i32,
-    entity_type: &'static str,
-    entity_id: Option<Uuid>,
-}
-
-impl InsertFeedEventChange {
-    fn new(feed_event_id: i32, entity_type: &'static str, entity_id: Option<Uuid>) -> Self {
-        InsertFeedEventChange {
-            feed_event_id,
-            entity_type,
-            entity_id,
-        }
-    }
-}
-
-
-pub async fn ingest_feed(db: IngestState, start_at_time: &'static str) {
+pub async fn ingest_feed(mut ingest: IngestState, start_at_time: &'static str) {
     info!("Started Feed ingest task");
 
-    eventually::events(start_at_time)
-        .ready_chunks(500)
-        .fold(db, |mut ingest, events| async move {
-            let processed_up_to = save_feed_events(&ingest, events).await;
+    let feed_events = eventually::events(start_at_time);
 
-            ingest.notify_progress.send(processed_up_to)
-                .expect("Error communicating with Chronicler ingest");
-            info!("Feed ingest sent progress {}", processed_up_to);
+    pin_mut!(feed_events);
 
-            loop {
-                let chron_time = *ingest.receive_progress.borrow();
-                let stop_at = chron_time + Duration::minutes(1);
-                if processed_up_to < stop_at {
-                    break;
-                }
-                info!("Eventually ingest waiting for Chronicler ingest to catch up (at {} and we are at {}, {}s ahead)",
-                    chron_time, processed_up_to, (processed_up_to - chron_time).num_seconds());
-                ingest.receive_progress.changed().await
-                    .expect("Error communicating with Chronicler ingest");
-            }
+    while let Some(feed_event) = feed_events.next().await {
+        let feed_event_time = feed_event.created;
+        // Doing a "manual borrow" of ingest because I can't figure out how to please the borrow
+        // checker with a proper borrow
+        ingest = apply_timed_events_until(ingest, feed_event_time).await;
 
-            ingest
-        }).await;
+        apply_feed_event(&ingest, feed_event).await;
+
+        wait_for_chron_ingest(&mut ingest, feed_event_time).await
+    }
 }
 
-async fn save_feed_events(ingest: &IngestState, events: Vec<EventuallyEvent>) -> DateTime<Utc> {
-    // TODO Update this to use the header from Eventually somehow
-    let last_event_date = events.split_last()
-        .expect("save_feed_events was called with no events")
-        .0.created;
+async fn apply_timed_events_until(ingest: IngestState, feed_event_time: DateTime<Utc>) -> IngestState {
+    ingest.db.run(move |c| {
+        while let Some((entity_type, value, entity_time)) = get_version_with_next_timed_event(c, ingest.ingest_id, feed_event_time) {
+            match entity_type.as_str() {
+                "sim" => apply_timed_event::<sim::Sim>(c, ingest.ingest_id, value, entity_time, feed_event_time),
+                "game" => apply_timed_event::<sim::Game>(c, ingest.ingest_id, value, entity_time, feed_event_time),
+                "team" => apply_timed_event::<sim::Team>(c, ingest.ingest_id, value, entity_time, feed_event_time),
+                "player" => apply_timed_event::<sim::Player>(c, ingest.ingest_id, value, entity_time, feed_event_time),
+                &_ => { panic!("Tried to deserialize entity of unknown type {}", entity_type) }
+            }
+        }
+    }).await;
 
-    let mut insert_events = Vec::new();
-    let mut insert_changes = Vec::new();
-    for event in events {
-        insert_changes.push(feed_changes::changes_for_event(&event));
-        insert_events.push(InsertFeedEvent::from_eventually(ingest.ingest_id, event));
+    ingest
+}
+
+fn apply_timed_event<EntityT: sim::Entity>(c: &mut PgConnection, ingest_id: i32, value: serde_json::Value, entity_time: DateTime<Utc>, feed_event_time: DateTime<Utc>) {
+    let entity: EntityT = serde_json::from_value(value)
+        .expect("Error deserializing entity for timed event");
+
+    let event = entity.next_timed_event(entity_time)
+        .expect("get_version_with_next_timed_event returned a version without a timed event");
+    assert!(event.time > entity_time);
+    assert!(event.time <= feed_event_time);
+
+    let mut state = StateInterface::new(c, ingest_id, event.time);
+
+    info!("Applying timed event {:?}", event);
+    event.apply(&mut state);
+}
+
+async fn apply_feed_event(_ingest: &IngestState, _feed_event: EventuallyEvent) {
+    todo!()
+}
+
+async fn wait_for_chron_ingest(ingest: &mut IngestState, feed_event_time: DateTime<Utc>) {
+    ingest.notify_progress.send(feed_event_time)
+        .expect("Error communicating with Chronicler ingest");
+    info!("Feed ingest sent progress {}", feed_event_time);
+
+    loop {
+        let chron_time = *ingest.receive_progress.borrow();
+        let stop_at = chron_time + Duration::minutes(1);
+        if feed_event_time < stop_at {
+            break;
+        }
+        info!("Eventually ingest waiting for Chronicler ingest to catch up (at {} and we are at {}, {}s ahead)",
+                    chron_time, feed_event_time, (feed_event_time - chron_time).num_seconds());
+        ingest.receive_progress.changed().await
+            .expect("Error communicating with Chronicler ingest");
     }
-
-    ingest.db.run(|c| {
-        c.transaction(|| {
-            use crate::schema::feed_events::dsl as feed_events;
-            use crate::schema::feed_event_changes::dsl as feed_event_changes;
-
-            let ids: Vec<i32> = insert_into(feed_events::feed_events)
-                .values(insert_events)
-                .returning(feed_events::id)
-                .get_results(c)?;
-
-            let changes: Vec<_> = ids.into_iter()
-                .zip(insert_changes.into_iter())
-                .map(|(feed_event_id, changes)| {
-                    changes.into_iter().map(move |(entity_type, entity_id)| {
-                        InsertFeedEventChange::new(feed_event_id, entity_type, entity_id)
-                    })
-                })
-                .flatten()
-                .collect();
-
-            insert_into(feed_event_changes::feed_event_changes)
-                .values(changes)
-                .execute(c)?;
-
-            Ok::<_, diesel::result::Error>(())
-        })
-    }).await.expect("Failed to insert feed events");
-
-    last_event_date
 }

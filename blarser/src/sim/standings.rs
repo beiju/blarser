@@ -1,43 +1,43 @@
+use std::collections::HashMap;
 use std::fmt::Debug;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use partial_information::{CachedMap, PartialInformationCompare};
+use partial_information::{PartialInformationCompare};
 use partial_information_derive::PartialInformationCompare;
 
-use crate::sim::{Entity, FeedEventChangeResult};
-use crate::state::{StateInterface, GenericEvent};
+use crate::sim::Entity;
+use crate::sim::entity::TimedEvent;
+use crate::state::StateInterface;
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialInformationCompare)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
 pub struct Standings {
     pub id: Uuid,
-    pub runs: CachedMap<Uuid, f32>,
-    pub wins: CachedMap<Uuid, i32>,
-    pub losses: CachedMap<Uuid, i32>,
-    pub games_played: CachedMap<Uuid, i32>,
+    pub runs: HashMap<Uuid, f32>,
+    pub wins: HashMap<Uuid, i32>,
+    pub losses: HashMap<Uuid, i32>,
+    pub games_played: HashMap<Uuid, i32>,
 }
 
 impl Entity for Standings {
-    fn name() -> &'static str {
-        "standings"
-    }
+    fn name() -> &'static str { "standings" }
+    fn id(&self) -> Uuid { self.id }
 
-    fn next_timed_event(&self, _: DateTime<Utc>) -> Option<DateTime<Utc>> {
+    fn next_timed_event(&self, _: DateTime<Utc>) -> Option<TimedEvent> {
         None
     }
 
-    fn apply_event(&mut self, _event: &GenericEvent, _state: &StateInterface) -> FeedEventChangeResult {
-        todo!()
-        // match &event.event_type {
-        //     GenericEventType::FeedEvent(event) => self.apply_feed_event(event, state),
-        //     other => {
-        //         panic!("{:?} event does not apply to standings", other)
-        //     }
-        // }
-    }
+    // fn apply_event(&mut self, _event: &GenericEvent, _state: &StateInterface) -> FeedEventChangeResult {
+    //     match &event.event_type {
+    //         GenericEventType::FeedEvent(event) => self.apply_feed_event(event, state),
+    //         other => {
+    //             panic!("{:?} event does not apply to standings", other)
+    //         }
+    //     }
+    // }
 }
 
 // impl Standings {

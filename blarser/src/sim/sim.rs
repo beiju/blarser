@@ -4,17 +4,17 @@ use uuid::Uuid;
 use partial_information::PartialInformationCompare;
 use partial_information_derive::PartialInformationCompare;
 
-use crate::sim::{Entity, FeedEventChangeResult};
-use crate::sim::entity::Lowest;
-use crate::state::{GenericEvent, GenericEventType, StateInterface};
+use crate::sim::Entity;
+use crate::sim::entity::{EarliestEvent, TimedEvent, TimedEventType};
+use crate::state::StateInterface;
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialInformationCompare)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
 pub struct SimState {}
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialInformationCompare)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
@@ -59,33 +59,16 @@ impl Entity for Sim {
     fn name() -> &'static str {
         "sim"
     }
+    fn id(&self) -> Uuid { Uuid::nil() }
 
-    fn next_timed_event(&self, after_time: DateTime<Utc>) -> Option<DateTime<Utc>> {
-        let mut earliest = Lowest::new(after_time);
+    fn next_timed_event(&self, after_time: DateTime<Utc>) -> Option<TimedEvent> {
+        let mut earliest = EarliestEvent::new(after_time);
 
-        earliest.push(self.earlseason_date);
+        earliest.push(TimedEvent {
+            time: self.earlseason_date,
+            event_type: TimedEventType::EarlseasonStart
+        });
 
         earliest.into_inner()
-    }
-
-    fn apply_event(&mut self, event: &GenericEvent, _state: &StateInterface) -> FeedEventChangeResult {
-        match &event.event_type {
-            GenericEventType::EarlseasonStart => {
-                if self.phase == 1 {
-                    self.phase = 2;
-                    self.next_phase_time = self.earlseason_date;
-                    FeedEventChangeResult::Ok
-                } else {
-                    panic!("Tried to apply EarlseasonStart event while not in Preseason phase")
-                }
-            }
-            GenericEventType::DayAdvance => {
-                self.day += 1;
-                FeedEventChangeResult::Ok
-            }
-            other => {
-                panic!("{:?} event does not apply to Sim", other)
-            }
-        }
     }
 }

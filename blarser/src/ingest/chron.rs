@@ -1,6 +1,6 @@
 use std::iter;
 use std::pin::Pin;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use futures::{stream, Stream, StreamExt};
 use rocket::{info};
 
@@ -27,26 +27,23 @@ fn initial_state(start_at_time: &'static str) -> impl Stream<Item=(&'static str,
     stream::select_all(streams)
 }
 
-pub async fn ingest_chron(ingest: IngestState, start_at_time: &'static str) {
-    info!("Started Chron ingest task");
-
-    let start_time_parsed = DateTime::parse_from_rfc3339(start_at_time)
-        .expect("Couldn't parse hard-coded Blarser start time")
-        .with_timezone(&Utc);
-
+pub async fn init_chron(ingest: &mut IngestState, start_at_time: &'static str, start_time_parsed: DateTime<Utc>) {
     let initial_versions: Vec<_> = initial_state(start_at_time).collect().await;
-    add_initial_versions(ingest.db, ingest.ingest_id, start_time_parsed, initial_versions).await;
+    add_initial_versions(&mut ingest.db, ingest.ingest_id, start_time_parsed, initial_versions).await;
 
     info!("Finished populating initial Chron values");
+}
+
+pub async fn ingest_chron(mut ingest: IngestState, start_time_parsed: DateTime<Utc>) {
+    info!("Started Chron ingest task");
 
     // TODO: Re-add ingest
     loop {
-        tokio::time::sleep(core::time::Duration::from_secs(500)).await;
-        info!("Fake running ingest {}", ingest.ingest_id)
+        info!("Fake running ingest {}", ingest.ingest_id);
+        wait_for_feed_ingest(&mut ingest, start_time_parsed + Duration::hours(24)).await;
     }
 
 }
-
 
 async fn wait_for_feed_ingest(ingest: &mut IngestState, wait_until_time: DateTime<Utc>) {
     loop {

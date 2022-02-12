@@ -98,13 +98,22 @@ table! {
         ingest_id -> Int4,
         entity_type -> Text,
         entity_id -> Uuid,
-        generation -> Int4,
-        single_parent -> Nullable<Int4>,
         start_time -> Timestamptz,
+        terminated -> Nullable<Text>,
         data -> Jsonb,
-        event_type -> Event_type,
-        feed_event_id -> Nullable<Uuid>,
         next_timed_event -> Nullable<Timestamptz>,
+    }
+}
+
+table! {
+    use diesel::sql_types::*;
+    use crate::db_types::*;
+    use crate::state::Event_type;
+
+    versions_parents (id) {
+        id -> Int4,
+        parent -> Int4,
+        child -> Int4,
     }
 }
 
@@ -119,4 +128,5 @@ allow_tables_to_appear_in_same_query!(
     ingest_logs,
     ingests,
     versions,
+    versions_parents,
 );

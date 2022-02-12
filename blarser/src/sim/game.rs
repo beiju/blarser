@@ -1,31 +1,32 @@
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use serde_with::with_prefix;
 use uuid::Uuid;
-use partial_information::{Cached, MaybeKnown, PartialInformationCompare, Ranged};
+use partial_information::{MaybeKnown, PartialInformationCompare, Ranged};
 use partial_information_derive::PartialInformationCompare;
-use crate::sim::{Entity, FeedEventChangeResult};
+use crate::sim::Entity;
 
-use crate::sim::entity::Lowest;
-use crate::state::{GenericEvent, StateInterface};
+use crate::sim::entity::{EarliestEvent, TimedEvent, TimedEventType};
+use crate::state::{StateInterface};
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialInformationCompare)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
 pub struct GameState {
-    snowfall_events: Cached<Option<i32>>,
+    snowfall_events: Option<i32>,
 
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialInformationCompare)]
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize, PartialInformationCompare)]
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
 pub struct UpdateFullMetadata {
     r#mod: Option<String>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialInformationCompare)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
@@ -47,7 +48,7 @@ pub struct UpdateFull {
     description: String,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialInformationCompare)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "PascalCase")] // it will be camelCase after being prefixed with "home"/"away"
 #[allow(dead_code)]
@@ -74,7 +75,7 @@ pub struct GameByTeam {
     pub team_secondary_color: String,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialInformationCompare)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, PartialInformationCompare)]
 // Can't use deny_unknown_fields here because of the prefixed sub-objects
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
@@ -144,12 +145,11 @@ with_prefix!(prefix_away "away");
 
 
 impl Entity for Game {
-    fn name() -> &'static str {
-        "game"
-    }
+    fn name() -> &'static str { "game" }
+    fn id(&self) -> Uuid { self.id }
 
-    fn next_timed_event(&self, after_time: DateTime<Utc>) -> Option<DateTime<Utc>> {
-        let mut earliest = Lowest::new(after_time);
+    fn next_timed_event(&self, after_time: DateTime<Utc>) -> Option<TimedEvent> {
+        let mut earliest = EarliestEvent::new(after_time);
 
         // There's a game update without a corresponding game event. It happens at the end of the
         // first half of each inning, and from a cursory look at the game event json it appears to
@@ -160,45 +160,48 @@ impl Entity for Game {
                 .first()
                 .expect("lastUpdateFull must be non-empty when game phase is 3")
                 .created + Duration::seconds(5);
-            earliest.push(event_time)
+            earliest.push(TimedEvent {
+                time: event_time,
+                event_type: TimedEventType::EndTopHalf,
+            })
         }
 
         earliest.into_inner()
     }
 
-    fn apply_event(&mut self, _event: &GenericEvent, _state: &StateInterface) -> FeedEventChangeResult {
-        todo!()
-        // #[allow(unreachable_patterns)]
-        // match &event.event_type {
-        //     GenericEventType::EarlseasonStart => {
-        //         // This event generates odds and sets a bunch of properties
-        //         for self_by_team in [&mut self.home, &mut self.away] {
-        //             self_by_team.batter_name = Some(String::new());
-        //             self_by_team.odds = Some(Ranged::Range(0.0, 1.0));
-        //             self_by_team.pitcher = Some(MaybeKnown::Unknown);
-        //             self_by_team.pitcher_name = Some(MaybeKnown::Unknown);
-        //             self_by_team.score = Some(0.0);
-        //             self_by_team.strikes = Some(3);
-        //         }
-        //         self.last_update = String::new();
-        //         self.last_update_full = Some(Vec::new());
-        //         FeedEventChangeResult::Ok
-        //     }
-        //     GenericEventType::EndTopHalf => {
-        //         self.phase = 2;
-        //         self.play_count += 1;
-        //         self.last_update = String::new();
-        //         self.last_update_full = Some(Vec::new());
-        //         FeedEventChangeResult::Ok
-        //     }
-        //     GenericEventType::FeedEvent(feed_event) => {
-        //         self.apply_feed_event(feed_event, state)
-        //     }
-        //     other => {
-        //         panic!("{:?} event does not apply to Game", other)
-        //     }
-        // }
-    }
+    // fn apply_event(&mut self, _event: &GenericEvent, _state: &StateInterface) -> FeedEventChangeResult {
+    //     todo!()
+    //     #[allow(unreachable_patterns)]
+    //     match &event.event_type {
+    //         GenericEventType::EarlseasonStart => {
+    //             // This event generates odds and sets a bunch of properties
+    //             for self_by_team in [&mut self.home, &mut self.away] {
+    //                 self_by_team.batter_name = Some(String::new());
+    //                 self_by_team.odds = Some(Ranged::Range(0.0, 1.0));
+    //                 self_by_team.pitcher = Some(MaybeKnown::Unknown);
+    //                 self_by_team.pitcher_name = Some(MaybeKnown::Unknown);
+    //                 self_by_team.score = Some(0.0);
+    //                 self_by_team.strikes = Some(3);
+    //             }
+    //             self.last_update = String::new();
+    //             self.last_update_full = Some(Vec::new());
+    //             FeedEventChangeResult::Ok
+    //         }
+    //         GenericEventType::EndTopHalf => {
+    //             self.phase = 2;
+    //             self.play_count += 1;
+    //             self.last_update = String::new();
+    //             self.last_update_full = Some(Vec::new());
+    //             FeedEventChangeResult::Ok
+    //         }
+    //         GenericEventType::FeedEvent(feed_event) => {
+    //             self.apply_feed_event(feed_event, state)
+    //         }
+    //         other => {
+    //             panic!("{:?} event does not apply to Game", other)
+    //         }
+    //     }
+    // }
 }
 
 // impl Game {

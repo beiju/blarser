@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::compare::PartialInformationDiff;
 use crate::PartialInformationCompare;
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, PartialEq, Deserialize, Serialize)]
 pub enum Ranged<UnderlyingType: PartialOrd> {
     Known(UnderlyingType),
     Range(UnderlyingType, UnderlyingType),

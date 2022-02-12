@@ -7,7 +7,7 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
 use crate::db::BlarserDbConn;
-use crate::ingest::chron::ingest_chron;
+use crate::ingest::chron::{init_chron, ingest_chron};
 use crate::ingest::feed::ingest_feed;
 use crate::schema;
 
@@ -56,14 +56,20 @@ impl IngestTask {
             receive_progress: recv_chron_progress,
         };
 
-        let chron_ingest = IngestState {
+        let mut chron_ingest = IngestState {
             ingest_id,
             db: chron_db,
             notify_progress: send_chron_progress,
             receive_progress: recv_feed_progress,
         };
 
-        *self.chron_task.lock().unwrap() = Some(tokio::spawn(ingest_chron(chron_ingest, BLARSER_START)));
+        let start_time_parsed = DateTime::parse_from_rfc3339(BLARSER_START)
+            .expect("Couldn't parse hard-coded Blarser start time")
+            .with_timezone(&Utc);
+
+        init_chron(&mut chron_ingest, BLARSER_START, start_time_parsed).await;
+
+        *self.chron_task.lock().unwrap() = Some(tokio::spawn(ingest_chron(chron_ingest, start_time_parsed)));
         *self.feed_task.lock().unwrap() = Some(tokio::spawn(ingest_feed(feed_ingest, BLARSER_START)));
     }
 }

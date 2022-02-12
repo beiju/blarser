@@ -1,2 +1,2 @@
+DROP TABLE versions_parents;
 DROP TABLE versions;
-DROP TYPE event_type;

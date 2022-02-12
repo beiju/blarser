@@ -7,7 +7,7 @@ mod team;
 mod standings;
 mod parse;
 
-pub use entity::{Entity, FeedEventChangeResult};
+pub use entity::{Entity, TimedEvent, TimedEventType};
 pub use player::Player;
 pub use sim::Sim;
 pub use game::Game;

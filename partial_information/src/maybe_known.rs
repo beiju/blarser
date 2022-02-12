@@ -4,7 +4,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use crate::compare::PartialInformationDiff;
 use crate::PartialInformationCompare;
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub enum MaybeKnown<UnderlyingType> {
     Unknown,
     Known(UnderlyingType),
