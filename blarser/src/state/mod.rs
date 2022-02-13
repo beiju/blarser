@@ -2,6 +2,7 @@ mod state_interface;
 mod events;
 mod versions_db;
 mod timed_event;
+mod feed_event;
 mod merged_successors;
 
 pub use state_interface::{StateInterface};

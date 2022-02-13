@@ -6,7 +6,6 @@ use partial_information_derive::PartialInformationCompare;
 
 use crate::sim::Entity;
 use crate::sim::entity::{EarliestEvent, TimedEvent, TimedEventType};
-use crate::state::StateInterface;
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]

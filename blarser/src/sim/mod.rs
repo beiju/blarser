@@ -5,7 +5,6 @@ mod sim;
 mod game;
 mod team;
 mod standings;
-mod parse;
 
 pub use entity::{Entity, TimedEvent, TimedEventType};
 pub use player::Player;

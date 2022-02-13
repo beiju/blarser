@@ -1,10 +1,10 @@
 use std::fmt::Debug;
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 use crate::compare::PartialInformationDiff;
 use crate::PartialInformationCompare;
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum MaybeKnown<UnderlyingType> {
     Unknown,
     Known(UnderlyingType),
@@ -17,15 +17,6 @@ impl<UnderlyingType> MaybeKnown<UnderlyingType>
             MaybeKnown::Unknown => { None }
             MaybeKnown::Known(val) => { Some(val) }
         }
-    }
-}
-
-impl<'de, UnderlyingType> Deserialize<'de> for MaybeKnown<UnderlyingType>
-    where UnderlyingType: for<'de2> Deserialize<'de2> + Clone + Debug {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where D: Deserializer<'de> {
-        let val: UnderlyingType = Deserialize::deserialize(deserializer)?;
-        Ok(MaybeKnown::Known(val))
     }
 }
 

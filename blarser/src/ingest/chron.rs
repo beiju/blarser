@@ -46,6 +46,10 @@ pub async fn ingest_chron(mut ingest: IngestState, start_time_parsed: DateTime<U
 }
 
 async fn wait_for_feed_ingest(ingest: &mut IngestState, wait_until_time: DateTime<Utc>) {
+    ingest.notify_progress.send(wait_until_time)
+        .expect("Error communicating with Chronicler ingest");
+    info!("Chron ingest sent {} as requested time", wait_until_time);
+
     loop {
         let feed_time = *ingest.receive_progress.borrow();
         if wait_until_time < feed_time {

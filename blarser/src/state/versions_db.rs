@@ -5,7 +5,6 @@ use chrono::{DateTime, Utc};
 use itertools::Itertools;
 use diesel::prelude::*;
 use rocket::info;
-use serde::Deserialize;
 
 use crate::api::ChroniclerItem;
 use crate::db::BlarserDbConn;
@@ -125,30 +124,38 @@ pub fn get_version_with_next_timed_event(c: &mut PgConnection, ingest_id: i32, b
         .expect("Error getting next version with timed event")
 }
 
-pub fn get_possible_versions_at(c: &mut PgConnection, ingest_id: i32, entity_type: &str, entity_id: Uuid, at_time: DateTime<Utc>) -> Vec<(i32, serde_json::Value)> {
+pub fn get_possible_versions_at(c: &PgConnection, ingest_id: i32, entity_type: &str, entity_id: Option<Uuid>, at_time: DateTime<Utc>) -> Vec<(i32, serde_json::Value)> {
     use crate::schema::versions::dsl as versions;
     use crate::schema::versions_parents::dsl as parents;
-    versions::versions
+    let base_query = versions::versions
         .select((versions::id, versions::data))
         .left_join(parents::versions_parents.on(parents::parent.eq(versions::id)))
         // Is from the right ingest
         .filter(versions::ingest_id.eq(ingest_id))
         // Has the right entity type
         .filter(versions::entity_type.eq(entity_type))
-        // Has the right entity id
-        .filter(versions::entity_id.eq(entity_id))
         // Was created before the requested time
         .filter(versions::start_time.le(at_time))
         // Has no children
         // TODO: Revisit this when it comes time to re-apply stored events to a past version after
         //   getting a new observation for it. This may not work, depending on whether I decide to
         //   delete the existing branch of the tree before generating a new one
-        .filter(parents::child.is_null())
-        .get_results::<(i32, serde_json::Value)>(c)
-        .expect("Error getting next version with timed event")
+        .filter(parents::child.is_null());
+
+    match entity_id {
+        Some(entity_id) => {
+            base_query
+                // Has the right entity id
+                .filter(versions::entity_id.eq(entity_id))
+                .get_results::<(i32, serde_json::Value)>(c)
+        }
+        None => {
+            base_query.get_results::<(i32, serde_json::Value)>(c)
+        }
+    }.expect("Error getting next version with timed event")
 }
 
-pub fn save_successors<EntityT: sim::Entity>(c: &mut PgConnection, ingest_id: i32, start_time: DateTime<Utc>, successors: Vec<(EntityT, Vec<i32>)>) {
+pub fn save_successors<EntityT: sim::Entity>(c: &PgConnection, ingest_id: i32, start_time: DateTime<Utc>, successors: Vec<(EntityT, Vec<i32>)>) {
     let (new_versions, parents): (Vec<_>, Vec<_>) = successors.into_iter().map(|(entity, parents)| {
         let next_timed_event = entity.next_timed_event(start_time)
             .map(|event| event.time);

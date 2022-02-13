@@ -8,7 +8,7 @@ use partial_information::PartialInformationCompare;
 pub enum TimedEventType {
     EarlseasonStart,
     DayAdvance,
-    EndTopHalf,
+    EndTopHalf(Uuid),
 }
 
 #[derive(Debug)]

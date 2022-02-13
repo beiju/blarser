@@ -1,4 +1,6 @@
+use anyhow::anyhow;
 use chrono::{DateTime, Utc};
+use itertools::Itertools;
 use serde::{Serialize, Deserialize};
 use serde_json::Value;
 use serde_repr::{Serialize_repr, Deserialize_repr};
@@ -60,6 +62,38 @@ pub struct EventuallyEvent {
     pub season: i32,
     pub tournament: i32,
     pub phase: i32,
+}
+
+impl EventuallyEvent {
+    pub fn game_id(&self) -> Result<Uuid, anyhow::Error> {
+        self.game_tags.iter()
+            .exactly_one()
+            .map_err(|err| anyhow!("Expected exactly one game id but found {:?}", err))
+            .cloned()
+    }
+
+    pub fn player_id(&self) -> Result<Uuid, anyhow::Error> {
+        self.player_tags.iter()
+            .exactly_one()
+            .map_err(|err| anyhow!("Expected exactly one player id but found {:?}", err))
+            .cloned()
+    }
+
+    pub fn player_id_excluding(&self, excluding: Uuid) -> Result<Uuid, anyhow::Error> {
+        self.player_tags.iter()
+            .filter(|uuid| uuid == &&excluding)
+            .exactly_one()
+            .map_err(|err| anyhow!("Expected exactly one player id, excluding {}, but found {:?}", excluding, err))
+            .cloned()
+    }
+
+    pub fn team_id_excluding(&self, excluding: Uuid) -> Result<Uuid, anyhow::Error> {
+        self.game_tags.iter()
+            .filter(|uuid| uuid == &&excluding)
+            .exactly_one()
+            .map_err(|err| anyhow!("Expected exactly one team id, excluding {}, but found {:?}", excluding, err))
+            .cloned()
+    }
 }
 
 #[derive(Serialize_repr, Deserialize_repr, PartialEq, Debug)]

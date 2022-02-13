@@ -21,8 +21,7 @@ pub async fn ingest_feed(mut ingest: IngestState, start_at_time: &'static str) {
         // Doing a "manual borrow" of ingest because I can't figure out how to please the borrow
         // checker with a proper borrow
         ingest = apply_timed_events_until(ingest, feed_event_time).await;
-
-        apply_feed_event(&ingest, feed_event).await;
+        ingest = apply_feed_event(ingest, feed_event).await;
 
         wait_for_chron_ingest(&mut ingest, feed_event_time).await
     }
@@ -59,8 +58,15 @@ fn apply_timed_event<EntityT: sim::Entity>(c: &mut PgConnection, ingest_id: i32,
     event.apply(&mut state);
 }
 
-async fn apply_feed_event(_ingest: &IngestState, _feed_event: EventuallyEvent) {
-    todo!()
+async fn apply_feed_event(ingest: IngestState, event: EventuallyEvent) -> IngestState {
+    ingest.db.run(move |c| {
+        let mut state = StateInterface::new(c, ingest.ingest_id, event.created);
+
+        info!("Applying feed event {:?}", event);
+        event.apply(&mut state);
+    }).await;
+
+    ingest
 }
 
 async fn wait_for_chron_ingest(ingest: &mut IngestState, feed_event_time: DateTime<Utc>) {
@@ -69,13 +75,13 @@ async fn wait_for_chron_ingest(ingest: &mut IngestState, feed_event_time: DateTi
     info!("Feed ingest sent progress {}", feed_event_time);
 
     loop {
-        let chron_time = *ingest.receive_progress.borrow();
-        let stop_at = chron_time + Duration::minutes(1);
+        let chron_requests_time = *ingest.receive_progress.borrow();
+        let stop_at = chron_requests_time + Duration::minutes(1);
         if feed_event_time < stop_at {
             break;
         }
         info!("Eventually ingest waiting for Chronicler ingest to catch up (at {} and we are at {}, {}s ahead)",
-                    chron_time, feed_event_time, (feed_event_time - chron_time).num_seconds());
+                    chron_requests_time, feed_event_time, (feed_event_time - chron_requests_time).num_seconds());
         ingest.receive_progress.changed().await
             .expect("Error communicating with Chronicler ingest");
     }

@@ -1,4 +1,3 @@
-use chrono::{DateTime, Utc};
 use crate::sim::Entity;
 
 pub struct MergedSuccessors<EntityT: Entity>(Vec<(EntityT, Vec<i32>)>);

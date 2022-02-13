@@ -15,6 +15,6 @@ pub mod schema;
 pub mod db_types;
 mod sim;
 mod state;
-mod event_utils;
+mod parse;
 
 pub use state::StateInterface;
