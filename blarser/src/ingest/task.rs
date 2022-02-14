@@ -2,7 +2,7 @@ use std::sync::Mutex;
 use chrono::{DateTime, Utc};
 use diesel::{insert_into, RunQueryDsl};
 use rocket::info;
-use tokio::sync::watch;
+use tokio::sync::{OnceCell, watch};
 
 use tokio::task::JoinHandle;
 
@@ -14,6 +14,7 @@ use crate::schema;
 const BLARSER_START: &str = "2021-12-06T15:00:00Z";
 
 pub struct IngestTask {
+    latest_ingest_id: OnceCell<i32>,
     feed_task: Mutex<Option<JoinHandle<()>>>,
     chron_task: Mutex<Option<JoinHandle<()>>>,
 }
@@ -28,9 +29,14 @@ pub struct IngestState {
 impl IngestTask {
     pub fn new() -> IngestTask {
         IngestTask {
+            latest_ingest_id: OnceCell::new(),
             feed_task: Mutex::new(None),
             chron_task: Mutex::new(None)
         }
+    }
+
+    pub fn latest_ingest(&self) -> Option<i32> {
+        self.latest_ingest_id.get().cloned()
     }
 
     pub async fn start(&self, feed_db: BlarserDbConn, chron_db: BlarserDbConn) {
@@ -41,6 +47,8 @@ impl IngestTask {
             insert_into(ingests).default_values().returning(id).get_result(c)
         }).await.expect("Failed to create new ingest record");
 
+        self.latest_ingest_id.set(ingest_id)
+            .expect("Error saving latest ingest id");
 
         let blarser_start = DateTime::parse_from_rfc3339(BLARSER_START)
             .expect("Couldn't parse Blarser start time")

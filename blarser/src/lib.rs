@@ -13,8 +13,8 @@ pub mod db;
 #[allow(unused_imports)]
 pub mod schema;
 pub mod db_types;
-mod sim;
-mod state;
+pub mod sim;
+pub mod state;
 mod parse;
 
 pub use state::StateInterface;

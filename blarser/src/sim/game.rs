@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::fmt::{Display, Formatter};
 use std::iter;
 use chrono::{DateTime, Duration, Utc};
 use itertools::Itertools;
@@ -147,6 +148,11 @@ pub struct Game {
 with_prefix!(prefix_home "home");
 with_prefix!(prefix_away "away");
 
+impl Display for Game {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Game: {} @ {}", self.away.team_name, self.home.team_name)
+    }
+}
 
 impl Entity for Game {
     fn name() -> &'static str { "game" }

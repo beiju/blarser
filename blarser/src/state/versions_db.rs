@@ -192,3 +192,21 @@ pub fn save_successors<EntityT: sim::Entity>(c: &PgConnection, ingest_id: i32, f
     })
         .expect("Failed to save successors")
 }
+
+pub fn get_recently_updated_entities(c: &PgConnection, ingest_id: i32, count: i64) -> QueryResult<Vec<(String, Uuid, serde_json::Value)>> {
+    use crate::schema::versions::dsl as versions;
+    use crate::schema::versions_parents::dsl as parents;
+    use crate::schema::events::dsl as events;
+    versions::versions
+        .select((versions::entity_type, versions::entity_id, versions::data))
+        .left_join(parents::versions_parents.on(parents::parent.eq(versions::id)))
+        .inner_join(events::events.on(events::id.eq(versions::from_event)))
+        // Is from the right ingest
+        .filter(versions::ingest_id.eq(ingest_id))
+        // Has no children
+        .filter(parents::child.is_null())
+        // Order by event
+        .order(events::event_time.desc())
+        .limit(count)
+        .get_results::<(String, Uuid, serde_json::Value)>(c)
+}

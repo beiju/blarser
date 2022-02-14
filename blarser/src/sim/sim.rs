@@ -1,3 +1,4 @@
+use std::fmt::{Display, Formatter};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -52,6 +53,12 @@ pub struct Sim {
     pub tournament_round: i32,
     pub earlpostseason_date: DateTime<Utc>,
     pub latepostseason_date: DateTime<Utc>,
+}
+
+impl Display for Sim {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Sim")
+    }
 }
 
 impl Entity for Sim {

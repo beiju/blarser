@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt::{Display, Formatter};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -85,6 +86,15 @@ pub struct Team {
     pub secondary_color: String,
     pub tournament_wins: Option<i32>,
     pub underchampionships: Option<i32>,
+}
+
+impl Display for Team {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self.state.as_ref().and_then(|state| state.scattered.as_ref()).map(|info| &info.full_name) {
+            Some(name) => write!(f, "Team: {}", name),
+            None => write!(f, "Team: {}", self.full_name),
+        }
+    }
 }
 
 impl Entity for Team {

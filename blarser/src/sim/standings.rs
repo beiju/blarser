@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::fmt::Debug;
+use std::fmt::{Debug, Display, Formatter};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -19,6 +19,12 @@ pub struct Standings {
     pub wins: HashMap<Uuid, i32>,
     pub losses: HashMap<Uuid, i32>,
     pub games_played: HashMap<Uuid, i32>,
+}
+
+impl Display for Standings {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Standings")
+    }
 }
 
 impl Entity for Standings {

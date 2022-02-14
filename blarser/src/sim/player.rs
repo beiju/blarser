@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt::{Display, Formatter, Write};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -104,6 +105,15 @@ pub struct Player {
     pub hitting_rating: Option<MaybeKnown<f32>>,
     pub pitching_rating: Option<MaybeKnown<f32>>,
     pub baserunning_rating: Option<MaybeKnown<f32>>,
+}
+
+impl Display for Player {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Player: {}",
+               self.state.as_ref()
+                   .and_then(|state| state.unscattered_name.as_ref())
+                   .unwrap_or(&self.name))
+    }
 }
 
 

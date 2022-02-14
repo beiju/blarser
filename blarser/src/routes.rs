@@ -1,14 +1,18 @@
 use rocket_dyn_templates::Template;
 use diesel::result::Error as DieselError;
+use log::info;
 use serde::Serialize;
 use rocket::form::{Form, FromForm};
 use rocket::response::Redirect;
 use rocket::{State, uri};
 use uuid::Uuid;
+use anyhow::anyhow;
 
 use blarser::db::{BlarserDbConn, get_pending_approvals, get_latest_ingest, get_logs_for, IngestApproval, set_approval, IngestLogAndApproval};
 use blarser::ingest::IngestTask;
 use blarser::StateInterface;
+use blarser::state::get_recently_updated_entities;
+use blarser::sim;
 
 #[derive(rocket::Responder)]
 pub enum ServerError {
@@ -94,7 +98,34 @@ pub async fn approve(_task: &State<IngestTask>, conn: BlarserDbConn, approval: F
     Ok(Redirect::to(redirect_to))
 }
 
-#[rocket::get("/changes/<entity_type>/<entity_id>")]
-pub async fn changes(conn: BlarserDbConn, entity_type: String, entity_id: Uuid) {
-    todo!()
+#[rocket::get("/debug")]
+pub async fn debug(conn: BlarserDbConn, ingest: &State<IngestTask>) -> Result<Template, ServerError> {
+    let ingest_id = ingest.latest_ingest()
+        .ok_or(ServerError::InternalError(format!("There is no ingest yet")))?;
+
+    info!("Getting debug for ingest {}", ingest_id);
+
+    #[derive(Serialize)]
+    struct DebugEntityParams {
+        name: String,
+        id: Uuid,
+    }
+
+    #[derive(Serialize)]
+    struct DebugTemplateParams {
+        pub entities: Vec<DebugEntityParams>,
+    }
+
+    let entities = conn.run(move |c| {
+        get_recently_updated_entities(c, ingest_id, 500)
+    }).await
+        .map_err(|e| ServerError::InternalError(anyhow!(e).context("In debug route").to_string()))?
+        .into_iter()
+        .map(|(entity_type, entity_id, entity_json)| DebugEntityParams {
+            name: sim::entity_description(&entity_type, entity_json),
+            id: entity_id
+        })
+        .collect();
+
+    Ok(Template::render("debug", DebugTemplateParams { entities }))
 }
