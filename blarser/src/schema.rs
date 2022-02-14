@@ -1,7 +1,7 @@
 table! {
     use diesel::sql_types::*;
     use crate::db_types::*;
-    use crate::state::Event_type;
+    use crate::state::Event_source;
 
     chron_updates (id) {
         id -> Int4,
@@ -20,7 +20,21 @@ table! {
 table! {
     use diesel::sql_types::*;
     use crate::db_types::*;
-    use crate::state::Event_type;
+    use crate::state::Event_source;
+
+    events (id) {
+        id -> Int4,
+        ingest_id -> Int4,
+        event_time -> Timestamptz,
+        event_source -> Event_source,
+        event_data -> Jsonb,
+    }
+}
+
+table! {
+    use diesel::sql_types::*;
+    use crate::db_types::*;
+    use crate::state::Event_source;
 
     feed_event_changes (id) {
         id -> Int4,
@@ -33,7 +47,7 @@ table! {
 table! {
     use diesel::sql_types::*;
     use crate::db_types::*;
-    use crate::state::Event_type;
+    use crate::state::Event_source;
 
     feed_events (id) {
         id -> Int4,
@@ -46,7 +60,7 @@ table! {
 table! {
     use diesel::sql_types::*;
     use crate::db_types::*;
-    use crate::state::Event_type;
+    use crate::state::Event_source;
 
     ingest_approvals (id) {
         id -> Int4,
@@ -63,7 +77,7 @@ table! {
 table! {
     use diesel::sql_types::*;
     use crate::db_types::*;
-    use crate::state::Event_type;
+    use crate::state::Event_source;
 
     ingest_logs (id) {
         id -> Int4,
@@ -79,7 +93,7 @@ table! {
 table! {
     use diesel::sql_types::*;
     use crate::db_types::*;
-    use crate::state::Event_type;
+    use crate::state::Event_source;
 
     ingests (id) {
         id -> Int4,
@@ -91,16 +105,16 @@ table! {
 table! {
     use diesel::sql_types::*;
     use crate::db_types::*;
-    use crate::state::Event_type;
+    use crate::state::Event_source;
 
     versions (id) {
         id -> Int4,
         ingest_id -> Int4,
         entity_type -> Text,
         entity_id -> Uuid,
-        start_time -> Timestamptz,
         terminated -> Nullable<Text>,
         data -> Jsonb,
+        from_event -> Int4,
         next_timed_event -> Nullable<Timestamptz>,
     }
 }
@@ -108,7 +122,7 @@ table! {
 table! {
     use diesel::sql_types::*;
     use crate::db_types::*;
-    use crate::state::Event_type;
+    use crate::state::Event_source;
 
     versions_parents (id) {
         id -> Int4,
@@ -119,9 +133,11 @@ table! {
 
 joinable!(feed_event_changes -> feed_events (feed_event_id));
 joinable!(ingest_logs -> ingest_approvals (approval_id));
+joinable!(versions -> events (from_event));
 
 allow_tables_to_appear_in_same_query!(
     chron_updates,
+    events,
     feed_event_changes,
     feed_events,
     ingest_approvals,

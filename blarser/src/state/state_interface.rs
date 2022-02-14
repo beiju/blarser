@@ -9,6 +9,7 @@ use crate::state::merged_successors::MergedSuccessors;
 pub struct StateInterface<'conn> {
     conn: &'conn mut PgConnection,
     ingest_id: i32,
+    from_event: i32,
     at_time: DateTime<Utc>,
 
     // TODO: Cache parameters
@@ -57,10 +58,11 @@ macro_rules! writer_with_nil_id {
 }
 
 impl<'conn> StateInterface<'conn> {
-    pub fn new(c: &'conn mut PgConnection, ingest_id: i32, at_time: DateTime<Utc>) -> StateInterface<'conn> {
+    pub fn new(c: &'conn mut PgConnection, ingest_id: i32, from_event: i32, at_time: DateTime<Utc>) -> StateInterface<'conn> {
         StateInterface {
             conn: c,
             ingest_id,
+            from_event,
             at_time,
         }
     }
@@ -113,7 +115,7 @@ impl<'conn> StateInterface<'conn> {
             todo!()
         }
 
-        versions_db::save_successors(&self.conn, self.ingest_id, self.at_time, all_successors.into_inner())
+        versions_db::save_successors(&self.conn, self.ingest_id, self.from_event, self.at_time, all_successors.into_inner())
     }
 
     // TODO Probably should change these to be named writer or something

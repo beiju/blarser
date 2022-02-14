@@ -1,17 +1,17 @@
 use std::fmt::Debug;
 use chrono::{DateTime, Utc};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use partial_information::PartialInformationCompare;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize)]
 pub enum TimedEventType {
     EarlseasonStart,
     DayAdvance,
     EndTopHalf(Uuid),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TimedEvent {
     pub time: DateTime<Utc>,
     pub event_type: TimedEventType,

@@ -7,7 +7,7 @@ use crate::api::{eventually, EventuallyEvent};
 use crate::ingest::task::IngestState;
 
 use crate::{sim, StateInterface};
-use crate::state::{get_version_with_next_timed_event, IngestEvent};
+use crate::state::{add_feed_event, add_timed_event, get_version_with_next_timed_event, IngestEvent};
 
 pub async fn ingest_feed(mut ingest: IngestState, start_at_time: &'static str) {
     info!("Started Feed ingest task");
@@ -52,7 +52,9 @@ fn apply_timed_event<EntityT: sim::Entity>(c: &mut PgConnection, ingest_id: i32,
     assert!(event.time > entity_time);
     assert!(event.time <= feed_event_time);
 
-    let mut state = StateInterface::new(c, ingest_id, event.time);
+    let from_event = add_timed_event(c, ingest_id, event.clone());
+
+    let mut state = StateInterface::new(c, ingest_id, from_event, event.time);
 
     info!("Applying timed event {:?}", event);
     event.apply(&mut state);
@@ -60,7 +62,9 @@ fn apply_timed_event<EntityT: sim::Entity>(c: &mut PgConnection, ingest_id: i32,
 
 async fn apply_feed_event(ingest: IngestState, event: EventuallyEvent) -> IngestState {
     ingest.db.run(move |c| {
-        let mut state = StateInterface::new(c, ingest.ingest_id, event.created);
+        let from_event = add_feed_event(c, ingest.ingest_id, event.clone());
+
+        let mut state = StateInterface::new(c, ingest.ingest_id, from_event, event.created);
 
         info!("Applying feed event {:?}", event);
         event.apply(&mut state);
