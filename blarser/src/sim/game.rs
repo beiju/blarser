@@ -181,10 +181,6 @@ impl Entity for Game {
 }
 
 impl Game {
-
-    pub(crate) fn storm_warning(&mut self, event: &EventuallyEvent) {
-    }
-
     pub(crate) fn game_update_common(&mut self, first_event: &EventuallyEvent) {
         let events = &first_event.metadata.siblings;
 

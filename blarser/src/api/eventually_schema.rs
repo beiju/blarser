@@ -81,7 +81,7 @@ impl EventuallyEvent {
 
     pub fn player_id_excluding(&self, excluding: Uuid) -> Result<Uuid, anyhow::Error> {
         self.player_tags.iter()
-            .filter(|uuid| uuid == &&excluding)
+            .filter(|uuid| uuid != &&excluding)
             .exactly_one()
             .map_err(|err| anyhow!("Expected exactly one player id, excluding {}, but found {:?}", excluding, err))
             .cloned()
@@ -89,7 +89,7 @@ impl EventuallyEvent {
 
     pub fn team_id_excluding(&self, excluding: Uuid) -> Result<Uuid, anyhow::Error> {
         self.game_tags.iter()
-            .filter(|uuid| uuid == &&excluding)
+            .filter(|uuid| uuid != &&excluding)
             .exactly_one()
             .map_err(|err| anyhow!("Expected exactly one team id, excluding {}, but found {:?}", excluding, err))
             .cloned()
