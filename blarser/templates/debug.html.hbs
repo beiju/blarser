@@ -1,14 +1,19 @@
 {{#> base title="Debug Ingest" }}
+    {{#*inline "head-block"}}
+        <script src="https://d3js.org/d3.v7.min.js"></script>
+        <script src="https://unpkg.com/d3-dag@0.8.2"></script>
+        <script src="/public/debug.js"></script>
+    {{/inline}}
 
     {{#*inline "body-block"}}
         <div class="container-fluid h-100">
             <div class="row h-100">
-                <div class="col-3 h-100 bg-light border-end overflow-auto">
+                <div class="col-3 h-100 overflow-auto bg-light border-end">
                     <h1 class="mt-2 fs-6 text-center text-uppercase">Entities</h1>
 
-                    <ul class="list-unstyled">
+                    <ul class="list-unstyled" id="entity-list">
                         {{#each entities}}
-                            <li>
+                            <li data-entity-id="{{id}}">
                                 <label>
                                     <input type="checkbox" name="{{id}}_debug" />
                                     {{name}}
@@ -17,8 +22,8 @@
                         {{/each}}
                     </ul>
                 </div>
-                <div class="col" id="main">
-                    Lorem Ipsum is simply dummy text of the printing and typesetting industry. Lorem Ipsum has been the industry's standard dummy text ever since the 1500s, when an unknown printer took a galley of type and scrambled it to make a type specimen book. It has survived not only five centuries, but also the leap into electronic typesetting, remaining essentially unchanged. It was popularised in the 1960s with the release of Letraset sheets containing Lorem Ipsum passages, and more recently with desktop publishing software like Aldus PageMaker including versions of Lorem Ipsum.
+                <div class="col h-100 overflow-auto" id="main">
+
                 </div>
             </div>
         </div>

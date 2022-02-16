@@ -23,11 +23,33 @@ struct NewVersion {
     next_timed_event: Option<DateTime<Utc>>,
 }
 
+#[derive(Identifiable, Queryable, PartialEq, Debug)]
+#[table_name = "versions"]
+pub struct Version {
+    pub id: i32,
+    pub ingest_id: i32,
+    pub entity_type: String,
+    pub entity_id: Uuid,
+    pub terminated: Option<String>,
+    pub data: serde_json::Value,
+    pub from_event: i32,
+    pub next_timed_event: Option<DateTime<Utc>>,
+}
+
 #[derive(Insertable)]
 #[table_name = "versions_parents"]
 struct NewParent {
     parent: i32,
     child: i32,
+}
+
+#[derive(Identifiable, Queryable, Associations, PartialEq, Debug)]
+#[belongs_to(parent = "Version", foreign_key = "child")]
+#[table_name = "versions_parents"]
+pub struct Parent {
+    pub id: i32,
+    pub parent: i32,
+    pub child: i32,
 }
 
 impl NewVersion {
@@ -209,4 +231,22 @@ pub fn get_recently_updated_entities(c: &PgConnection, ingest_id: i32, count: i6
         .order(events::event_time.desc())
         .limit(count)
         .get_results::<(String, Uuid, serde_json::Value)>(c)
+}
+
+pub fn get_entity_debug(c: &PgConnection, ingest_id: i32, entity_id: Uuid) -> QueryResult<(Vec<Version>, Vec<Vec<Parent>>)> {
+    use crate::schema::versions::dsl as versions;
+    use crate::schema::versions_parents::dsl as parents;
+    // use crate::schema::events::dsl as events;
+    let versions = versions::versions
+        // Is from the right ingest
+        .filter(versions::ingest_id.eq(ingest_id))
+        // Is the right entity
+        .filter(versions::entity_id.eq(entity_id))
+        .get_results::<Version>(c)?;
+
+    let parents = Parent::belonging_to(&versions)
+        .load::<Parent>(c)?
+        .grouped_by(&versions);
+
+    Ok((versions, parents))
 }

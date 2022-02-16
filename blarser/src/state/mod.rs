@@ -8,5 +8,5 @@ mod merged_successors;
 
 pub use state_interface::{StateInterface};
 pub use events_db::{Event_source, add_feed_event, add_timed_event};
-pub use versions_db::{add_initial_versions, get_version_with_next_timed_event, get_recently_updated_entities};
+pub use versions_db::{add_initial_versions, get_version_with_next_timed_event, get_recently_updated_entities, get_entity_debug};
 pub use events::IngestEvent;

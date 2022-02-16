@@ -3,15 +3,17 @@ use diesel::result::Error as DieselError;
 use log::info;
 use serde::Serialize;
 use rocket::form::{Form, FromForm};
-use rocket::response::Redirect;
+use rocket::response::{Redirect};
+use rocket::serde::json::{json, Value};
 use rocket::{State, uri};
+use rocket::http::RawStr;
 use uuid::Uuid;
 use anyhow::anyhow;
 
 use blarser::db::{BlarserDbConn, get_pending_approvals, get_latest_ingest, get_logs_for, IngestApproval, set_approval, IngestLogAndApproval};
 use blarser::ingest::IngestTask;
 use blarser::StateInterface;
-use blarser::state::get_recently_updated_entities;
+use blarser::state::{get_recently_updated_entities, get_entity_debug};
 use blarser::sim;
 
 #[derive(rocket::Responder)]
@@ -103,8 +105,6 @@ pub async fn debug(conn: BlarserDbConn, ingest: &State<IngestTask>) -> Result<Te
     let ingest_id = ingest.latest_ingest()
         .ok_or(ServerError::InternalError(format!("There is no ingest yet")))?;
 
-    info!("Getting debug for ingest {}", ingest_id);
-
     #[derive(Serialize)]
     struct DebugEntityParams {
         name: String,
@@ -128,4 +128,30 @@ pub async fn debug(conn: BlarserDbConn, ingest: &State<IngestTask>) -> Result<Te
         .collect();
 
     Ok(Template::render("debug", DebugTemplateParams { entities }))
+}
+
+#[rocket::get("/debug/<entity_id>")]
+pub async fn entity_debug_json(conn: BlarserDbConn, ingest: &State<IngestTask>, entity_id: Uuid) -> Result<Value, ServerError> {
+    let ingest_id = ingest.latest_ingest()
+        .ok_or(ServerError::InternalError(format!("There is no ingest yet")))?;
+
+    let (versions, parents) = conn.run(move |c| {
+        get_entity_debug(c, ingest_id, entity_id)
+    }).await
+        .map_err(|e| ServerError::InternalError(anyhow!(e).context("In entity debug json route").to_string()))?;
+
+    let result: Vec<_> = versions.into_iter().zip(parents)
+        .map(|(version, version_parents)| {
+            let parents: Vec<_> = version_parents.into_iter()
+                .map(|parent| parent.parent.to_string())
+                .collect();
+
+            json!({
+                "id": version.id.to_string(),
+                "parentIds": parents,
+            })
+        })
+        .collect();
+
+    Ok(json!(result))
 }
