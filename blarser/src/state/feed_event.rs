@@ -1,6 +1,8 @@
+use std::collections::HashSet;
+use chrono::Duration;
 use itertools::Itertools;
 use uuid::Uuid;
-use partial_information::MaybeKnown;
+use partial_information::{MaybeKnown, Ranged};
 
 use crate::api::{EventType, EventuallyEvent};
 use crate::state::events::IngestEvent;
@@ -24,16 +26,17 @@ impl IngestEvent for EventuallyEvent {
             EventType::Hit => hit(state, self),
             EventType::GameEnd => game_end(state, self),
             EventType::BatterUp => batter_up(state, self),
-            // EventType::Strike => delegate_to_game!(state, self, strike),
-            // EventType::Ball => delegate_to_game!(state, self, ball),
-            // EventType::FoulBall => delegate_to_game!(state, self, foul_ball),
-            // EventType::InningEnd => delegate_to_game!(state, self, inning_end),
-            // EventType::BatterSkipped => delegate_to_game!(state, self, batter_skipped),
-            // EventType::PeanutFlavorText => delegate_to_game!(state, self, peanut_flavor_text),
-            // EventType::WinCollectedRegular => delegate_to_game!(state, self, win_collected_regular),
-            // EventType::GameOver => delegate_to_game!(state, self, game_over),
-            // EventType::StormWarning => delegate_to_game!(state, self, storm_warning),
-            // EventType::Snowflakes => delegate_to_game!(state, self, snowflakes),
+            EventType::Strike => strike(state, self),
+            EventType::Ball => ball(state, self),
+            EventType::FoulBall => foul_ball(state, self),
+            EventType::InningEnd => inning_end(state, self),
+            EventType::BatterSkipped => batter_skipped(state, self),
+            EventType::PeanutFlavorText => flavor_text(state, self),
+            EventType::PlayerStatReroll => player_stat_reroll(state, self),
+            EventType::WinCollectedRegular => win_collected_regular(state, self),
+            EventType::GameOver => game_over(state, self),
+            EventType::StormWarning => storm_warning(state, self),
+            EventType::Snowflakes => snowflakes(state, self),
             _ => todo!(),
         }
     }
@@ -383,6 +386,174 @@ fn batter_up(state: &mut StateInterface, event: &EventuallyEvent) {
         game.team_at_bat_mut().batter_name = Some(batter_name);
 
         game.game_update_common(event);
+
+        Ok(vec![game])
+    })
+}
+
+fn strike(state: &mut StateInterface, event: &EventuallyEvent) {
+    let game_id = event.game_id().expect(concat!("Strike event must have a game id"));
+    state.with_game(game_id, |mut game| {
+        game.at_bat_strikes += 1;
+        game.game_update_common(event);
+
+        Ok(vec![game])
+    })
+}
+
+fn ball(state: &mut StateInterface, event: &EventuallyEvent) {
+    let game_id = event.game_id().expect(concat!("Ball event must have a game id"));
+    state.with_game(game_id, |mut game| {
+        game.at_bat_balls += 1;
+        game.game_update_common(event);
+
+        Ok(vec![game])
+    })
+}
+
+fn foul_ball(state: &mut StateInterface, event: &EventuallyEvent) {
+    let game_id = event.game_id().expect(concat!("FoulBall event must have a game id"));
+    state.with_game(game_id, |mut game| {
+        if game.at_bat_strikes < 2 {
+            game.at_bat_strikes += 1;
+        }
+        game.game_update_common(event);
+
+        Ok(vec![game])
+    })
+}
+
+fn inning_end(state: &mut StateInterface, event: &EventuallyEvent) {
+    let game_id = event.game_id().expect(concat!("InningEnd event must have a game id"));
+    state.with_game(game_id, |mut game| {
+        game.phase = 2;
+        game.game_update_common(event);
+
+        Ok(vec![game])
+    })
+}
+
+fn batter_skipped(state: &mut StateInterface, event: &EventuallyEvent) {
+    let game_id = event.game_id().expect(concat!("BatterSkipped event must have a game id"));
+    state.with_game(game_id, |mut game| {
+        game.game_update_common(event);
+        *game.team_at_bat_mut().team_batter_count.as_mut()
+            .expect("TeamBatterCount must be populated during a game") += 1;
+
+        Ok(vec![game])
+    })
+}
+
+fn flavor_text(state: &mut StateInterface, event: &EventuallyEvent) {
+    let game_id = event.game_id().expect(concat!("*FlavorText event must have a game id"));
+    state.with_game(game_id, |mut game| {
+        game.game_update_common(event);
+
+        Ok(vec![game])
+    })
+}
+
+fn player_stat_reroll(state: &mut StateInterface, event: &EventuallyEvent) {
+    let player_id = event.player_id().expect(concat!("PlayerStatReroll event must have a player id"));
+    state.with_player(player_id, |mut player| {
+        // This event is normally a child (or in events that use siblings, a non-first
+        // sibling), but for Snow events it's a top-level event. For now I assert that it's
+        // always snow.
+
+        assert_eq!(event.description, format!("Snow fell on {}!", player.name),
+                   "Unexpected top-level PlayerStatReroll event");
+
+        // I think this is pretty close to the actual range
+        player.adjust_attributes(Ranged::Range(-0.03, 0.03));
+
+        Ok(vec![player])
+    })
+}
+
+fn win_collected_regular(state: &mut StateInterface, event: &EventuallyEvent) {
+    let game_id = event.game_id().expect(concat!("WinCollectedRegular event must have a game id"));
+    state.with_game(game_id, |mut game| {
+        game.end_phase = 4;
+        game.game_update_common(event);
+
+        Ok(vec![game])
+    })
+}
+
+fn game_over(state: &mut StateInterface, event: &EventuallyEvent) {
+    let game_id = event.game_id().expect(concat!("GameOver event must have a game id"));
+    state.with_game(game_id, |mut game| {
+        game.end_phase = 5;
+        game.finalized = true;
+        game.game_complete = true;
+
+        if game.home.score.unwrap() > game.away.score.unwrap() {
+            game.winner = Some(game.home.team);
+            game.loser = Some(game.away.team);
+        } else {
+            game.loser = Some(game.home.team);
+            game.winner = Some(game.away.team);
+        };
+
+        game.game_update_common(event);
+
+        Ok(vec![game])
+    })
+}
+
+fn storm_warning(state: &mut StateInterface, event: &EventuallyEvent) {
+    let game_id = event.game_id().expect(concat!("StormWarning event must have a game id"));
+    state.with_game(game_id, |mut game| {
+        game.game_start_phase = 11; // sure why not
+        game.state.snowfall_events = Some(0);
+
+        game.game_update_common(event);
+
+        Ok(vec![game])
+    })
+}
+
+fn snowflakes(state: &mut StateInterface, event: &EventuallyEvent) {
+    let game_id = event.game_id().expect(concat!("Snowflakes event must have a game id"));
+    let (snow_event, _) = event.metadata.siblings.split_first()
+        .expect("Snowflakes event is missing metadata.siblings");
+
+    parse::parse_snowfall(&snow_event.description)
+        .expect("Error parsing Snowflakes description");
+
+    state.with_game(game_id, |mut game| {
+        game.game_update_common(event);
+        game.game_start_phase = 20;
+        *game.state.snowfall_events.as_mut().expect("snowfallEvents must be set in Snowflakes event") += 1;
+
+        let frozen_players: HashSet<_> = event.metadata.siblings.iter()
+            .flat_map(|event| {
+                if let Some(serde_json::Value::String(mod_name)) = event.metadata.other.get("mod") {
+                    if mod_name == "FROZEN" {
+                        return Some(event.player_id().expect("Must have a player ID"));
+                    }
+                }
+
+                None
+            })
+            .collect();
+
+        if let Some(batter_id) = game.team_at_bat().batter {
+            if frozen_players.contains(&batter_id) {
+                game.team_at_bat_mut().batter = None;
+                game.team_at_bat_mut().batter_name = Some("".to_string());
+            }
+        }
+
+        if let Some(pitcher_id) = &game.team_fielding().pitcher {
+            let pitcher_id = pitcher_id.known()
+                .expect("Pitcher must be Known in Snowfall event");
+
+            if frozen_players.contains(pitcher_id) {
+                game.team_fielding().pitcher = None;
+                game.team_fielding().pitcher_name = Some("".to_string().into());
+            }
+        }
 
         Ok(vec![game])
     })

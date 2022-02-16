@@ -229,55 +229,55 @@ impl Player {
     //         FeedEventChangeResult::DidNotApply
     //     }
     // }
-    //
-    // fn adjust_attributes(&mut self, range: Ranged<f32>, deadline: DateTime<Utc>) {
-    //     self.adjust_batting(range, deadline);
-    //     self.adjust_pitching(range, deadline);
-    //     self.adjust_baserunning(range, deadline);
-    //     self.adjust_defense(range, deadline);
-    // }
-    //
-    // fn adjust_batting(&mut self, range: Ranged<f32>, deadline: DateTime<Utc>) {
-    //     self.buoyancy.add_cached(range, deadline);
-    //     self.divinity.add_cached(range, deadline);
-    //     self.martyrdom.add_cached(range, deadline);
-    //     self.moxie.add_cached(range, deadline);
-    //     self.musclitude.add_cached(range, deadline);
-    //     self.patheticism.add_cached(range, deadline);
-    //     self.thwackability.add_cached(range, deadline);
-    //     self.tragicness.add_cached(range, deadline);
-    //
-    //     *self.hitting_rating.as_mut().expect("Everyone but Phantom Sixpack has this") = MaybeKnown::Unknown;
-    // }
-    //
-    // fn adjust_pitching(&mut self, range: Ranged<f32>, deadline: DateTime<Utc>) {
-    //     self.coldness.add_cached(range, deadline);
-    //     self.overpowerment.add_cached(range, deadline);
-    //     self.ruthlessness.add_cached(range, deadline);
-    //     self.shakespearianism.add_cached(range, deadline);
-    //     self.suppression.add_cached(range, deadline);
-    //     self.unthwackability.add_cached(range, deadline);
-    //
-    //     *self.pitching_rating.as_mut().expect("Everyone but Phantom Sixpack has this") = MaybeKnown::Unknown;
-    // }
-    //
-    // fn adjust_baserunning(&mut self, range: Ranged<f32>, deadline: DateTime<Utc>) {
-    //     self.base_thirst.add_cached(range, deadline);
-    //     self.continuation.add_cached(range, deadline);
-    //     self.ground_friction.add_cached(range, deadline);
-    //     self.indulgence.add_cached(range, deadline);
-    //     self.laserlikeness.add_cached(range, deadline);
-    //
-    //     *self.baserunning_rating.as_mut().expect("Everyone but Phantom Sixpack has this") = MaybeKnown::Unknown;
-    // }
-    //
-    // fn adjust_defense(&mut self, range: Ranged<f32>, deadline: DateTime<Utc>) {
-    //     self.anticapitalism.add_cached(range, deadline);
-    //     self.chasiness.add_cached(range, deadline);
-    //     self.omniscience.add_cached(range, deadline);
-    //     self.tenaciousness.add_cached(range, deadline);
-    //     self.watchfulness.add_cached(range, deadline);
-    //
-    //     *self.defense_rating.as_mut().expect("Everyone but Phantom Sixpack has this") = MaybeKnown::Unknown;
-    // }
+
+    pub fn adjust_attributes(&mut self, range: Ranged<f32>) {
+        self.adjust_batting(range);
+        self.adjust_pitching(range);
+        self.adjust_baserunning(range);
+        self.adjust_defense(range);
+    }
+
+    fn adjust_batting(&mut self, range: Ranged<f32>) {
+        self.buoyancy += range;
+        self.divinity += range;
+        self.martyrdom += range;
+        self.moxie += range;
+        self.musclitude += range;
+        self.patheticism += range;
+        self.thwackability += range;
+        self.tragicness += range;
+
+        *self.hitting_rating.as_mut().expect("Everyone but Phantom Sixpack has this") = MaybeKnown::Unknown;
+    }
+
+    fn adjust_pitching(&mut self, range: Ranged<f32>) {
+        self.coldness += range;
+        self.overpowerment += range;
+        self.ruthlessness += range;
+        self.shakespearianism += range;
+        self.suppression += range;
+        self.unthwackability += range;
+
+        *self.pitching_rating.as_mut().expect("Everyone but Phantom Sixpack has this") = MaybeKnown::Unknown;
+    }
+
+    fn adjust_baserunning(&mut self, range: Ranged<f32>) {
+        self.base_thirst += range;
+        self.continuation += range;
+        self.ground_friction += range;
+        self.indulgence += range;
+        self.laserlikeness += range;
+
+        *self.baserunning_rating.as_mut().expect("Everyone but Phantom Sixpack has this") = MaybeKnown::Unknown;
+    }
+
+    fn adjust_defense(&mut self, range: Ranged<f32>) {
+        self.anticapitalism += range;
+        self.chasiness += range;
+        self.omniscience += range;
+        self.tenaciousness += range;
+        self.watchfulness += range;
+
+        *self.defense_rating.as_mut().expect("Everyone but Phantom Sixpack has this") = MaybeKnown::Unknown;
+    }
 }

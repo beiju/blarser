@@ -20,7 +20,7 @@ use crate::state::StateInterface;
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
 pub struct GameState {
-    snowfall_events: Option<i32>,
+    pub snowfall_events: Option<i32>,
 
 }
 
@@ -181,27 +181,8 @@ impl Entity for Game {
 }
 
 impl Game {
-    pub(crate) fn strike(&mut self, event: &EventuallyEvent) {
-        self.at_bat_strikes += 1;
-        self.game_update_common(event);
-    }
-
-    pub(crate) fn ball(&mut self, event: &EventuallyEvent) {
-        self.at_bat_balls += 1;
-        self.game_update_common(event);
-    }
-
-    pub(crate) fn foul_ball(&mut self, event: &EventuallyEvent) {
-        if self.at_bat_strikes < 2 {
-            self.at_bat_strikes += 1;
-        }
-        self.game_update_common(event);
-    }
 
     pub(crate) fn storm_warning(&mut self, event: &EventuallyEvent) {
-        self.game_start_phase = 11; // sure why not
-        self.game_update_common(event);
-        self.state.snowfall_events = Some(0);
     }
 
     pub(crate) fn game_update_common(&mut self, first_event: &EventuallyEvent) {
@@ -307,7 +288,7 @@ impl Game {
         }
     }
 
-    fn team_fielding(&mut self) -> &mut GameByTeam {
+    pub(crate) fn team_fielding(&mut self) -> &mut GameByTeam {
         if self.top_of_inning {
             &mut self.home
         } else {
@@ -469,48 +450,6 @@ impl Game {
         }
     }
 
-    pub(crate) fn snowflakes(&mut self, event: &EventuallyEvent) {
-        let (snow_event, _) = event.metadata.siblings.split_first()
-            .expect("Snowflakes event is missing metadata.siblings");
-
-        parse::parse_snowfall(&snow_event.description)
-            .expect("Error parsing Snowflakes description");
-
-        self.game_update_common(event);
-        self.game_start_phase = 20;
-        *self.state.snowfall_events.as_mut().expect("snowfallEvents must be set in Snowflakes event") += 1;
-
-        let frozen_players: HashSet<_> = event.metadata.siblings.iter()
-            .flat_map(|event| {
-                if let Some(serde_json::Value::String(mod_name)) = event.metadata.other.get("mod") {
-                    if mod_name == "FROZEN" {
-                        return Some(event.player_id().expect("Must have a player ID"));
-                    }
-                }
-
-                None
-            })
-            .collect();
-
-        if let Some(batter_id) = self.team_at_bat().batter {
-            if frozen_players.contains(&batter_id) {
-                self.team_at_bat_mut().batter = None;
-                self.team_at_bat_mut().batter_name = Some("".to_string());
-            }
-        }
-
-        if let Some(pitcher_id) = &self.team_fielding().pitcher {
-            let pitcher_id = pitcher_id.known()
-                .expect("Pitcher must be Known in Snowfall event");
-
-            if frozen_players.contains(pitcher_id) {
-                self.team_fielding().pitcher = None;
-                self.team_fielding().pitcher_name = Some("".to_string().into());
-            }
-        }
-
-    }
-
     pub(crate) fn apply_successful_steal(&mut self, event: &EventuallyEvent, thief_id: Uuid, base: Base) {
         let baserunner_index = self.get_baserunner_with_id(thief_id, base);
 
@@ -547,46 +486,6 @@ impl Game {
                 self.half_inning_score = 0.0;
             }
         }
-
-    }
-
-
-    pub(crate) fn inning_end(&mut self, event: &EventuallyEvent) {
-        self.game_update_common(&event);
-        self.phase = 2;
-    }
-
-    pub(crate) fn batter_skipped(&mut self, event: &EventuallyEvent) {
-        self.game_update_common(event);
-        *self.team_at_bat_mut().team_batter_count.as_mut()
-            .expect("TeamBatterCount must be populated during a game") += 1;
-
-    }
-
-    pub(crate) fn peanut_flavor_text(&mut self, event: &EventuallyEvent) {
-        self.game_update_common(event);
-    }
-
-    pub(crate) fn win_collected_regular(&mut self, event: &EventuallyEvent) {
-        self.end_phase = 4;
-        self.game_update_common(event);
-
-    }
-
-    pub(crate) fn game_over(&mut self, event: &EventuallyEvent) {
-        self.end_phase = 5;
-        self.finalized = true;
-        self.game_complete = true;
-
-        if self.home.score.unwrap() > self.away.score.unwrap() {
-            self.winner = Some(self.home.team);
-            self.loser = Some(self.away.team);
-        } else {
-            self.loser = Some(self.home.team);
-            self.winner = Some(self.away.team);
-        };
-
-        self.game_update_common(event);
 
     }
 

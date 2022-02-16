@@ -105,9 +105,9 @@ document.addEventListener("DOMContentLoaded", function (event) {
         // Clicking a label causes a click event on the corresponding input. Clicking the
         // input causes an event only in that input. Only respond to clicks that originate
         // on the input so there's only one event triggered.
-        if (event.srcElement.tagName != "INPUT") return;
+        if (event.target.tagName !== "INPUT") return;
 
-        const checked = event.srcElement.checked;
+        const checked = event.target.checked;
         console.log("Checked entity id", li.dataset.entityId, checked);
 
         if (checked) {
