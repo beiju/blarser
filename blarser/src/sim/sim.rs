@@ -1,5 +1,5 @@
 use std::fmt::{Display, Formatter};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use partial_information::PartialInformationCompare;
@@ -76,5 +76,10 @@ impl Entity for Sim {
         });
 
         earliest.into_inner()
+    }
+
+    fn time_range_for_update(valid_from: DateTime<Utc>, _: &Self::Raw) -> (DateTime<Utc>, DateTime<Utc>) {
+        // Sim seems to be timestamped before the fetch? not sure
+        (valid_from, valid_from + Duration::minutes(1))
     }
 }

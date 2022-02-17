@@ -6,7 +6,7 @@ mod game;
 mod team;
 mod standings;
 
-pub use entity::{Entity, TimedEvent, TimedEventType, entity_description};
+pub use entity::{Entity, TimedEvent, TimedEventType, entity_description, entity_dispatch};
 pub use player::Player;
 pub use sim::Sim;
 pub use game::Game;

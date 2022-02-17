@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::fmt::Debug;
+use std::fmt::{Debug, Display, Formatter};
 use std::hash::Hash;
 use std::iter;
 use uuid::Uuid;
@@ -11,11 +11,36 @@ pub trait PartialInformationDiff<'d>: Debug {
     fn is_empty(&self) -> bool;
 }
 
+pub struct Conflict {
+    property: String,
+    message: String,
+}
+
+impl Conflict {
+    pub fn new(property: String, message: String) -> Conflict {
+        Conflict { property, message }
+    }
+
+    pub fn with_prefix(self, prefix: &str) -> Conflict {
+        Conflict {
+            property: format!("{}/{}", prefix, self.property),
+            message: self.message,
+        }
+    }
+}
+
+impl Display for Conflict {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.property, self.message)
+    }
+}
+
 pub trait PartialInformationCompare: Sized + Debug + Serialize {
-    type Raw: for<'de> Deserialize<'de> + Debug;
+    type Raw: 'static + for<'de> Deserialize<'de> + Debug + Send;
     type Diff<'d>: PartialInformationDiff<'d > where Self: 'd;
 
     fn diff<'d>(&'d self, observed: &'d Self::Raw, time: DateTime<Utc>) -> Self::Diff<'d>;
+    fn observe(&mut self, observed: &Self::Raw) -> Vec<Conflict>;
 
     fn from_raw(raw: Self::Raw) -> Self;
 }
@@ -29,7 +54,7 @@ pub struct HashMapDiff<'d, KeyT, ValT: PartialInformationCompare> {
 }
 
 impl<K, V> PartialInformationCompare for HashMap<K, V>
-    where K: 'static + Debug + Eq + Hash + Clone + for<'de> Deserialize<'de> + Serialize,
+    where K: 'static + Debug + Eq + Hash + Clone + for<'de> Deserialize<'de> + Serialize + Send,
           V: 'static + PartialInformationCompare {
     type Raw = HashMap<K, V::Raw>;
     type Diff<'d> = HashMapDiff<'d, K, V>;
@@ -51,6 +76,41 @@ impl<K, V> PartialInformationCompare for HashMap<K, V>
                 })
                 .collect(),
         }
+    }
+
+    fn observe(&mut self, observed: &Self::Raw) -> Vec<Conflict> {
+        let mut conflicts = Vec::new();
+
+        for (key, val) in observed {
+            match self.get(&key) {
+                Some(_) => {}
+                None => {
+                    conflicts.push(
+                        Conflict::new(format!("{:?}", key),
+                                      format!("Expected no value in HashMap, but observed {:?}", val))
+                    );
+                }
+            }
+        }
+
+        for (key, expected_val) in self.iter_mut() {
+            match observed.get(&key) {
+                None => {
+                    conflicts.push(
+                        Conflict::new(format!("{:?}", key),
+                                      format!("Expected value {:?} in HashMap, but observed none", expected_val))
+                    );
+                }
+                Some(observed_val) => {
+                    conflicts.extend(
+                        expected_val.observe(observed_val).into_iter()
+                            .map(move |conflict| conflict.with_prefix(&format!("{:?}", key)))
+                    )
+                }
+            }
+        }
+
+        conflicts
     }
 
     fn from_raw(raw: Self::Raw) -> Self {
@@ -87,6 +147,21 @@ impl<T> PartialInformationCompare for Option<T>
             (None, Some(val)) => OptionDiff::ExpectedNoneGotSome(val),
             (Some(val), None) => OptionDiff::ExpectedSomeGotNone(val),
             (Some(a), Some(b)) => OptionDiff::ExpectedSomeGotSome(a.diff(b, time))
+        }
+    }
+
+    fn observe(&mut self, observed: &Self::Raw) -> Vec<Conflict> {
+        match (self, observed) {
+            (None, None) => vec![],
+            (None, Some(val)) => {
+                vec![Conflict::new(String::new(),
+                                   format!("Expected no value in Option, but observed {:?}", val))]
+            }
+            (Some(val), None) => {
+                vec![Conflict::new(String::new(),
+                                   format!("Expected value {:?} in Option, but observed none", val))]
+            }
+            (Some(a), Some(b)) => a.observe(b)
         }
     }
 
@@ -127,6 +202,41 @@ impl<ItemT> PartialInformationCompare for Vec<ItemT>
                 .map(|(self_item, other_item)| self_item.diff(other_item, time))
                 .collect(),
         }
+    }
+
+    fn observe(&mut self, observed: &Self::Raw) -> Vec<Conflict> {
+        let mut conflicts = Vec::new();
+
+        if self.len() > observed.len() {
+            conflicts.extend(
+                self[observed.len()..].iter().enumerate()
+                    .map(|(i, val)| Conflict::new(format!("{:?}", i),
+                                                  format!("Expected value {:?} in Vec, but observed none", val)))
+            );
+        } else if observed.len() > self.len() {
+            conflicts.extend(
+                observed[self.len()..].iter().enumerate()
+                    .map(|(i, val)| Conflict::new(format!("{:?}", i),
+                                                  format!("Expected no value in Vec, but observed {:?}", val)))
+            );
+        }
+
+        let rot_amt = conflicts.len();
+        conflicts.extend(
+            iter::zip(self, observed)
+                .enumerate()
+                .map(|(i, (self_item, other_item))| {
+                    self_item.observe(other_item).into_iter()
+                        .map(move |conflict| conflict.with_prefix(&format!("{:?}", i)))
+                })
+                .flatten()
+        );
+
+        // Rust lifetime rules force me to compute the extra elements first, but I want them to be
+        // listed last. This rotation makes that happen.
+        conflicts.rotate_left(rot_amt);
+
+        conflicts
     }
 
     fn from_raw(raw: Self::Raw) -> Self {
@@ -170,6 +280,15 @@ macro_rules! trivial_compare {
                     PrimitiveDiff::NoDiff
                 } else {
                     PrimitiveDiff::Diff(self, observed)
+                }
+            }
+
+            fn observe(&mut self, observed: &Self::Raw) -> Vec<Conflict> {
+                if self == observed {
+                    vec![]
+                } else {
+                    vec![Conflict::new(String::new(),
+                                       format!("Expected {:?}, but observed {:?}", self, observed))]
                 }
             }
 

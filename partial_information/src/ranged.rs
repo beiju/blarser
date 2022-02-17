@@ -2,7 +2,7 @@ use std::fmt::Debug;
 use std::ops;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use crate::compare::PartialInformationDiff;
+use crate::compare::{Conflict, PartialInformationDiff};
 use crate::PartialInformationCompare;
 
 #[derive(Debug, PartialEq, Deserialize, Serialize)]
@@ -131,7 +131,7 @@ pub enum RangedDiff<'d, T> {
 }
 
 impl<T> PartialInformationCompare for Ranged<T>
-    where T: 'static + Debug + PartialOrd + for<'de> Deserialize<'de> + Serialize {
+    where T: 'static + Clone + Debug + PartialOrd + for<'de> Deserialize<'de> + Serialize + Send {
     type Raw = T;
     type Diff<'d> = RangedDiff<'d, T>;
 
@@ -149,6 +149,28 @@ impl<T> PartialInformationCompare for Ranged<T>
                     RangedDiff::NoDiff
                 } else {
                     RangedDiff::RangeDiff((low, high), observed)
+                }
+            }
+        }
+    }
+
+    fn observe(&mut self, observed: &Self::Raw) -> Vec<Conflict> {
+        match self {
+            Ranged::Known(known) => {
+                if known == observed {
+                    vec![]
+                } else {
+                    vec![Conflict::new(String::new(),
+                                       format!("Expected {:?}, but observed {:?}", known, observed))]
+                }
+            }
+            Ranged::Range(lower, upper) => {
+                if *lower <= *observed && observed <= upper {
+                    *self = Ranged::Known((*observed).clone());
+                    vec![]
+                } else {
+                    vec![Conflict::new(String::new(),
+                                       format!("Expected value in range {:?}-{:?}, but observed {:?}", lower, upper, observed))]
                 }
             }
         }

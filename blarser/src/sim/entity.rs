@@ -28,6 +28,7 @@ pub trait Entity: for<'de> Deserialize<'de> + PartialInformationCompare + Clone 
     }
 
     fn next_timed_event(&self, after_time: DateTime<Utc>) -> Option<TimedEvent>;
+    fn time_range_for_update(valid_from: DateTime<Utc>, raw: &Self::Raw) -> (DateTime<Utc>, DateTime<Utc>);
 }
 
 pub fn entity_description(entity_type: &str, entity_json: serde_json::Value) -> String {
@@ -82,3 +83,27 @@ impl EarliestEvent {
         self.lowest
     }
 }
+
+#[macro_export]
+macro_rules! entity_dispatch {
+    ($type_var:ident => $func:ident($($args:expr),*); $fallback_pattern:ident => $fallback_arm:expr) => {
+        match $type_var {
+            "sim" => $func::<crate::sim::Sim>($($args),*),
+            "game" => $func::<crate::sim::Game>($($args),*),
+            "team" => $func::<crate::sim::Team>($($args),*),
+            "player" => $func::<crate::sim::Player>($($args),*),
+            $fallback_pattern => $fallback_arm,
+        }
+    };
+    ($type_var:ident => $func:ident($($args:expr),*).await; $fallback_pattern:ident => $fallback_arm:expr) => {
+        match $type_var {
+            "sim" => $func::<crate::sim::Sim>($($args),*).await,
+            "game" => $func::<crate::sim::Game>($($args),*).await,
+            "team" => $func::<crate::sim::Team>($($args),*).await,
+            "player" => $func::<crate::sim::Player>($($args),*).await,
+            $fallback_pattern => $fallback_arm,
+        }
+    };
+}
+
+pub use entity_dispatch;

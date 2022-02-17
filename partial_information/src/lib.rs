@@ -6,4 +6,4 @@ mod compare;
 
 pub use ranged::Ranged;
 pub use maybe_known::MaybeKnown;
-pub use compare::{PartialInformationCompare, PartialInformationDiff};
+pub use compare::{PartialInformationCompare, PartialInformationDiff, Conflict};

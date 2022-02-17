@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use partial_information::{PartialInformationCompare};
@@ -103,6 +103,11 @@ impl Entity for Team {
 
     fn next_timed_event(&self, _: DateTime<Utc>) -> Option<TimedEvent> {
         None
+    }
+
+    fn time_range_for_update(valid_from: DateTime<Utc>, _: &Self::Raw) -> (DateTime<Utc>, DateTime<Utc>) {
+        // Teams are timestamped before the fetch
+        (valid_from, valid_from + Duration::minutes(1))
     }
 }
 

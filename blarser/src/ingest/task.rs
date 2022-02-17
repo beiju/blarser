@@ -77,7 +77,7 @@ impl IngestTask {
 
         init_chron(&mut chron_ingest, BLARSER_START, start_time_parsed).await;
 
-        *self.chron_task.lock().unwrap() = Some(tokio::spawn(ingest_chron(chron_ingest, start_time_parsed)));
+        *self.chron_task.lock().unwrap() = Some(tokio::spawn(ingest_chron(chron_ingest, BLARSER_START, start_time_parsed)));
         *self.feed_task.lock().unwrap() = Some(tokio::spawn(ingest_feed(feed_ingest, BLARSER_START)));
     }
 }

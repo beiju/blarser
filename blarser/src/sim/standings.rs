@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use partial_information::{PartialInformationCompare};
@@ -35,14 +35,11 @@ impl Entity for Standings {
         None
     }
 
-    // fn apply_event(&mut self, _event: &GenericEvent, _state: &StateInterface) -> FeedEventChangeResult {
-    //     match &event.event_type {
-    //         GenericEventType::FeedEvent(event) => self.apply_feed_event(event, state),
-    //         other => {
-    //             panic!("{:?} event does not apply to standings", other)
-    //         }
-    //     }
-    // }
+    fn time_range_for_update(valid_from: DateTime<Utc>, _: &Self::Raw) -> (DateTime<Utc>, DateTime<Utc>) {
+        // It's definitely timestamped after when it's extracted from streamData, but it may also be
+        // polled and timestamped before in that case
+        (valid_from - Duration::minutes(1), valid_from + Duration::minutes(1))
+    }
 }
 
 // impl Standings {

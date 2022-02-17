@@ -178,6 +178,18 @@ impl Entity for Game {
 
         earliest.into_inner()
     }
+
+    fn time_range_for_update(valid_from: DateTime<Utc>, raw: &Self::Raw) -> (DateTime<Utc>, DateTime<Utc>) {
+        // If there's a lastUpdateFull, we know exactly when it was from
+        if let Some(luf) = &raw.last_update_full {
+            if let Some(event) = luf.first() {
+                return (event.created, event.created);
+            }
+        }
+
+        // Otherwise, games are timestamped from after the fetch
+        (valid_from - Duration::minutes(1), valid_from)
+    }
 }
 
 impl Game {

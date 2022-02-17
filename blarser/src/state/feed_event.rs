@@ -556,7 +556,18 @@ fn snowflakes(state: &mut StateInterface, event: &EventuallyEvent) {
         }
 
         Ok(vec![game])
-    })
+    });
+
+    for child_event in &event.metadata.siblings {
+        if child_event.r#type == EventType::AddedMod {
+            let player_id = child_event.player_id().expect("AddedMod event must have a player id");
+            state.with_player(player_id, |mut player| {
+                player.game_attr.as_mut().expect("Everyone but Phantom Sixpack has this").push("FROZEN".to_string());
+
+                Ok(vec![player])
+            });
+        }
+    }
 }
 
 

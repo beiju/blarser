@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use crate::compare::PartialInformationDiff;
+use crate::compare::{Conflict, PartialInformationDiff};
 use crate::PartialInformationCompare;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -34,7 +34,8 @@ pub enum MaybeKnownDiff<'d, T: 'd + PartialInformationCompare> {
 }
 
 impl<T> PartialInformationCompare for MaybeKnown<T>
-    where T: 'static + PartialInformationCompare {
+    where T: 'static + PartialInformationCompare,
+          T::Raw: Clone {
     type Raw = T::Raw;
     type Diff<'d> = MaybeKnownDiff<'d, T>;
 
@@ -43,6 +44,18 @@ impl<T> PartialInformationCompare for MaybeKnown<T>
             MaybeKnown::Unknown => { MaybeKnownDiff::NoDiff }
             MaybeKnown::Known(expected) => {
                 MaybeKnownDiff::Diff(expected.diff(observed, time))
+            }
+        }
+    }
+
+    fn observe(&mut self, observed: &Self::Raw) -> Vec<Conflict> {
+        match self {
+            MaybeKnown::Unknown => {
+                *self = MaybeKnown::Known(T::from_raw((*observed).clone()));
+                vec![]
+            }
+            MaybeKnown::Known(expected) => {
+                expected.observe(observed)
             }
         }
     }

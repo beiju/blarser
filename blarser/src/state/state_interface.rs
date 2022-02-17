@@ -75,7 +75,7 @@ impl<'conn> StateInterface<'conn> {
         assert!(!versions.is_empty(),
                 "Error: There are no versions for the requested entity");
 
-        for (_, version_json) in versions {
+        for (_, version_json, _) in versions {
             let version: EntityT = serde_json::from_value(version_json)
                 .expect("Couldn't deserialize stored entity version");
 
@@ -91,12 +91,13 @@ impl<'conn> StateInterface<'conn> {
     reader_with_nil_id! {read_sim, sim::Sim}
     reader_with_id! {read_player, sim::Player}
     reader_with_id! {read_team, sim::Team}
+    reader_with_id! {read_game, sim::Game}
 
     fn with_entity<EntityT: sim::Entity, F: Fn(EntityT) -> ApplyResult<EntityT>>(&self, id: Option<Uuid>, f: F) {
         let versions = versions_db::get_possible_versions_at(&self.conn, self.ingest_id, EntityT::name(), id, self.at_time);
 
         let mut all_successors = MergedSuccessors::new();
-        for (version_id, version_json) in versions {
+        for (version_id, version_json, _) in versions {
             let version: EntityT = serde_json::from_value(version_json)
                 .expect("Couldn't deserialize stored entity version");
 

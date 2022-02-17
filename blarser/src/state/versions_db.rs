@@ -139,14 +139,14 @@ pub fn get_version_with_next_timed_event(c: &mut PgConnection, ingest_id: i32, b
         .expect("Error getting next version with timed event")
 }
 
-pub fn get_possible_versions_at(c: &PgConnection, ingest_id: i32, entity_type: &str, entity_id: Option<Uuid>, at_time: DateTime<Utc>) -> Vec<(i32, serde_json::Value)> {
+pub fn get_possible_versions_at(c: &PgConnection, ingest_id: i32, entity_type: &str, entity_id: Option<Uuid>, at_time: DateTime<Utc>) -> Vec<(i32, serde_json::Value, DateTime<Utc>)> {
     use crate::schema::versions::dsl as versions;
     use crate::schema::versions_parents::dsl as parents;
     use crate::schema::events::dsl as events;
     let base_query = versions::versions
-        .select((versions::id, versions::data))
-        .left_join(parents::versions_parents.on(parents::parent.eq(versions::id)))
         .inner_join(events::events.on(events::id.eq(versions::from_event)))
+        .select((versions::id, versions::data, events::event_time))
+        .left_join(parents::versions_parents.on(parents::parent.eq(versions::id)))
         // Is from the right ingest
         .filter(versions::ingest_id.eq(ingest_id))
         // Has the right entity type
@@ -164,10 +164,10 @@ pub fn get_possible_versions_at(c: &PgConnection, ingest_id: i32, entity_type: &
             base_query
                 // Has the right entity id
                 .filter(versions::entity_id.eq(entity_id))
-                .get_results::<(i32, serde_json::Value)>(c)
+                .get_results::<(i32, serde_json::Value, DateTime<Utc>)>(c)
         }
         None => {
-            base_query.get_results::<(i32, serde_json::Value)>(c)
+            base_query.get_results::<(i32, serde_json::Value, DateTime<Utc>)>(c)
         }
     }.expect("Error getting next version with timed event")
 }

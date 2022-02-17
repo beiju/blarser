@@ -53,6 +53,18 @@ fn impl_partial_information_compare(ast: DeriveInput) -> Result<TokenStream2> {
                 }
             });
 
+        let observe_method_items = fields.named.iter()
+            .map(|field| {
+                let field_name = field.ident.as_ref().expect("Unreachable");
+                let field_name_stringified = LitStr::new(&field_name.to_string(), field_name.span());
+                quote! {
+                    conflicts.extend(
+                        self.#field_name.observe(&observed.#field_name).into_iter()
+                            .map(|conflict| conflict.with_prefix(#field_name_stringified))
+                    );
+                }
+            });
+
         let raw_attrs = ast.attrs.iter()
             .filter(|attr| {
                 attr.style == AttrStyle::Outer && attr.path.is_ident("serde")
@@ -108,6 +120,13 @@ fn impl_partial_information_compare(ast: DeriveInput) -> Result<TokenStream2> {
                         _phantom: ::std::default::Default::default(),
                         #(#diff_method_items),*
                     }
+                }
+
+                fn observe(&mut self, observed: &Self::Raw) -> Vec<::partial_information::Conflict> {
+                    let mut conflicts = Vec::new();
+                    #(#observe_method_items)*
+
+                    conflicts
                 }
 
                 fn from_raw(raw: Self::Raw) -> Self {
