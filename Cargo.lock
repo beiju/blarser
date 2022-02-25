@@ -168,6 +168,7 @@ dependencies = [
  "serde_with",
  "sled",
  "tap",
+ "text-diff",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -734,6 +735,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ffdf9f34f1447443d37393cc6c2b8313aebddcd96906caf34e54c68d8e57d7bd"
 dependencies = [
  "typenum",
+]
+
+[[package]]
+name = "getopts"
+version = "0.2.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "14dbbfd5c71d70241ecf9e6f13737f7b5ce823821063188d7e46c41d371eebd5"
+dependencies = [
+ "unicode-width",
 ]
 
 [[package]]
@@ -2244,6 +2254,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "term"
+version = "0.2.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f2077e54d38055cf1ca0fd7933a2e00cd3ec8f6fed352b2a377f06dcdaaf3281"
+dependencies = [
+ "kernel32-sys",
+ "winapi 0.2.8",
+]
+
+[[package]]
 name = "termcolor"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2260,6 +2280,16 @@ checksum = "633c1a546cee861a1a6d0dc69ebeca693bf4296661ba7852b9d21d159e0506df"
 dependencies = [
  "libc",
  "winapi 0.3.9",
+]
+
+[[package]]
+name = "text-diff"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "309238dd66f8bf11a20d015b727b926f294a13fcb8d56770bb984e7a22c43897"
+dependencies = [
+ "getopts",
+ "term",
 ]
 
 [[package]]

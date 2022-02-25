@@ -1,3 +1,5 @@
+let tooltip;
+
 async function addEntityView(entityId) {
     // fetch data and render
     const resp = await fetch("/debug/" + entityId);
@@ -73,7 +75,10 @@ async function addEntityView(entityId) {
         .data(dag.descendants())
         .enter()
         .append("g")
-        .attr("transform", ({x, y}) => `translate(${x}, ${y})`);
+        .attr("class", "version")
+        .attr("transform", ({x, y}) => `translate(${x}, ${y})`)
+        .attr("title", ({data}) => data.event)
+        .attr("data-bs-content", ({data}) => `<pre class="tooltip-diff">${data.diff}</pre>`);
 
     // Plot node circles
     nodes
@@ -97,6 +102,16 @@ async function removeEntityView(entityId) {
 }
 
 document.addEventListener("DOMContentLoaded", function (event) {
+    const main = document.getElementById("main");
+    new bootstrap.Popover(main, {
+        container: main,
+        selector: '.version',
+        placement: 'right',
+        html: true,
+        trigger: 'hover',
+        boundary: main,
+    })
+
     const entityList = document.getElementById("entity-list");
     entityList.addEventListener("click", event => {
         const li = event.target.closest('li'); // (1)

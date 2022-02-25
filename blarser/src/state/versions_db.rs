@@ -2,15 +2,16 @@ use diesel::{Connection, insert_into, Insertable, QueryDsl, RunQueryDsl};
 use diesel_derive_enum::DbEnum;
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
-use itertools::Itertools;
+use itertools::{Itertools, izip};
 use diesel::prelude::*;
+use futures::StreamExt;
 use rocket::info;
 
 use crate::api::ChroniclerItem;
 use crate::db::BlarserDbConn;
 use crate::sim;
 use crate::schema::*;
-use crate::state::events_db::add_start_event;
+use crate::state::events_db::{Event, add_start_event};
 
 #[derive(Insertable)]
 #[table_name = "versions"]
@@ -233,20 +234,23 @@ pub fn get_recently_updated_entities(c: &PgConnection, ingest_id: i32, count: i6
         .get_results::<(String, Uuid, serde_json::Value)>(c)
 }
 
-pub fn get_entity_debug(c: &PgConnection, ingest_id: i32, entity_id: Uuid) -> QueryResult<(Vec<Version>, Vec<Vec<Parent>>)> {
+pub fn get_entity_debug(c: &PgConnection, ingest_id: i32, entity_id: Uuid) -> QueryResult<Vec<(Version, Event, Vec<Parent>)>> {
     use crate::schema::versions::dsl as versions;
     use crate::schema::versions_parents::dsl as parents;
-    // use crate::schema::events::dsl as events;
-    let versions = versions::versions
+    use crate::schema::events::dsl as events;
+    let (versions, events): (Vec<Version>, Vec<Event>) = versions::versions
+        .inner_join(events::events.on(versions::from_event.eq(events::id)))
         // Is from the right ingest
         .filter(versions::ingest_id.eq(ingest_id))
         // Is the right entity
         .filter(versions::entity_id.eq(entity_id))
-        .get_results::<Version>(c)?;
+        .get_results::<(Version, Event)>(c)?
+        .into_iter()
+        .unzip();
 
     let parents = Parent::belonging_to(&versions)
         .load::<Parent>(c)?
         .grouped_by(&versions);
 
-    Ok((versions, parents))
+    Ok(izip!(versions, events, parents).collect())
 }

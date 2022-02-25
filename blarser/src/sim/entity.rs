@@ -5,7 +5,7 @@ use uuid::Uuid;
 use partial_information::PartialInformationCompare;
 use crate::sim;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TimedEventType {
     EarlseasonStart,
     DayAdvance,
@@ -16,6 +16,22 @@ pub enum TimedEventType {
 pub struct TimedEvent {
     pub time: DateTime<Utc>,
     pub event_type: TimedEventType,
+}
+
+impl TimedEventType {
+    pub fn description(&self) -> String {
+        match self {
+            TimedEventType::EarlseasonStart => {
+                "EarlseasonStart".to_string()
+            }
+            TimedEventType::DayAdvance => {
+                "DayAdvance".to_string()
+            }
+            TimedEventType::EndTopHalf(_) => {
+                "EndTopHalf".to_string()
+            }
+        }
+    }
 }
 
 pub trait Entity: for<'de> Deserialize<'de> + PartialInformationCompare + Clone + Debug + Display + PartialEq {

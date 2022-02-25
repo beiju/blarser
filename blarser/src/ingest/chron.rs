@@ -87,7 +87,7 @@ async fn ingest_update<EntityT: sim::Entity>(ingest: &mut IngestState, item: Chr
 
             Ok::<_, diesel::result::Error>(())
         })
-    }).await;
+    }).await.unwrap();
 
     todo!()
 }

@@ -1,13 +1,14 @@
 use chrono::{DateTime, Utc};
 use diesel::{insert_into, PgConnection, RunQueryDsl};
 use diesel_derive_enum::DbEnum;
+use itertools::Itertools;
 use crate::api::EventuallyEvent;
 
 use crate::schema::*;
-use crate::sim::TimedEvent;
+use crate::sim::{TimedEvent, TimedEventType};
 
 // define your enum
-#[derive(Debug, DbEnum)]
+#[derive(PartialEq, Debug, DbEnum)]
 #[DieselType = "Event_source"]
 pub enum EventSource {
     Start,
@@ -23,6 +24,39 @@ struct NewEvent {
     event_time: DateTime<Utc>,
     event_source: EventSource,
     event_data: serde_json::Value,
+}
+
+#[derive(Identifiable, Queryable, PartialEq, Debug)]
+#[table_name = "events"]
+pub struct Event {
+    pub id: i32,
+    pub ingest_id: i32,
+    pub event_time: DateTime<Utc>,
+    pub event_source: EventSource,
+    pub event_data: serde_json::Value
+}
+
+impl Event {
+    pub fn description(self) -> Result<String, serde_json::error::Error> {
+        match self.event_source {
+            EventSource::Start => { Ok("Start".to_string())}
+            EventSource::Feed => {
+                let event: EventuallyEvent = serde_json::from_value(self.event_data)?;
+                let description = event.metadata.siblings.into_iter()
+                    .map(|event| event.description)
+                    .join("\n");
+
+                Ok(description)
+            }
+            EventSource::Timed => {
+                let event: TimedEventType = serde_json::from_value(self.event_data)?;
+                Ok(event.description())
+            }
+            EventSource::Manual => {
+                todo!()
+            }
+        }
+    }
 }
 
 fn insert_event(c: &PgConnection, event: NewEvent) -> diesel::result::QueryResult<i32> {

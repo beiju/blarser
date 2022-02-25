@@ -1,0 +1,25 @@
+.popover {
+    box-sizing: border-box;
+    max-height: 100%;
+    overflow: hidden;
+}
+
+.tooltip-diff .diff-same {
+    display: none;
+}
+
+.diff-add {
+    color: rgb(14, 103, 14);
+}
+
+.diff-add::before {
+    content: "+";
+}
+
+.diff-rem {
+    color: rgb(255, 0, 0);
+}
+
+.diff-rem::before {
+    content: "-";
+}
