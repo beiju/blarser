@@ -9,8 +9,9 @@ use itertools::Itertools;
 
 use crate::api::{chronicler, ChroniclerItem};
 use crate::ingest::task::IngestState;
-use crate::sim;
-use crate::state::{add_initial_versions, get_possible_versions_at};
+use crate::schema::events::star;
+use crate::{sim, StateInterface};
+use crate::state::{add_initial_versions, Event, get_events_for_entity_after, get_possible_versions_at};
 use crate::sim::entity_dispatch;
 
 fn initial_state(start_at_time: &'static str) -> impl Stream<Item=(&'static str, ChroniclerItem)> {
@@ -93,26 +94,19 @@ async fn ingest_update<EntityT: sim::Entity>(ingest: &mut IngestState, item: Chr
 }
 
 fn do_ingest<EntityT: sim::Entity>(c: &PgConnection, ingest_id: i32, start_time: DateTime<Utc>, entity_id: Uuid, entity_raw: EntityT::Raw) {
-    let versions = get_possible_versions_at(c, ingest_id, EntityT::name(), Some(entity_id), start_time);
-    let mut cant_apply_reason = Some(String::new());
-    for (version_id, version_json, date) in versions {
-        let mut entity: EntityT = serde_json::from_value(version_json)
-            .expect("Error deserializing stored entity");
-        let conflicts = entity.observe(&entity_raw);
-        if conflicts.is_empty() {
-            cant_apply_reason = None;
-            info!("Applying observation at {} for {} {}:", date, EntityT::name(), entity_id);
+    let mut versions: Vec<EntityT> = get_possible_versions_at(c, ingest_id, EntityT::name(), Some(entity_id), start_time)
+        .into_iter()
+        .map(|(_, value, _)| {
+            serde_json::from_value(value)
+                .expect("Couldn't parse stored version")
+        })
+        .collect();
 
-            // TODO: Save this version as a successor and re-compute the successor versions
-            todo!()
-        } else {
-            let conflicts_str = conflicts.iter().map(|c| format!("\n  - {}", c)).join("");
-            info!("Can't apply observation at {} for {} {}:{}", date, EntityT::name(), entity_id, conflicts_str);
+    let events = get_events_for_entity_after(c, ingest_id, EntityT::name(), entity_id, start_time)
+        .expect("Error getting events for Chronicler ingest");
 
-            if let Some(reason) = cant_apply_reason.as_mut() {
-                *reason += &format!("Version at {}:{}", date, conflicts_str);
-            }
-        }
+    for event in events {
+        versions = advance_version(versions, event, &entity_raw);
     }
 
     // TODO: If no applications were found (cant_apply_reason is still Some()), prompt the user to
@@ -136,4 +130,26 @@ async fn wait_for_feed_ingest(ingest: &mut IngestState, wait_until_time: DateTim
         ingest.receive_progress.changed().await
             .expect("Error communicating with Eventually ingest");
     }
+}
+
+fn advance_version<EntityT: sim::Entity>(c: &PgConnection, ingest_id: i32, entities: Vec<(bool, EntityT)>, event: Event, entity_raw: &EntityT::Raw) -> Vec<(bool, EntityT)> {
+    let mut new_entities = Vec::new();
+    for (observation_already_applied, mut entity) in entities {
+        // If we haven't already applied the observation, and it's valid to apply the observation
+        // here, add the branch where we apply the observation here
+        if !observation_already_applied {
+            let conflicts = entity.observe(entity_raw);
+            if conflicts.is_empty() {
+                new_entities.push((true, entity.clone()))
+            }
+        }
+
+        // Always add the branch where we don't apply the observation
+        new_entities.push((observation_already_applied, entity));
+    }
+    let state = StateInterface::for_entity(c, ingest_id, event.id, event.event_time, EntityT::name(), entity.id());
+    event.apply(&mut entity);
+
+
+    new_entities
 }

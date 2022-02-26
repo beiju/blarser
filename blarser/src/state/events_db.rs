@@ -1,11 +1,14 @@
 use chrono::{DateTime, Utc};
 use diesel::{insert_into, PgConnection, RunQueryDsl};
+use diesel::types::Time;
 use diesel_derive_enum::DbEnum;
 use itertools::Itertools;
 use crate::api::EventuallyEvent;
 
 use crate::schema::*;
 use crate::sim::{TimedEvent, TimedEventType};
+use crate::state::IngestEvent;
+use crate::StateInterface;
 
 // define your enum
 #[derive(PartialEq, Debug, DbEnum)]
@@ -42,15 +45,40 @@ impl Event {
             EventSource::Start => { Ok("Start".to_string())}
             EventSource::Feed => {
                 let event: EventuallyEvent = serde_json::from_value(self.event_data)?;
-                let description = event.metadata.siblings.into_iter()
-                    .map(|event| event.description)
-                    .join("\n");
+                let description = if event.metadata.siblings.is_empty() {
+                    event.description
+                } else {
+                    event.metadata.siblings.into_iter()
+                        .map(|event| event.description)
+                        .join("\n")
+                };
 
                 Ok(description)
             }
             EventSource::Timed => {
                 let event: TimedEventType = serde_json::from_value(self.event_data)?;
                 Ok(event.description())
+            }
+            EventSource::Manual => {
+                todo!()
+            }
+        }
+    }
+
+    pub fn apply(&self, state: &mut StateInterface) {
+        match self.event_source {
+            EventSource::Start => {
+                panic!("Can't re-apply a Start event!")
+            }
+            EventSource::Feed => {
+                let feed_event: EventuallyEvent = serde_json::from_value(self.event_data.clone())
+                    .expect("Failed to parse saved EventuallyEvent");
+                feed_event.apply(state)
+            }
+            EventSource::Timed => {
+                let timed_event: TimedEvent = serde_json::from_value(self.event_data.clone())
+                    .expect("Failed to parse saved TimedEvent");
+                timed_event.apply(state)
             }
             EventSource::Manual => {
                 todo!()

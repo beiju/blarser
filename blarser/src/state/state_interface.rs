@@ -2,15 +2,17 @@ use chrono::{DateTime, Utc};
 use diesel::{PgConnection};
 use log::info;
 use uuid::Uuid;
+use crate::schema::versions::entity_id;
 use crate::sim;
 use crate::state::versions_db;
 use crate::state::merged_successors::MergedSuccessors;
 
 pub struct StateInterface<'conn> {
-    conn: &'conn mut PgConnection,
+    conn: &'conn PgConnection,
     ingest_id: i32,
     from_event: i32,
     at_time: DateTime<Utc>,
+    for_entity: Option<(&'static str, Uuid)>
 
     // TODO: Cache parameters
 }
@@ -64,6 +66,17 @@ impl<'conn> StateInterface<'conn> {
             ingest_id,
             from_event,
             at_time,
+            for_entity: None
+        }
+    }
+
+    pub fn for_entity(c: &'conn PgConnection, ingest_id: i32, from_event: i32, at_time: DateTime<Utc>, entity_type: &'static str, entity_id: Uuid) -> StateInterface<'conn> {
+        StateInterface {
+            conn: c,
+            ingest_id,
+            from_event,
+            at_time,
+            for_entity: Some((entity_type, entity_id))
         }
     }
 

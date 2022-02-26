@@ -254,3 +254,23 @@ pub fn get_entity_debug(c: &PgConnection, ingest_id: i32, entity_id: Uuid) -> Qu
 
     Ok(izip!(versions, events, parents).collect())
 }
+
+pub fn get_events_for_entity_after(c: &PgConnection, ingest_id: i32, entity_type: &str, entity_id: Uuid, start_time: DateTime<Utc>) -> QueryResult<Vec<Event>> {
+    use crate::schema::versions::dsl as versions;
+    use crate::schema::events::dsl as events;
+
+    versions::versions
+        .inner_join(events::events.on(versions::from_event.eq(events::id)))
+        // Is from the right ingest
+        .filter(versions::ingest_id.eq(ingest_id))
+        // Is the right entity
+        .filter(versions::entity_type.eq(entity_type))
+        .filter(versions::entity_id.eq(entity_id))
+        // Is after the desired time
+        .filter(event::event_time.gt(start_time))
+        // Just the event
+        .select(events::star)
+        // No dupes
+        .distinct_on(events::id)
+        .get_results::<Event>(c)
+}

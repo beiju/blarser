@@ -16,5 +16,6 @@ pub use versions_db::{
     get_recently_updated_entities,
     get_entity_debug,
     get_possible_versions_at,
+    get_events_for_entity_after,
 };
 pub use events::IngestEvent;
