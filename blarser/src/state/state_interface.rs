@@ -125,7 +125,13 @@ impl<'conn> StateInterface for FeedStateInterface<'conn> {
     }
 
     fn with_entity<EntityT: sim::Entity, F: Fn(EntityT) -> ApplyResult<EntityT>>(&self, id: Option<Uuid>, f: F) {
+        if let Some(id) = id {
+            info!("Updating {} {}", EntityT::name(), id);
+        } else {
+            info!("Updating all {} entities", EntityT::name());
+        }
         let versions = versions_db::get_possible_versions_at(&self.conn, self.ingest_id, EntityT::name(), id, self.at_time);
+        assert!(!versions.is_empty(), "Tried to modify an entity/entity type that doesn't have any entries");
 
         let mut all_successors = MergedSuccessors::new();
         for (version_id, version_json, _) in versions {

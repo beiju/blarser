@@ -7,12 +7,13 @@ use futures::{pin_mut, stream, Stream, StreamExt};
 use rocket::{info};
 use uuid::Uuid;
 use itertools::Itertools;
+use serde::Serialize;
 
 use crate::api::{chronicler, ChroniclerItem};
 use crate::ingest::task::IngestState;
 use crate::schema::events::star;
 use crate::{sim, EntityStateInterface};
-use crate::state::{add_chron_event, add_initial_versions, Event, get_events_for_entity_after, get_possible_versions_at, MergedSuccessors, save_versions};
+use crate::state::{add_chron_event, add_initial_versions, ChronObservationEvent, Event, get_events_for_entity_after, get_possible_versions_at, MergedSuccessors, save_versions};
 use crate::sim::entity_dispatch;
 
 fn initial_state(start_at_time: &'static str) -> impl Stream<Item=(&'static str, ChroniclerItem)> {
@@ -85,14 +86,22 @@ async fn ingest_update<EntityT: 'static + sim::Entity>(ingest: &mut IngestState,
     wait_for_feed_ingest(ingest, latest).await;
     ingest.db.run(move |c| {
         c.transaction(|| {
-            do_ingest::<EntityT>(c, ingest_id, earliest, latest, item.entity_id, entity_raw);
+            do_ingest::<EntityT>(c, ingest_id, earliest, latest, item.valid_from, item.entity_id, entity_raw);
 
             Ok::<_, diesel::result::Error>(())
         })
     }).await.unwrap();
 }
 
-fn do_ingest<EntityT: 'static + sim::Entity>(c: &PgConnection, ingest_id: i32, start_time: DateTime<Utc>, end_time: DateTime<Utc>, entity_id: Uuid, entity_raw: EntityT::Raw) {
+fn do_ingest<EntityT: 'static + sim::Entity>(
+    c: &PgConnection,
+    ingest_id: i32,
+    start_time: DateTime<Utc>,
+    end_time: DateTime<Utc>,
+    perceived_at: DateTime<Utc>,
+    entity_id: Uuid,
+    entity_raw: EntityT::Raw
+) {
     info!("Placing {} {} between {} and {}", EntityT::name(), entity_id, start_time, end_time);
     let mut versions: Vec<_> = get_possible_versions_at(c, ingest_id, EntityT::name(), Some(entity_id), start_time)
         .into_iter()
@@ -107,13 +116,20 @@ fn do_ingest<EntityT: 'static + sim::Entity>(c: &PgConnection, ingest_id: i32, s
         .expect("Error getting events for Chronicler ingest");
     info!("Applying {} events", events.len());
 
-    let update_id = add_chron_event(c, ingest_id, entity_raw);
+    let mut observation_event = ChronObservationEvent {
+        entity_type: EntityT::name().to_string(),
+        entity_id,
+        perceived_at,
+        applied_at: start_time,
+    };
 
-    let mut earliest_time = start_time;
+    let mut event_id = add_chron_event(c, ingest_id, observation_event.clone());
+
     for event in events {
         let event_time = event.event_time;
-        versions = advance_version(c, ingest_id, versions, event, update_id, &entity_raw, entity_id, earliest_time, end_time);
-        earliest_time = event_time;
+        versions = advance_version(c, ingest_id, versions, event, event_id, &entity_raw, entity_id, observation_event.applied_at, end_time);
+        observation_event.applied_at = event_time;
+        event_id = add_chron_event(c, ingest_id, observation_event.clone());
     }
 
     // Now need to apply to the latest version, after all events in this time range
@@ -130,7 +146,7 @@ fn do_ingest<EntityT: 'static + sim::Entity>(c: &PgConnection, ingest_id: i32, s
         }
     }
 
-    save_versions(c, ingest_id, update_id, earliest_time, last_successors.into_inner());
+    save_versions(c, ingest_id, event_id, observation_event.applied_at, last_successors.into_inner());
 
     if !any_applied {
         // Throw up an alert -- this Chron update couldn't be applied at all

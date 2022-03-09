@@ -7,7 +7,7 @@ use crate::api::chronicler_schema::{ChroniclerItem, ChroniclerResponse, Chronicl
 // This list comes directly from
 // https://github.com/xSke/Chronicler/blob/main/SIBR.Storage.Data/Models/UpdateType.cs
 //noinspection SpellCheckingInspection
-pub const ENDPOINT_NAMES: [&str; 45] = [
+pub const ENDPOINT_NAMES: [&str; 44] = [
     "player",
     "team",
     // Completely covered by "league", "temporal", "sim", and games (handled separately). See
@@ -18,7 +18,9 @@ pub const ENDPOINT_NAMES: [&str; 45] = [
     "idols",
     // Peanut tributes to hall of flame players, not related to anything that happens in the sim
     // "tributes",
-    "temporal",
+    // A few things like entities (Gods, etc.) speaking, peanut purchases (in the distant past),
+    // the ascended Crabs' game record, etc. I don't think it's connected to the sim?
+    // "temporal",
     "tiebreakers",
     "sim",
     // This is the ticker, not connected to the sim at all
