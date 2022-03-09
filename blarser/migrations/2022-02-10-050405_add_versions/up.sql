@@ -1,4 +1,4 @@
-CREATE TYPE event_source AS ENUM ('start', 'feed', 'timed', 'manual');
+CREATE TYPE event_source AS ENUM ('start', 'feed', 'timed', 'chron');
 
 CREATE TABLE events (
     id                SERIAL PRIMARY KEY,

@@ -36,7 +36,7 @@ impl Display for Conflict {
 }
 
 pub trait PartialInformationCompare: Sized + Debug + Serialize {
-    type Raw: 'static + for<'de> Deserialize<'de> + Debug + Send;
+    type Raw: 'static + for<'de> Deserialize<'de> + Serialize + Debug + Send;
     type Diff<'d>: PartialInformationDiff<'d > where Self: 'd;
 
     fn diff<'d>(&'d self, observed: &'d Self::Raw, time: DateTime<Utc>) -> Self::Diff<'d>;

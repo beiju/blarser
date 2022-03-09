@@ -6,8 +6,8 @@ mod timed_event;
 mod feed_event;
 mod merged_successors;
 
-pub use state_interface::{StateInterface};
-pub use events_db::{Event_source, Event, add_feed_event, add_timed_event};
+pub use state_interface::{StateInterface, FeedStateInterface, EntityStateInterface};
+pub use events_db::{Event_source, Event, add_feed_event, add_timed_event, add_chron_event};
 pub use versions_db::{
     Version,
     Parent,
@@ -17,5 +17,7 @@ pub use versions_db::{
     get_entity_debug,
     get_possible_versions_at,
     get_events_for_entity_after,
+    save_versions,
 };
 pub use events::IngestEvent;
+pub use merged_successors::MergedSuccessors;

@@ -6,7 +6,7 @@ use crate::state::events::IngestEvent;
 use crate::StateInterface;
 
 impl IngestEvent for TimedEvent {
-    fn apply(&self, state: &mut StateInterface) {
+    fn apply(&self, state: &impl StateInterface) {
         match self.event_type {
             TimedEventType::EarlseasonStart => earlseason_start(state),
             TimedEventType::DayAdvance => day_advance(state),
@@ -15,7 +15,7 @@ impl IngestEvent for TimedEvent {
     }
 }
 
-fn earlseason_start(state: &mut StateInterface) {
+fn earlseason_start(state: &impl StateInterface) {
     state.with_sim(|mut sim| {
         if sim.phase == 1 {
             sim.phase = 2;
@@ -43,7 +43,7 @@ fn earlseason_start(state: &mut StateInterface) {
     })
 }
 
-fn day_advance(state: &mut StateInterface) {
+fn day_advance(state: &impl StateInterface) {
     state.with_sim(|mut sim| {
         sim.day += 1;
 
@@ -51,7 +51,7 @@ fn day_advance(state: &mut StateInterface) {
     });
 }
 
-fn end_top_half(game_id: Uuid, state: &mut StateInterface) {
+fn end_top_half(game_id: Uuid, state: &impl StateInterface) {
     state.with_game(game_id, |mut game| {
         game.phase = 2;
         game.play_count += 1;

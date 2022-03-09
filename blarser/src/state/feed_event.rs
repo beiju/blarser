@@ -10,7 +10,7 @@ use crate::{StateInterface};
 use crate::parse::{self, Base};
 
 impl IngestEvent for EventuallyEvent {
-    fn apply(&self, state: &mut StateInterface) {
+    fn apply(&self, state: &impl StateInterface) {
         match self.r#type {
             EventType::LetsGo => lets_go(state, self),
             EventType::PlayBall => play_ball(state, self),
@@ -42,7 +42,7 @@ impl IngestEvent for EventuallyEvent {
     }
 }
 
-fn lets_go(state: &mut StateInterface, event: &EventuallyEvent) {
+fn lets_go(state: &impl StateInterface, event: &EventuallyEvent) {
     let game_id = event.game_id().expect("LetsGo event must have a game id");
     state.with_game(game_id, |mut game| {
         game.game_start = true;
@@ -56,7 +56,7 @@ fn lets_go(state: &mut StateInterface, event: &EventuallyEvent) {
     });
 }
 
-fn play_ball(state: &mut StateInterface, event: &EventuallyEvent) {
+fn play_ball(state: &impl StateInterface, event: &EventuallyEvent) {
     let game_id = event.game_id().expect("PlayBall event must have a game id");
     state.with_game(game_id, |mut game| {
         game.game_start_phase = 20;
@@ -76,7 +76,7 @@ fn play_ball(state: &mut StateInterface, event: &EventuallyEvent) {
     });
 }
 
-fn half_inning(state: &mut StateInterface, event: &EventuallyEvent) {
+fn half_inning(state: &impl StateInterface, event: &EventuallyEvent) {
     let game_id = event.game_id().expect(concat!("HalfInning event must have a game id"));
     state.with_game(game_id, |mut game| {
         game.top_of_inning = !game.top_of_inning;
@@ -108,7 +108,7 @@ fn half_inning(state: &mut StateInterface, event: &EventuallyEvent) {
     })
 }
 
-fn pitcher_change(state: &mut StateInterface, event: &EventuallyEvent) {
+fn pitcher_change(state: &impl StateInterface, event: &EventuallyEvent) {
     let new_pitcher_id = event.player_id()
         .expect("PitcherChange event must have a player id");
     let new_pitcher_name = state.read_player(new_pitcher_id, |player| {
@@ -137,7 +137,7 @@ fn pitcher_change(state: &mut StateInterface, event: &EventuallyEvent) {
     })
 }
 
-fn stolen_base(state: &mut StateInterface, event: &EventuallyEvent) {
+fn stolen_base(state: &impl StateInterface, event: &EventuallyEvent) {
     let game_id = event.game_id().expect("StolenBase event must have a game id");
     let thief_id = event.player_id().expect("StolenBase event must have a player id");
 
@@ -160,7 +160,7 @@ fn stolen_base(state: &mut StateInterface, event: &EventuallyEvent) {
     });
 }
 
-fn walk(state: &mut StateInterface, event: &EventuallyEvent) {
+fn walk(state: &impl StateInterface, event: &EventuallyEvent) {
     let game_id = event.game_id().expect("Walk event must have a game id");
     let event_batter_id = event.player_id()
         .expect("Walk event must have a player id");
@@ -189,7 +189,7 @@ fn walk(state: &mut StateInterface, event: &EventuallyEvent) {
     });
 }
 
-fn strikeout(state: &mut StateInterface, event: &EventuallyEvent) {
+fn strikeout(state: &impl StateInterface, event: &EventuallyEvent) {
     let game_id = event.game_id().expect("Strikeout event must have a game id");
     let event_batter_id = event.player_id()
         .expect("Strikeout event must have exactly one player id");
@@ -214,7 +214,7 @@ fn strikeout(state: &mut StateInterface, event: &EventuallyEvent) {
     });
 }
 
-fn fielding_out(state: &mut StateInterface, event: &EventuallyEvent) {
+fn fielding_out(state: &impl StateInterface, event: &EventuallyEvent) {
     // Ground outs and flyouts are different event types, but the logic is so similar that it's
     // easier to combine them
     let game_id = event.game_id().expect("GroundOut/Flyout event must have a game id");
@@ -273,7 +273,7 @@ fn fielding_out(state: &mut StateInterface, event: &EventuallyEvent) {
     });
 }
 
-fn home_run(state: &mut StateInterface, event: &EventuallyEvent) {
+fn home_run(state: &impl StateInterface, event: &EventuallyEvent) {
     let game_id = event.game_id().expect("HomeRun event must have a game id");
     let event_batter_id = event.player_id()
         .expect("HomeRun event must have exactly one player id");
@@ -301,7 +301,7 @@ fn home_run(state: &mut StateInterface, event: &EventuallyEvent) {
     });
 }
 
-fn hit(state: &mut StateInterface, event: &EventuallyEvent) {
+fn hit(state: &impl StateInterface, event: &EventuallyEvent) {
     let game_id = event.game_id().expect("Hit event must have a game id");
     let event_batter_id = event.player_id()
         .expect("Hit event must have exactly one player id");
@@ -333,7 +333,7 @@ fn hit(state: &mut StateInterface, event: &EventuallyEvent) {
     });
 }
 
-fn game_end(state: &mut StateInterface, event: &EventuallyEvent) {
+fn game_end(state: &impl StateInterface, event: &EventuallyEvent) {
     let game_id = event.game_id().expect("GameEnd event must have a game id");
     let winner_id: Uuid = serde_json::from_value(
         event.metadata.other.get("winner")
@@ -369,7 +369,7 @@ fn game_end(state: &mut StateInterface, event: &EventuallyEvent) {
     });
 }
 
-fn batter_up(state: &mut StateInterface, event: &EventuallyEvent) {
+fn batter_up(state: &impl StateInterface, event: &EventuallyEvent) {
     let game_id = event.game_id().expect(concat!("BatterUp event must have a game id"));
     state.with_game(game_id, |mut game| {
         let (batter_count, batter_id) = state.read_team(game.team_at_bat().team, |team| {
@@ -391,7 +391,7 @@ fn batter_up(state: &mut StateInterface, event: &EventuallyEvent) {
     })
 }
 
-fn strike(state: &mut StateInterface, event: &EventuallyEvent) {
+fn strike(state: &impl StateInterface, event: &EventuallyEvent) {
     let game_id = event.game_id().expect(concat!("Strike event must have a game id"));
     state.with_game(game_id, |mut game| {
         game.at_bat_strikes += 1;
@@ -401,7 +401,7 @@ fn strike(state: &mut StateInterface, event: &EventuallyEvent) {
     })
 }
 
-fn ball(state: &mut StateInterface, event: &EventuallyEvent) {
+fn ball(state: &impl StateInterface, event: &EventuallyEvent) {
     let game_id = event.game_id().expect(concat!("Ball event must have a game id"));
     state.with_game(game_id, |mut game| {
         game.at_bat_balls += 1;
@@ -411,7 +411,7 @@ fn ball(state: &mut StateInterface, event: &EventuallyEvent) {
     })
 }
 
-fn foul_ball(state: &mut StateInterface, event: &EventuallyEvent) {
+fn foul_ball(state: &impl StateInterface, event: &EventuallyEvent) {
     let game_id = event.game_id().expect(concat!("FoulBall event must have a game id"));
     state.with_game(game_id, |mut game| {
         if game.at_bat_strikes < 2 {
@@ -423,7 +423,7 @@ fn foul_ball(state: &mut StateInterface, event: &EventuallyEvent) {
     })
 }
 
-fn inning_end(state: &mut StateInterface, event: &EventuallyEvent) {
+fn inning_end(state: &impl StateInterface, event: &EventuallyEvent) {
     let game_id = event.game_id().expect(concat!("InningEnd event must have a game id"));
     state.with_game(game_id, |mut game| {
         game.phase = 2;
@@ -433,7 +433,7 @@ fn inning_end(state: &mut StateInterface, event: &EventuallyEvent) {
     })
 }
 
-fn batter_skipped(state: &mut StateInterface, event: &EventuallyEvent) {
+fn batter_skipped(state: &impl StateInterface, event: &EventuallyEvent) {
     let game_id = event.game_id().expect(concat!("BatterSkipped event must have a game id"));
     state.with_game(game_id, |mut game| {
         game.game_update_common(event);
@@ -444,7 +444,7 @@ fn batter_skipped(state: &mut StateInterface, event: &EventuallyEvent) {
     })
 }
 
-fn flavor_text(state: &mut StateInterface, event: &EventuallyEvent) {
+fn flavor_text(state: &impl StateInterface, event: &EventuallyEvent) {
     let game_id = event.game_id().expect(concat!("*FlavorText event must have a game id"));
     state.with_game(game_id, |mut game| {
         game.game_update_common(event);
@@ -453,7 +453,7 @@ fn flavor_text(state: &mut StateInterface, event: &EventuallyEvent) {
     })
 }
 
-fn player_stat_reroll(state: &mut StateInterface, event: &EventuallyEvent) {
+fn player_stat_reroll(state: &impl StateInterface, event: &EventuallyEvent) {
     let player_id = event.player_id().expect(concat!("PlayerStatReroll event must have a player id"));
     state.with_player(player_id, |mut player| {
         // This event is normally a child (or in events that use siblings, a non-first
@@ -470,7 +470,7 @@ fn player_stat_reroll(state: &mut StateInterface, event: &EventuallyEvent) {
     })
 }
 
-fn win_collected_regular(state: &mut StateInterface, event: &EventuallyEvent) {
+fn win_collected_regular(state: &impl StateInterface, event: &EventuallyEvent) {
     let game_id = event.game_id().expect(concat!("WinCollectedRegular event must have a game id"));
     state.with_game(game_id, |mut game| {
         game.end_phase = 4;
@@ -480,7 +480,7 @@ fn win_collected_regular(state: &mut StateInterface, event: &EventuallyEvent) {
     })
 }
 
-fn game_over(state: &mut StateInterface, event: &EventuallyEvent) {
+fn game_over(state: &impl StateInterface, event: &EventuallyEvent) {
     let game_id = event.game_id().expect(concat!("GameOver event must have a game id"));
     state.with_game(game_id, |mut game| {
         game.end_phase = 5;
@@ -501,7 +501,7 @@ fn game_over(state: &mut StateInterface, event: &EventuallyEvent) {
     })
 }
 
-fn storm_warning(state: &mut StateInterface, event: &EventuallyEvent) {
+fn storm_warning(state: &impl StateInterface, event: &EventuallyEvent) {
     let game_id = event.game_id().expect(concat!("StormWarning event must have a game id"));
     state.with_game(game_id, |mut game| {
         game.game_start_phase = 11; // sure why not
@@ -513,7 +513,7 @@ fn storm_warning(state: &mut StateInterface, event: &EventuallyEvent) {
     })
 }
 
-fn snowflakes(state: &mut StateInterface, event: &EventuallyEvent) {
+fn snowflakes(state: &impl StateInterface, event: &EventuallyEvent) {
     let game_id = event.game_id().expect(concat!("Snowflakes event must have a game id"));
     let (snow_event, _) = event.metadata.siblings.split_first()
         .expect("Snowflakes event is missing metadata.siblings");

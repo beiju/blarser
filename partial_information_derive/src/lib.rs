@@ -136,7 +136,7 @@ fn impl_partial_information_compare(ast: DeriveInput) -> Result<TokenStream2> {
                 }
             }
 
-            #[derive(::core::fmt::Debug, ::serde::Deserialize)]
+            #[derive(::core::fmt::Debug, ::serde::Deserialize, ::serde::Serialize)]
             #(#raw_attrs)*
             #item_vis struct #raw_name {
                 #(#raw_members),*

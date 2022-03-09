@@ -2,6 +2,7 @@
 #![feature(trivial_bounds)] // Necessary for partial_information
 #![feature(generic_associated_types)]
 #![feature(result_option_inspect)] // Necessary for partial_information
+#![feature(specialization)]
 
 #[macro_use]
 extern crate diesel;
@@ -17,4 +18,4 @@ pub mod sim;
 pub mod state;
 mod parse;
 
-pub use state::StateInterface;
+pub use state::{StateInterface, FeedStateInterface, EntityStateInterface};

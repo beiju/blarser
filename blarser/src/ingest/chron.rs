@@ -1,3 +1,4 @@
+use std::cmp::{max, min};
 use std::iter;
 use std::pin::Pin;
 use chrono::{DateTime, Duration, Utc};
@@ -10,8 +11,8 @@ use itertools::Itertools;
 use crate::api::{chronicler, ChroniclerItem};
 use crate::ingest::task::IngestState;
 use crate::schema::events::star;
-use crate::{sim, StateInterface};
-use crate::state::{add_initial_versions, Event, get_events_for_entity_after, get_possible_versions_at};
+use crate::{sim, EntityStateInterface};
+use crate::state::{add_chron_event, add_initial_versions, Event, get_events_for_entity_after, get_possible_versions_at, MergedSuccessors, save_versions};
 use crate::sim::entity_dispatch;
 
 fn initial_state(start_at_time: &'static str) -> impl Stream<Item=(&'static str, ChroniclerItem)> {
@@ -73,7 +74,7 @@ pub async fn ingest_chron(mut ingest: IngestState, start_at_time: &'static str, 
     }
 }
 
-async fn ingest_update<EntityT: sim::Entity>(ingest: &mut IngestState, item: ChroniclerItem) {
+async fn ingest_update<EntityT: 'static + sim::Entity>(ingest: &mut IngestState, item: ChroniclerItem) {
     let entity_raw: EntityT::Raw = serde_json::from_value(item.data)
         .expect("Error deserializing raw entity");
     info!("Processing chron update for {} {} at {}", EntityT::name(), item.entity_id, item.valid_from);
@@ -84,35 +85,59 @@ async fn ingest_update<EntityT: sim::Entity>(ingest: &mut IngestState, item: Chr
     wait_for_feed_ingest(ingest, latest).await;
     ingest.db.run(move |c| {
         c.transaction(|| {
-            do_ingest::<EntityT>(c, ingest_id, earliest, item.entity_id, entity_raw);
+            do_ingest::<EntityT>(c, ingest_id, earliest, latest, item.entity_id, entity_raw);
 
             Ok::<_, diesel::result::Error>(())
         })
     }).await.unwrap();
-
-    todo!()
 }
 
-fn do_ingest<EntityT: sim::Entity>(c: &PgConnection, ingest_id: i32, start_time: DateTime<Utc>, entity_id: Uuid, entity_raw: EntityT::Raw) {
-    let mut versions: Vec<EntityT> = get_possible_versions_at(c, ingest_id, EntityT::name(), Some(entity_id), start_time)
+fn do_ingest<EntityT: 'static + sim::Entity>(c: &PgConnection, ingest_id: i32, start_time: DateTime<Utc>, end_time: DateTime<Utc>, entity_id: Uuid, entity_raw: EntityT::Raw) {
+    info!("Placing {} {} between {} and {}", EntityT::name(), entity_id, start_time, end_time);
+    let mut versions: Vec<_> = get_possible_versions_at(c, ingest_id, EntityT::name(), Some(entity_id), start_time)
         .into_iter()
-        .map(|(_, value, _)| {
-            serde_json::from_value(value)
-                .expect("Couldn't parse stored version")
+        .map(|(version_id, value, _)| {
+            let entity: EntityT = serde_json::from_value(value)
+                .expect("Couldn't parse stored version");
+            (false, version_id, entity)
         })
         .collect();
 
     let events = get_events_for_entity_after(c, ingest_id, EntityT::name(), entity_id, start_time)
         .expect("Error getting events for Chronicler ingest");
+    info!("Applying {} events", events.len());
 
+    let update_id = add_chron_event(c, ingest_id, entity_raw);
+
+    let mut earliest_time = start_time;
     for event in events {
-        versions = advance_version(versions, event, &entity_raw);
+        let event_time = event.event_time;
+        versions = advance_version(c, ingest_id, versions, event, update_id, &entity_raw, entity_id, earliest_time, end_time);
+        earliest_time = event_time;
     }
 
-    // TODO: If no applications were found (cant_apply_reason is still Some()), prompt the user to
-    //   approve a manual change. Otherwise, delete the old successors and insert the newly-computed
-    //   chain.
-    todo!()
+    // Now need to apply to the latest version, after all events in this time range
+    let mut last_successors = MergedSuccessors::new();
+    let mut any_applied = false;
+    for (applied, version_id, mut entity) in versions {
+        if applied {
+            any_applied = true;
+        }
+        let conflicts = entity.observe(&entity_raw);
+        if conflicts.is_empty() {
+            any_applied = true;
+            last_successors.add_successor(version_id, entity);
+        }
+    }
+
+    save_versions(c, ingest_id, update_id, earliest_time, last_successors.into_inner());
+
+    if !any_applied {
+        // Throw up an alert -- this Chron update couldn't be applied at all
+        todo!()
+    }
+
+    info!("Finished ingest for {} {}", EntityT::name(), entity_id);
 }
 
 async fn wait_for_feed_ingest(ingest: &mut IngestState, wait_until_time: DateTime<Utc>) {
@@ -132,24 +157,70 @@ async fn wait_for_feed_ingest(ingest: &mut IngestState, wait_until_time: DateTim
     }
 }
 
-fn advance_version<EntityT: sim::Entity>(c: &PgConnection, ingest_id: i32, entities: Vec<(bool, EntityT)>, event: Event, entity_raw: &EntityT::Raw) -> Vec<(bool, EntityT)> {
+fn advance_version<EntityT: 'static + sim::Entity>(
+    c: &PgConnection,
+    ingest_id: i32,
+    entities: Vec<(bool, i32, EntityT)>,
+    event: Event,
+    update_id: i32,
+    entity_raw: &EntityT::Raw,
+    entity_id: Uuid,
+    earliest_time: DateTime<Utc>,
+    end_time: DateTime<Utc>
+) -> Vec<(bool, i32, EntityT)> {
     let mut new_entities = Vec::new();
-    for (observation_already_applied, mut entity) in entities {
+
+    // Save for use after moving event
+    let event_id = event.id;
+    let event_time = event.event_time;
+
+    let mut versions_from_observation = MergedSuccessors::new();
+    for (observation_already_applied, version_id, entity) in entities {
         // If we haven't already applied the observation, and it's valid to apply the observation
         // here, add the branch where we apply the observation here
         if !observation_already_applied {
-            let conflicts = entity.observe(entity_raw);
-            if conflicts.is_empty() {
-                new_entities.push((true, entity.clone()))
+            if event_time > end_time {
+                // Terminate this event
+                todo!()
+            } else {
+                let mut entity_after_observation = entity.clone();
+                let conflicts = entity_after_observation.observe(entity_raw);
+                if conflicts.is_empty() {
+                    versions_from_observation.add_successor(version_id, entity_after_observation);
+                }
             }
         }
 
         // Always add the branch where we don't apply the observation
-        new_entities.push((observation_already_applied, entity));
+        new_entities.push((observation_already_applied, version_id, entity));
     }
-    let state = StateInterface::for_entity(c, ingest_id, event.id, event.event_time, EntityT::name(), entity.id());
-    event.apply(&mut entity);
+    // NOTE: At this point, new_entities doesn't yet contain any of the branches that came from
+    // applying the observation, because we haven't saved them to the DB and don't have their ids
+    // yet.
+    let saved_version_ids = save_versions(c, ingest_id, update_id, earliest_time, versions_from_observation.clone().into_inner());
+    new_entities.extend(
+        versions_from_observation.into_inner().into_iter()
+                .zip_eq(saved_version_ids)
+                .map(|((entity, _), id)| (true, id, entity))
+    );
 
+    let mut state: EntityStateInterface<EntityT> = EntityStateInterface::new(c, ingest_id, event_id, event_time, entity_id, new_entities);
+    event.apply(&mut state);
 
-    new_entities
+    let successors = state.get_successors();
+    let (successors, successors_to_save): (Vec<_>, Vec<_>) = successors.into_iter()
+        .map(|((applied, successor), parent_ids)| {
+            (
+                (applied, successor.clone()), // These ones are saved for the next iteration
+                (successor, parent_ids), // These ones are passed to the database function
+            )
+        })
+        .unzip();
+
+    info!("Saving {} successors for {} {}", successors_to_save.len(), EntityT::name(), entity_id);
+    let successor_ids = save_versions(c, ingest_id, event_id, event_time, successors_to_save);
+
+    successors.into_iter().zip_eq(successor_ids)
+        .map(|((applied, version), version_id)| (applied, version_id, version))
+        .collect()
 }

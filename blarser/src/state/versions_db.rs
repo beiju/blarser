@@ -173,7 +173,7 @@ pub fn get_possible_versions_at(c: &PgConnection, ingest_id: i32, entity_type: &
     }.expect("Error getting next version with timed event")
 }
 
-pub fn save_successors<EntityT: sim::Entity>(c: &PgConnection, ingest_id: i32, from_event: i32, start_time: DateTime<Utc>, successors: Vec<(EntityT, Vec<i32>)>) {
+pub fn save_versions<EntityT: sim::Entity>(c: &PgConnection, ingest_id: i32, from_event: i32, start_time: DateTime<Utc>, successors: Vec<(EntityT, Vec<i32>)>) -> Vec<i32> {
     let (new_versions, parents): (Vec<_>, Vec<_>) = successors.into_iter().map(|(entity, parents)| {
         let next_timed_event = entity.next_timed_event(start_time)
             .map(|event| event.time);
@@ -199,10 +199,10 @@ pub fn save_successors<EntityT: sim::Entity>(c: &PgConnection, ingest_id: i32, f
             .returning(versions::id)
             .get_results::<i32>(c)?;
 
-        let new_parents: Vec<_> = parents.into_iter().zip(children)
+        let new_parents: Vec<_> = parents.into_iter().zip(&children)
             .flat_map(|(parents, child)| {
                 parents.into_iter().map(move |parent| {
-                    NewParent { parent, child }
+                    NewParent { parent, child: *child }
                 })
             })
             .collect();
@@ -211,7 +211,7 @@ pub fn save_successors<EntityT: sim::Entity>(c: &PgConnection, ingest_id: i32, f
             .values(new_parents)
             .execute(c)?;
 
-        Ok::<_, diesel::result::Error>(())
+        Ok::<_, diesel::result::Error>(children)
     })
         .expect("Failed to save successors")
 }
@@ -267,10 +267,22 @@ pub fn get_events_for_entity_after(c: &PgConnection, ingest_id: i32, entity_type
         .filter(versions::entity_type.eq(entity_type))
         .filter(versions::entity_id.eq(entity_id))
         // Is after the desired time
-        .filter(event::event_time.gt(start_time))
+        .filter(events::event_time.gt(start_time))
         // Just the event
-        .select(events::star)
+        .select(events::events::all_columns())
         // No dupes
         .distinct_on(events::id)
         .get_results::<Event>(c)
+}
+
+
+
+pub fn terminate_versions(c: &PgConnection, to_update: Vec<i32>, reason: String) -> QueryResult<()> {
+    use crate::schema::versions::dsl as versions;
+
+    diesel::update(versions::versions.filter(versions::id.eq_any(to_update)))
+        .set(versions::terminated.eq(Some(reason)))
+        .execute(c)?;
+
+    Ok(())
 }

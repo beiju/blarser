@@ -1,25 +1,32 @@
 use crate::sim::Entity;
 
-pub struct MergedSuccessors<EntityT: Entity>(Vec<(EntityT, Vec<i32>)>);
+#[derive(Clone)]
+pub struct MergedSuccessors<T: PartialEq>(Vec<(T, Vec<i32>)>);
 
-impl<EntityT: Entity> MergedSuccessors<EntityT> {
+impl<T: PartialEq> MergedSuccessors<T> {
     pub fn new() -> Self {
         Self(Vec::new())
     }
 
-    pub fn add_successors(&mut self, parent: i32, new_successors: Vec<EntityT>) {
+    pub fn add_successors(&mut self, parent: i32, new_successors: impl IntoIterator<Item=T>) {
         for new_successor in new_successors {
-            let found = self.0.iter_mut()
-                .find(|(old_successor, _)| new_successor == *old_successor);
+            self.add_successor(parent, new_successor)
+        }
+    }
 
-            match found {
-                Some((_, parents)) => { parents.push(parent) }
-                None => { self.0.push((new_successor, vec![parent])) }
-            }
+    pub fn add_successor(&mut self, parent: i32, new_successor: T) {
+        let found = self.0.iter_mut()
+            .find(|(old_successor, _)| new_successor == *old_successor);
+
+        match found {
+            Some((_, parents)) => { parents.push(parent) }
+            None => { self.0.push((new_successor, vec![parent])) }
         }
     }
 
     pub fn is_empty(&self) -> bool { self.0.is_empty() }
 
-    pub fn into_inner(self) -> Vec<(EntityT, Vec<i32>)> { self.0 }
+    pub fn into_inner(self) -> Vec<(T, Vec<i32>)> { self.0 }
+
+    pub fn iter(&self) -> impl Iterator<Item=&(T, Vec<i32>)> { self.0.iter() }
 }

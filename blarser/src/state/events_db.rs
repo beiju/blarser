@@ -3,6 +3,8 @@ use diesel::{insert_into, PgConnection, RunQueryDsl};
 use diesel::types::Time;
 use diesel_derive_enum::DbEnum;
 use itertools::Itertools;
+use rocket::info;
+use serde::{Deserialize, Serialize};
 use crate::api::EventuallyEvent;
 
 use crate::schema::*;
@@ -17,14 +19,14 @@ pub enum EventSource {
     Start,
     Feed,
     Timed,
-    Manual,
+    Chron,
 }
 
 #[derive(Insertable)]
 #[table_name = "events"]
 struct NewEvent {
     ingest_id: i32,
-    event_time: DateTime<Utc>,
+    event_time: Option<DateTime<Utc>>,
     event_source: EventSource,
     event_data: serde_json::Value,
 }
@@ -36,13 +38,13 @@ pub struct Event {
     pub ingest_id: i32,
     pub event_time: DateTime<Utc>,
     pub event_source: EventSource,
-    pub event_data: serde_json::Value
+    pub event_data: serde_json::Value,
 }
 
 impl Event {
     pub fn description(self) -> Result<String, serde_json::error::Error> {
         match self.event_source {
-            EventSource::Start => { Ok("Start".to_string())}
+            EventSource::Start => { Ok("Start".to_string()) }
             EventSource::Feed => {
                 let event: EventuallyEvent = serde_json::from_value(self.event_data)?;
                 let description = if event.metadata.siblings.is_empty() {
@@ -59,13 +61,13 @@ impl Event {
                 let event: TimedEventType = serde_json::from_value(self.event_data)?;
                 Ok(event.description())
             }
-            EventSource::Manual => {
+            EventSource::Chron => {
                 todo!()
             }
         }
     }
 
-    pub fn apply(&self, state: &mut StateInterface) {
+    pub fn apply(&self, state: &impl StateInterface) {
         match self.event_source {
             EventSource::Start => {
                 panic!("Can't re-apply a Start event!")
@@ -73,11 +75,16 @@ impl Event {
             EventSource::Feed => {
                 let feed_event: EventuallyEvent = serde_json::from_value(self.event_data.clone())
                     .expect("Failed to parse saved EventuallyEvent");
+                info!("In chronicler, re-applying feed event {:?}", feed_event.description);
                 feed_event.apply(state)
             }
             EventSource::Timed => {
-                let timed_event: TimedEvent = serde_json::from_value(self.event_data.clone())
-                    .expect("Failed to parse saved TimedEvent");
+                let timed_event = TimedEvent {
+                    time: self.event_time,
+                    event_type: serde_json::from_value(self.event_data.clone())
+                        .expect("Failed to parse saved TimedEvent"),
+                };
+                info!("In chronicler, re-applying timed event {:?}", timed_event.event_type);
                 timed_event.apply(state)
             }
             EventSource::Manual => {
@@ -99,7 +106,7 @@ fn insert_event(c: &PgConnection, event: NewEvent) -> diesel::result::QueryResul
 pub fn add_start_event(c: &PgConnection, ingest_id: i32, event_time: DateTime<Utc>) -> i32 {
     insert_event(c, NewEvent {
         ingest_id,
-        event_time,
+        event_time: Some(event_time),
         event_source: EventSource::Start,
         event_data: serde_json::Value::Null,
     }).expect("Error inserting start event")
@@ -108,7 +115,7 @@ pub fn add_start_event(c: &PgConnection, ingest_id: i32, event_time: DateTime<Ut
 pub fn add_timed_event(c: &PgConnection, ingest_id: i32, event: TimedEvent) -> i32 {
     insert_event(c, NewEvent {
         ingest_id,
-        event_time: event.time,
+        event_time: Some(event.time),
         event_source: EventSource::Timed,
         event_data: serde_json::to_value(event.event_type)
             .expect("Error serializing TimedEvent"),
@@ -118,9 +125,19 @@ pub fn add_timed_event(c: &PgConnection, ingest_id: i32, event: TimedEvent) -> i
 pub fn add_feed_event(c: &PgConnection, ingest_id: i32, event: EventuallyEvent) -> i32 {
     insert_event(c, NewEvent {
         ingest_id,
-        event_time: event.created,
+        event_time: Some(event.created),
         event_source: EventSource::Feed,
         event_data: serde_json::to_value(event)
             .expect("Error serializing EventuallyEvent"),
     }).expect("Error inserting feed event")
+}
+
+pub fn add_chron_event(c: &PgConnection, ingest_id: i32, event: impl Serialize) -> i32 {
+    insert_event(c, NewEvent {
+        ingest_id,
+        event_time: None,
+        event_source: EventSource::Chron,
+        event_data: serde_json::to_value(event)
+            .expect("Error serializing EventuallyEvent"),
+    }).expect("Error inserting chron event")
 }
