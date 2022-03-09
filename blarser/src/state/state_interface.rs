@@ -21,7 +21,6 @@ pub struct FeedStateInterface<'conn> {
 pub struct EntityStateInterface<'conn, EntityT: sim::Entity> {
     conn: &'conn PgConnection,
     ingest_id: i32,
-    from_event: i32,
     at_time: DateTime<Utc>,
     entity_id: Uuid,
     versions: Vec<(bool, i32, EntityT)>,
@@ -142,7 +141,7 @@ impl<'conn> StateInterface for FeedStateInterface<'conn> {
                 Ok(successors) => {
                     all_successors.add_successors(version_id, successors)
                 }
-                Err(failure) => {
+                Err(_failure) => {
                     todo!()
                 }
             }
@@ -158,11 +157,10 @@ impl<'conn> StateInterface for FeedStateInterface<'conn> {
 }
 
 impl<'conn, EntityT: sim::Entity> EntityStateInterface<'conn, EntityT> {
-    pub fn new(c: &'conn PgConnection, ingest_id: i32, from_event: i32, at_time: DateTime<Utc>, entity_id: Uuid, versions: Vec<(bool, i32, EntityT)>) -> EntityStateInterface<'conn, EntityT> {
+    pub fn new(c: &'conn PgConnection, ingest_id: i32, at_time: DateTime<Utc>, entity_id: Uuid, versions: Vec<(bool, i32, EntityT)>) -> EntityStateInterface<'conn, EntityT> {
         EntityStateInterface {
             conn: c,
             ingest_id,
-            from_event,
             at_time,
             entity_id,
             versions,
@@ -198,7 +196,7 @@ impl<'conn, MainEntityT: 'static + sim::Entity> StateInterface for EntityStateIn
                             (*a_bool, successor.clone())
                         }))
                     }
-                    Err(failure) => {
+                    Err(_failure) => {
                         todo!()
                     }
                 }

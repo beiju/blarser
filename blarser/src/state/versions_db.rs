@@ -1,10 +1,8 @@
 use diesel::{Connection, insert_into, Insertable, QueryDsl, RunQueryDsl};
-use diesel_derive_enum::DbEnum;
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
 use itertools::{Itertools, izip};
 use diesel::prelude::*;
-use futures::StreamExt;
 use rocket::info;
 
 use crate::api::ChroniclerItem;
@@ -236,7 +234,6 @@ pub fn get_recently_updated_entities(c: &PgConnection, ingest_id: i32, count: i6
 
 pub fn get_entity_debug(c: &PgConnection, ingest_id: i32, entity_id: Uuid) -> QueryResult<Vec<(Version, Event, Vec<Parent>)>> {
     use crate::schema::versions::dsl as versions;
-    use crate::schema::versions_parents::dsl as parents;
     use crate::schema::events::dsl as events;
     let (versions, events): (Vec<Version>, Vec<Event>) = versions::versions
         .inner_join(events::events.on(versions::from_event.eq(events::id)))
@@ -277,7 +274,7 @@ pub fn get_events_for_entity_after(c: &PgConnection, ingest_id: i32, entity_type
 
 
 
-pub fn terminate_versions(c: &PgConnection, to_update: Vec<i32>, reason: String) -> QueryResult<()> {
+pub fn _terminate_versions(c: &PgConnection, to_update: Vec<i32>, reason: String) -> QueryResult<()> {
     use crate::schema::versions::dsl as versions;
 
     diesel::update(versions::versions.filter(versions::id.eq_any(to_update)))

@@ -1,20 +1,17 @@
 use itertools::Itertools;
 use rocket_dyn_templates::Template;
 use diesel::result::Error as DieselError;
-use log::info;
 use serde::Serialize;
 use rocket::form::{Form, FromForm};
 use rocket::response::{Redirect};
 use rocket::serde::json::{json, Value};
 use rocket::{State, uri};
-use rocket::http::RawStr;
 use uuid::Uuid;
 use anyhow::anyhow;
 use text_diff::Difference;
 
-use blarser::db::{BlarserDbConn, get_pending_approvals, get_latest_ingest, get_logs_for, IngestApproval, set_approval, IngestLogAndApproval};
+use blarser::db::{IngestApproval, IngestLogAndApproval, BlarserDbConn, get_pending_approvals, get_latest_ingest, get_logs_for, set_approval};
 use blarser::ingest::IngestTask;
-use blarser::StateInterface;
 use blarser::state::{Version, Event, Parent, get_recently_updated_entities, get_entity_debug};
 use blarser::sim;
 

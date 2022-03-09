@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::fmt::{Display, Formatter};
 use std::iter;
 use chrono::{DateTime, Duration, Utc};
@@ -8,12 +7,11 @@ use serde_with::with_prefix;
 use uuid::Uuid;
 use partial_information::{MaybeKnown, PartialInformationCompare, Ranged};
 use partial_information_derive::PartialInformationCompare;
-use crate::api::{EventType, EventuallyEvent};
-use crate::parse::{self, Base};
-use crate::sim::{Entity, Player, Team};
 
+use crate::api::{EventType, EventuallyEvent};
+use crate::parse::{Base};
+use crate::sim::{Entity};
 use crate::sim::entity::{EarliestEvent, TimedEvent, TimedEventType};
-use crate::state::StateInterface;
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]

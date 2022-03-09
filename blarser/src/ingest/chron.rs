@@ -1,19 +1,16 @@
-use std::cmp::{max, min};
 use std::iter;
 use std::pin::Pin;
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Utc};
 use diesel::{Connection, PgConnection};
 use futures::{pin_mut, stream, Stream, StreamExt};
 use rocket::{info};
 use uuid::Uuid;
 use itertools::Itertools;
-use serde::Serialize;
 
 use crate::api::{chronicler, ChroniclerItem};
 use crate::ingest::task::IngestState;
-use crate::schema::events::star;
 use crate::{sim, EntityStateInterface};
-use crate::state::{add_chron_event, add_initial_versions, ChronObservationEvent, Event, get_events_for_entity_after, get_possible_versions_at, MergedSuccessors, save_versions};
+use crate::state::{ChronObservationEvent, Event, MergedSuccessors, add_chron_event, add_initial_versions, get_events_for_entity_after, get_possible_versions_at, save_versions};
 use crate::sim::entity_dispatch;
 
 fn initial_state(start_at_time: &'static str) -> impl Stream<Item=(&'static str, ChroniclerItem)> {
@@ -62,7 +59,7 @@ pub async fn init_chron(ingest: &mut IngestState, start_at_time: &'static str, s
     info!("Finished populating initial Chron values");
 }
 
-pub async fn ingest_chron(mut ingest: IngestState, start_at_time: &'static str, start_time_parsed: DateTime<Utc>) {
+pub async fn ingest_chron(mut ingest: IngestState, start_at_time: &'static str) {
     info!("Started Chron ingest task");
 
     let updates = chron_updates(start_at_time);
@@ -132,21 +129,26 @@ fn do_ingest<EntityT: 'static + sim::Entity>(
         event_id = add_chron_event(c, ingest_id, observation_event.clone());
     }
 
-    // Now need to apply to the latest version, after all events in this time range
-    let mut last_successors = MergedSuccessors::new();
     let mut any_applied = false;
-    for (applied, version_id, mut entity) in versions {
-        if applied {
-            any_applied = true;
+    if observation_event.applied_at < end_time {
+        // Now need to apply to the latest version, after all events in this time range
+        let mut last_successors = MergedSuccessors::new();
+        for (already_applied, version_id, mut entity) in versions {
+            if already_applied {
+                any_applied = true;
+            } else {
+                let conflicts = entity.observe(&entity_raw);
+                if conflicts.is_empty() {
+                    any_applied = true;
+                    last_successors.add_successor(version_id, entity);
+                }
+            }
         }
-        let conflicts = entity.observe(&entity_raw);
-        if conflicts.is_empty() {
-            any_applied = true;
-            last_successors.add_successor(version_id, entity);
-        }
-    }
 
-    save_versions(c, ingest_id, event_id, observation_event.applied_at, last_successors.into_inner());
+        save_versions(c, ingest_id, event_id, observation_event.applied_at, last_successors.into_inner());
+    } else {
+        any_applied = versions.iter().any(|(applied, _, _)| *applied);
+    }
 
     if !any_applied {
         // Throw up an alert -- this Chron update couldn't be applied at all
@@ -220,7 +222,7 @@ fn advance_version<EntityT: 'static + sim::Entity>(
                 .map(|((entity, _), id)| (true, id, entity))
     );
 
-    let mut state: EntityStateInterface<EntityT> = EntityStateInterface::new(c, ingest_id, event_id, event_time, entity_id, new_entities);
+    let mut state: EntityStateInterface<EntityT> = EntityStateInterface::new(c, ingest_id, event_time, entity_id, new_entities);
     event.apply(&mut state);
 
     let successors = state.get_successors();

@@ -1,5 +1,3 @@
-use crate::sim::Entity;
-
 #[derive(Clone)]
 pub struct MergedSuccessors<T: PartialEq>(Vec<(T, Vec<i32>)>);
 
