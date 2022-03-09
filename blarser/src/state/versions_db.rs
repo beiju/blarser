@@ -139,24 +139,25 @@ pub fn get_version_with_next_timed_event(c: &mut PgConnection, ingest_id: i32, b
 }
 
 pub fn get_possible_versions_at(c: &PgConnection, ingest_id: i32, entity_type: &str, entity_id: Option<Uuid>, at_time: DateTime<Utc>) -> Vec<(i32, serde_json::Value, DateTime<Utc>)> {
-    use crate::schema::versions::dsl as versions;
-    use crate::schema::versions_parents::dsl as parents;
-    use crate::schema::events::dsl as events;
-    let base_query = versions::versions
-        .inner_join(events::events.on(events::id.eq(versions::from_event)))
-        .select((versions::id, versions::data, events::event_time))
-        .left_join(parents::versions_parents.on(parents::parent.eq(versions::id)))
+    // Diesel doesn't support having the same table appear multiple times in a query, but I need to
+    // have a version and its child (or parent, depending on how you look at things) in the query so
+    // I can check that one is before at_time and the other is after. Rather than drop down to raw
+    // SQL, I created a view for the versions table (which is already joined to the events table,
+    // because why not, although that isn't necessary) and told diesel about my view as if it was
+    // just another table. Now I can join to the view and the ordinary table separately.
+    // For convenience in the join, I use the normal table for the parent and the view for the child
+
+    use crate::schema::versions_with_range::dsl as versions;
+    let base_query = versions::versions_with_range
+        .select((versions::id, versions::data, versions::event_time)).distinct()
         // Is from the right ingest
         .filter(versions::ingest_id.eq(ingest_id))
         // Has the right entity type
         .filter(versions::entity_type.eq(entity_type))
         // Was created before the requested time
-        .filter(events::event_time.le(at_time))
-        // Has no children
-        // TODO: Revisit this when it comes time to re-apply stored events to a past version after
-        //   getting a new observation for it. This may not work, depending on whether I decide to
-        //   delete the existing branch of the tree before generating a new one
-        .filter(parents::child.is_null());
+        .filter(versions::event_time.le(at_time))
+        // Has no children, or at least one child is after the requested time
+        .filter(versions::end_time.is_null().or(versions::end_time.gt(at_time)));
 
     match entity_id {
         Some(entity_id) => {

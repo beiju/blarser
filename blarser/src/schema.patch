@@ -1,0 +1,47 @@
+diff --git a/blarser/src/schema.rs b/blarser/src/schema.rs
+index da2fb5e..ea598b3 100644
+--- a/blarser/src/schema.rs
++++ b/blarser/src/schema.rs
+@@ -128,12 +128,33 @@ table! {
+         id -> Int4,
+         parent -> Int4,
+         child -> Int4,
+     }
+ }
+ 
++table! {
++    use diesel::sql_types::*;
++    use crate::db_types::*;
++    use crate::state::Event_source;
++
++    versions_with_range (id) {
++        id -> Int4,
++        ingest_id -> Int4,
++        entity_type -> Text,
++        entity_id -> Uuid,
++        terminated -> Nullable<Text>,
++        data -> Jsonb,
++        from_event -> Int4,
++        next_timed_event -> Nullable<Timestamptz>,
++        event_time -> Timestamptz,
++        event_source -> Event_source,
++        event_data -> Jsonb,
++        end_time -> Timestamptz,
++    }
++}
++
+ joinable!(feed_event_changes -> feed_events (feed_event_id));
+ joinable!(ingest_logs -> ingest_approvals (approval_id));
+ joinable!(versions -> events (from_event));
+ 
+ allow_tables_to_appear_in_same_query!(
+     chron_updates,
+@@ -142,7 +163,8 @@ allow_tables_to_appear_in_same_query!(
+     feed_events,
+     ingest_approvals,
+     ingest_logs,
+     ingests,
+     versions,
+     versions_parents,
++    versions_with_range,
+ );
