@@ -504,7 +504,8 @@ fn storm_warning(state: &impl StateInterface, event: &EventuallyEvent) {
     let game_id = event.game_id().expect(concat!("StormWarning event must have a game id"));
     state.with_game(game_id, |mut game| {
         game.game_start_phase = 11; // sure why not
-        game.state.snowfall_events = Some(0);
+        // TODO Reinstate this after implementing cached sub-objects
+        // game.state.snowfall_events = Some(0);
 
         game.game_update_common(event);
 
@@ -523,6 +524,10 @@ fn snowflakes(state: &impl StateInterface, event: &EventuallyEvent) {
     state.with_game(game_id, |mut game| {
         game.game_update_common(event);
         game.game_start_phase = 20;
+        // TODO Remove this once the todo in storm_warning is fixed
+        if game.state.snowfall_events.is_none() {
+            game.state.snowfall_events = Some(0)
+        }
         *game.state.snowfall_events.as_mut().expect("snowfallEvents must be set in Snowflakes event") += 1;
 
         let frozen_players: HashSet<_> = event.metadata.siblings.iter()
