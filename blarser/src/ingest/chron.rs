@@ -33,23 +33,55 @@ fn initial_state(start_at_time: &'static str) -> impl Stream<Item=(&'static str,
 }
 
 
+type ChronUpdateStream = Pin<Box<dyn Stream<Item=(&'static str, ChroniclerItem)> + Send>>;
+
 fn chron_updates(start_at_time: &'static str) -> impl Stream<Item=(&'static str, ChroniclerItem)> {
-    type ChronUpdateStream = Pin<Box<dyn Stream<Item=(&'static str, ChroniclerItem)> + Send>>;
     // So much of this is just making the type system happy
     let streams = chronicler::ENDPOINT_NAMES.into_iter()
         .map(move |entity_type| {
             let stream = chronicler::versions(entity_type, start_at_time)
-                .map(move |entity| (entity_type, entity));
+                .map(move |entity| (entity_type, entity))
+                .peekable();
 
             Box::pin(stream) as ChronUpdateStream
         })
         .chain(iter::once(
             Box::pin(chronicler::game_updates(start_at_time)
                 .map(move |entity| ("game", entity))
+                .peekable()
             ) as ChronUpdateStream
         ));
 
-    stream::select_all(streams)
+    kmerge_stream(streams)
+}
+
+fn kmerge_stream(streams: impl Iterator<Item=ChronUpdateStream>) -> impl Stream<Item=(&'static str, ChroniclerItem)> {
+    let peekable_streams: Vec<_> = streams
+        // Two layers of Box::pin :(
+        .map(|s| Box::pin(s.peekable()))
+        .collect();
+
+    stream::unfold(peekable_streams, |mut peekable_streams| async {
+        let selected_stream = *stream::iter(&mut peekable_streams)
+            .enumerate()
+            .filter_map(|(i, stream)| async move {
+                if let Some((_, next_item)) = stream.as_mut().peek().await {
+                    Some((i, next_item.valid_from))
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>().await
+            .iter()
+            .min_by_key(|(_, date)| date)
+            .map(|(i, _)| i)
+            .expect("TODO: Handle end of all streams");
+
+        let next = peekable_streams[selected_stream].next().await
+            .expect("selected_stream should never refer to a stream that doesn't have a next element");
+
+        Some((next, peekable_streams))
+    })
 }
 
 pub async fn init_chron(ingest: &mut IngestState, start_at_time: &'static str, start_time_parsed: DateTime<Utc>) {
@@ -111,7 +143,7 @@ fn do_ingest<EntityT: 'static + sim::Entity>(
 
     let events = get_events_for_entity_after(c, ingest_id, EntityT::name(), entity_id, start_time)
         .expect("Error getting events for Chronicler ingest");
-    info!("Applying {} events", events.len());
+    info!("Applying {} events to {} versions", events.len(), versions.len());
 
     let mut observation_event = ChronObservationEvent {
         entity_type: EntityT::name().to_string(),
@@ -141,6 +173,8 @@ fn do_ingest<EntityT: 'static + sim::Entity>(
                 if conflicts.is_empty() {
                     any_applied = true;
                     last_successors.add_successor(version_id, entity);
+                } else {
+                    info!("Not applying observation because of conflicts: \n- {}", conflicts.into_iter().map(|c| c.to_string()).join("\n- "))
                 }
             }
         }
@@ -197,20 +231,22 @@ fn advance_version<EntityT: 'static + sim::Entity>(
         // If we haven't already applied the observation, and it's valid to apply the observation
         // here, add the branch where we apply the observation here
         if !observation_already_applied {
-            if event_time > end_time {
-                // Terminate this event
-                todo!()
+            let mut entity_after_observation = entity.clone();
+            let conflicts = entity_after_observation.observe(entity_raw);
+            if conflicts.is_empty() {
+                versions_from_observation.add_successor(version_id, entity_after_observation);
             } else {
-                let mut entity_after_observation = entity.clone();
-                let conflicts = entity_after_observation.observe(entity_raw);
-                if conflicts.is_empty() {
-                    versions_from_observation.add_successor(version_id, entity_after_observation);
-                }
+                info!("Not applying observation because of conflicts: \n- {}", conflicts.into_iter().map(|c| c.to_string()).join("\n- "))
             }
         }
 
-        // Always add the branch where we don't apply the observation
-        new_entities.push((observation_already_applied, version_id, entity));
+        if event_time > end_time && !observation_already_applied {
+            // Terminate the branch
+            todo!()
+        } else {
+            // Always add the branch where we don't apply the observation
+            new_entities.push((observation_already_applied, version_id, entity));
+        }
     }
     // NOTE: At this point, new_entities doesn't yet contain any of the branches that came from
     // applying the observation, because we haven't saved them to the DB and don't have their ids
