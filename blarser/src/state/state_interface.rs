@@ -98,12 +98,13 @@ impl<'conn> FeedStateInterface<'conn> {
 
 fn read_entity_common<EntityT: sim::Entity, ReadT, Reader>(c: &PgConnection, ingest_id: i32, at_time: DateTime<Utc>, id: Option<Uuid>, reader: Reader) -> Vec<ReadT> where ReadT: Eq, Reader: Fn(EntityT) -> ReadT {
     let mut unique_vals = Vec::new();
-    let versions = versions_db::get_possible_versions_at(c, ingest_id, EntityT::name(), id, at_time);
+    let versions = versions_db::get_current_versions(c, ingest_id, EntityT::name(), id);
 
     assert!(!versions.is_empty(),
             "Error: There are no versions for the requested entity");
 
-    for (_, version_json, _) in versions {
+    for (_, version_json, version_time) in versions {
+        assert!(version_time <= at_time);
         let version: EntityT = serde_json::from_value(version_json)
             .expect("Couldn't deserialize stored entity version");
 
@@ -129,11 +130,12 @@ impl<'conn> StateInterface for FeedStateInterface<'conn> {
         } else {
             info!("Updating all {} entities", EntityT::name());
         }
-        let versions = versions_db::get_possible_versions_at(&self.conn, self.ingest_id, EntityT::name(), id, self.at_time);
+        let versions = versions_db::get_current_versions(&self.conn, self.ingest_id, EntityT::name(), id);
         assert!(!versions.is_empty(), "Tried to modify an entity/entity type that doesn't have any entries");
 
         let mut all_successors = MergedSuccessors::new();
-        for (version_id, version_json, _) in versions {
+        for (version_id, version_json, version_time) in versions {
+            assert!(version_time <= self.at_time);
             let version: EntityT = serde_json::from_value(version_json)
                 .expect("Couldn't deserialize stored entity version");
 

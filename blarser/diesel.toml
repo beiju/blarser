@@ -4,4 +4,3 @@
 [print_schema]
 file = "src/schema.rs"
 import_types = ["diesel::sql_types::*", "crate::db_types::*", "crate::state::Event_source"]
-patch_file = "src/schema.patch"

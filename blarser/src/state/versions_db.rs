@@ -138,26 +138,20 @@ pub fn get_version_with_next_timed_event(c: &mut PgConnection, ingest_id: i32, b
         .expect("Error getting next version with timed event")
 }
 
-pub fn get_possible_versions_at(c: &PgConnection, ingest_id: i32, entity_type: &str, entity_id: Option<Uuid>, at_time: DateTime<Utc>) -> Vec<(i32, serde_json::Value, DateTime<Utc>)> {
-    // Diesel doesn't support having the same table appear multiple times in a query, but I need to
-    // have a version and its child (or parent, depending on how you look at things) in the query so
-    // I can check that one is before at_time and the other is after. Rather than drop down to raw
-    // SQL, I created a view for the versions table (which is already joined to the events table,
-    // because why not, although that isn't necessary) and told diesel about my view as if it was
-    // just another table. Now I can join to the view and the ordinary table separately.
-    // For convenience in the join, I use the normal table for the parent and the view for the child
-
-    use crate::schema::versions_with_range::dsl as versions;
-    let base_query = versions::versions_with_range
-        .select((versions::id, versions::data, versions::event_time)).distinct()
+pub fn get_current_versions(c: &PgConnection, ingest_id: i32, entity_type: &str, entity_id: Option<Uuid>) -> Vec<(i32, serde_json::Value, DateTime<Utc>)> {
+    use crate::schema::versions::dsl as versions;
+    use crate::schema::versions_parents::dsl as parents;
+    use crate::schema::events::dsl as events;
+    let base_query = versions::versions
+        .inner_join(events::events.on(versions::from_event.eq(events::id)))
+        .select((versions::id, versions::data, events::event_time))
         // Is from the right ingest
         .filter(versions::ingest_id.eq(ingest_id))
-        // Has the right entity type
+        // Has the right entity type (entity id handled below)
         .filter(versions::entity_type.eq(entity_type))
-        // Was created before the requested time
-        .filter(versions::event_time.le(at_time))
-        // Has no children, or at least one child is after the requested time
-        .filter(versions::end_time.is_null().or(versions::end_time.gt(at_time)));
+        // Has no children
+        .left_join(parents::versions_parents.on(parents::parent.eq(versions::id)))
+        .filter(parents::child.is_null());
 
     match entity_id {
         Some(entity_id) => {
@@ -169,7 +163,7 @@ pub fn get_possible_versions_at(c: &PgConnection, ingest_id: i32, entity_type: &
         None => {
             base_query.get_results::<(i32, serde_json::Value, DateTime<Utc>)>(c)
         }
-    }.expect("Error getting next version with timed event")
+    }.expect("Error getting current versions")
 }
 
 pub fn save_versions<EntityT: sim::Entity>(c: &PgConnection, ingest_id: i32, from_event: i32, start_time: DateTime<Utc>, successors: Vec<(EntityT, Vec<i32>)>) -> Vec<i32> {
@@ -273,6 +267,21 @@ pub fn get_events_for_entity_after(c: &PgConnection, ingest_id: i32, entity_type
         .get_results::<Event>(c)
 }
 
+pub fn delete_versions_for_entity_after(c: &PgConnection, ingest_id: i32, entity_type: &str, entity_id: Uuid, start_time: DateTime<Utc>) -> QueryResult<usize> {
+    use crate::schema::versions::dsl as versions;
+    use crate::schema::events::dsl as events;
+
+    diesel::delete(
+        versions::versions
+            // Is from the right ingest
+            .filter(versions::ingest_id.eq(ingest_id))
+            // Is the right entity
+            .filter(versions::entity_type.eq(entity_type))
+            .filter(versions::entity_id.eq(entity_id))
+            // Is after the desired time
+            .filter(versions::from_event.eq_any(events::events.filter(events::event_time.gt(start_time)).select(events::id))))
+        .execute(c)
+}
 
 
 pub fn _terminate_versions(c: &PgConnection, to_update: Vec<i32>, reason: String) -> QueryResult<()> {

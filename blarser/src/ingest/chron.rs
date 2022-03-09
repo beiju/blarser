@@ -10,7 +10,7 @@ use itertools::Itertools;
 use crate::api::{chronicler, ChroniclerItem};
 use crate::ingest::task::IngestState;
 use crate::{sim, EntityStateInterface};
-use crate::state::{ChronObservationEvent, Event, MergedSuccessors, add_chron_event, add_initial_versions, get_events_for_entity_after, get_possible_versions_at, save_versions};
+use crate::state::{ChronObservationEvent, Event, MergedSuccessors, add_chron_event, add_initial_versions, get_events_for_entity_after, delete_versions_for_entity_after, get_current_versions, save_versions};
 use crate::sim::entity_dispatch;
 
 fn initial_state(start_at_time: &'static str) -> impl Stream<Item=(&'static str, ChroniclerItem)> {
@@ -132,17 +132,25 @@ fn do_ingest<EntityT: 'static + sim::Entity>(
     entity_raw: EntityT::Raw
 ) {
     info!("Placing {} {} between {} and {}", EntityT::name(), entity_id, start_time, end_time);
-    let mut versions: Vec<_> = get_possible_versions_at(c, ingest_id, EntityT::name(), Some(entity_id), start_time)
+
+    // The order for this is important! First get events by reading the versions after start_time,
+    // then delete the versions after start_time, then get the leaf versions which will now be the
+    // exact set of versions we need to start the ingest from.
+    let events = get_events_for_entity_after(c, ingest_id, EntityT::name(), entity_id, start_time)
+        .expect("Error getting events for Chronicler ingest");
+
+    delete_versions_for_entity_after(c, ingest_id, EntityT::name(), entity_id, start_time)
+        .expect("Error deleting to-be-replaced versions");
+
+    let mut versions: Vec<_> = get_current_versions(c, ingest_id, EntityT::name(), Some(entity_id))
         .into_iter()
-        .map(|(version_id, value, _)| {
+        .map(|(version_id, value, version_time)| {
+            assert!(version_time <= start_time);
             let entity: EntityT = serde_json::from_value(value)
                 .expect("Couldn't parse stored version");
             (false, version_id, entity)
         })
         .collect();
-
-    let events = get_events_for_entity_after(c, ingest_id, EntityT::name(), entity_id, start_time)
-        .expect("Error getting events for Chronicler ingest");
     info!("Applying {} events to {} versions", events.len(), versions.len());
 
     let mut observation_event = ChronObservationEvent {
