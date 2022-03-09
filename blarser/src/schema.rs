@@ -131,6 +131,27 @@ table! {
     }
 }
 
+table! {
+    use diesel::sql_types::*;
+    use crate::db_types::*;
+    use crate::state::Event_source;
+
+    versions_with_range (id) {
+        id -> Int4,
+        ingest_id -> Int4,
+        entity_type -> Text,
+        entity_id -> Uuid,
+        terminated -> Nullable<Text>,
+        data -> Jsonb,
+        from_event -> Int4,
+        next_timed_event -> Nullable<Timestamptz>,
+        event_time -> Timestamptz,
+        event_source -> Event_source,
+        event_data -> Jsonb,
+        end_time -> Timestamptz,
+    }
+}
+
 joinable!(feed_event_changes -> feed_events (feed_event_id));
 joinable!(ingest_logs -> ingest_approvals (approval_id));
 joinable!(versions -> events (from_event));
@@ -145,4 +166,5 @@ allow_tables_to_appear_in_same_query!(
     ingests,
     versions,
     versions_parents,
+    versions_with_range,
 );

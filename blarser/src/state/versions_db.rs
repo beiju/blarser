@@ -166,6 +166,40 @@ pub fn get_current_versions(c: &PgConnection, ingest_id: i32, entity_type: &str,
     }.expect("Error getting current versions")
 }
 
+pub fn get_possible_versions_at(c: &PgConnection, ingest_id: i32, entity_type: &str, entity_id: Option<Uuid>, at_time: DateTime<Utc>) -> Vec<(i32, serde_json::Value, DateTime<Utc>)> {
+    // Diesel doesn't support having the same table appear multiple times in a query, but I need to
+    // have a version and its child (or parent, depending on how you look at things) in the query so
+    // I can check that one is before at_time and the other is after. Rather than drop down to raw
+    // SQL, I created a view for the versions table (which is already joined to the events table,
+    // because why not, although that isn't necessary) and told diesel about my view as if it was
+    // just another table. Now I can join to the view and the ordinary table separately.
+    // For convenience in the join, I use the normal table for the parent and the view for the child
+
+    use crate::schema::versions_with_range::dsl as versions;
+    let base_query = versions::versions_with_range
+        .select((versions::id, versions::data, versions::event_time)).distinct()
+        // Is from the right ingest
+        .filter(versions::ingest_id.eq(ingest_id))
+        // Has the right entity type
+        .filter(versions::entity_type.eq(entity_type))
+        // Was created before the requested time
+        .filter(versions::event_time.le(at_time))
+        // Has no children, or at least one child is after the requested time
+        .filter(versions::end_time.is_null().or(versions::end_time.gt(at_time)));
+
+    match entity_id {
+        Some(entity_id) => {
+            base_query
+                // Has the right entity id
+                .filter(versions::entity_id.eq(entity_id))
+                .get_results::<(i32, serde_json::Value, DateTime<Utc>)>(c)
+        }
+        None => {
+            base_query.get_results::<(i32, serde_json::Value, DateTime<Utc>)>(c)
+        }
+    }.expect("Error getting versions at time")
+}
+
 pub fn save_versions<EntityT: sim::Entity>(c: &PgConnection, ingest_id: i32, from_event: i32, start_time: DateTime<Utc>, successors: Vec<(EntityT, Vec<i32>)>) -> Vec<i32> {
     let (new_versions, parents): (Vec<_>, Vec<_>) = successors.into_iter().map(|(entity, parents)| {
         let next_timed_event = entity.next_timed_event(start_time)
