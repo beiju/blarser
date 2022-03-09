@@ -10,7 +10,7 @@ use itertools::Itertools;
 use crate::api::{chronicler, ChroniclerItem};
 use crate::ingest::task::IngestState;
 use crate::{sim, EntityStateInterface};
-use crate::state::{ChronObservationEvent, Event, MergedSuccessors, add_chron_event, add_initial_versions, get_events_for_entity_after, delete_versions_for_entity_after, get_current_versions, save_versions};
+use crate::state::{ChronObservationEvent, Event, MergedSuccessors, add_chron_event, add_initial_versions, get_events_for_entity_after, delete_versions_for_entity_after, get_current_versions, save_versions, terminate_versions};
 use crate::sim::entity_dispatch;
 
 fn initial_state(start_at_time: &'static str) -> impl Stream<Item=(&'static str, ChroniclerItem)> {
@@ -235,6 +235,7 @@ fn advance_version<EntityT: 'static + sim::Entity>(
     let event_time = event.event_time;
 
     let mut versions_from_observation = MergedSuccessors::new();
+    let mut to_terminate = Vec::new();
     for (observation_already_applied, version_id, entity) in entities {
         // If we haven't already applied the observation, and it's valid to apply the observation
         // here, add the branch where we apply the observation here
@@ -250,11 +251,16 @@ fn advance_version<EntityT: 'static + sim::Entity>(
 
         if event_time > end_time && !observation_already_applied {
             // Terminate the branch
-            todo!()
+            to_terminate.push(version_id);
         } else {
             // Always add the branch where we don't apply the observation
             new_entities.push((observation_already_applied, version_id, entity));
         }
+    }
+    if !to_terminate.is_empty() {
+        // TODO Put the non-termination reasons in the string
+        terminate_versions(c, to_terminate,
+                           format!("This branch didn't apply a chron update at any point"));
     }
     // NOTE: At this point, new_entities doesn't yet contain any of the branches that came from
     // applying the observation, because we haven't saved them to the DB and don't have their ids

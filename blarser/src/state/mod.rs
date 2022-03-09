@@ -17,8 +17,9 @@ pub use versions_db::{
     get_current_versions,
     get_recently_updated_entities,
     get_version_with_next_timed_event,
-    Parent,
     save_versions,
+    terminate_versions,
+    Parent,
     Version,
 };
 pub use events::IngestEvent;

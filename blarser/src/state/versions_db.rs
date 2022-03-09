@@ -284,7 +284,7 @@ pub fn delete_versions_for_entity_after(c: &PgConnection, ingest_id: i32, entity
 }
 
 
-pub fn _terminate_versions(c: &PgConnection, to_update: Vec<i32>, reason: String) -> QueryResult<()> {
+pub fn terminate_versions(c: &PgConnection, to_update: Vec<i32>, reason: String) -> QueryResult<()> {
     use crate::schema::versions::dsl as versions;
 
     diesel::update(versions::versions.filter(versions::id.eq_any(to_update)))
