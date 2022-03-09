@@ -8,7 +8,7 @@ use ::proc_macro2::{Span, TokenStream as TokenStream2};
 use ::quote::{quote, ToTokens};
 use ::syn::{*, parse::{Parse, Parser, ParseStream}, punctuated::Punctuated, spanned::Spanned, Result};
 
-#[proc_macro_derive(PartialInformationCompare, attributes(derive_raw))]
+#[proc_macro_derive(PartialInformationCompare, attributes(partial_information))]
 pub fn partial_information_compare_derive(input: TokenStream) -> TokenStream {
     let ast = parse_macro_input!(input as _);
     TokenStream::from(match impl_partial_information_compare(ast) {
@@ -82,6 +82,40 @@ fn impl_partial_information_compare(ast: DeriveInput) -> Result<TokenStream2> {
                 }
             });
 
+        let mut raw_implements_default = false;
+        for attr in ast.attrs.iter() {
+            raw_implements_default |=
+                attr.style == AttrStyle::Outer && attr.path.is_ident("partial_information") && {
+                    let meta = attr.parse_meta()?;
+
+                    if let Meta::List(list) = meta {
+                        list.nested.iter().any(|item| {
+                            match item {
+                                NestedMeta::Meta(Meta::Path(p)) => {
+                                    if p.is_ident("default") {
+                                        true
+                                    } else {
+                                        panic!("Invalid format: unexpected path {}",
+                                               p.to_token_stream().to_string());
+                                    }
+                                }
+                                _ => {
+                                    panic!("Invalid format: Expected Meta(Path(...))")
+                                }
+                            }
+                        })
+                    } else {
+                        panic!("Invalid format: Expected list")
+                    }
+                }
+        }
+
+        let raw_default = if raw_implements_default {
+            quote! { #[derive(::std::default::Default)] }
+        } else {
+            quote! {}
+        };
+
         let diff_name = Ident::new(&format!("{}Diff", name), name.span());
         let diff_members = fields.named.iter()
             .map(|field| {
@@ -99,7 +133,7 @@ fn impl_partial_information_compare(ast: DeriveInput) -> Result<TokenStream2> {
                     self.#field_name.is_empty()
                 }
             })
-            .chain(iter::once(quote!{ true }));
+            .chain(iter::once(quote! { true }));
 
         let from_raw_members = fields.named.iter()
             .map(|field| {
@@ -137,6 +171,7 @@ fn impl_partial_information_compare(ast: DeriveInput) -> Result<TokenStream2> {
             }
 
             #[derive(::core::fmt::Debug, ::serde::Deserialize, ::serde::Serialize)]
+            #raw_default
             #(#raw_attrs)*
             #item_vis struct #raw_name {
                 #(#raw_members),*

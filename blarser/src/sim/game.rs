@@ -25,6 +25,7 @@ pub struct GameState {
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize, PartialInformationCompare)]
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
+#[partial_information(default)]
 pub struct UpdateFullMetadata {
     r#mod: Option<String>,
 }
@@ -43,7 +44,8 @@ pub struct UpdateFull {
     season: i32,
     created: DateTime<Utc>,
     category: i32,
-    metadata: Option<UpdateFullMetadata>,
+    #[serde(default)]
+    metadata: UpdateFullMetadata,
     game_tags: Vec<Uuid>,
     team_tags: Vec<Uuid>,
     player_tags: Vec<Uuid>,

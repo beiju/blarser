@@ -260,7 +260,8 @@ fn advance_version<EntityT: 'static + sim::Entity>(
     if !to_terminate.is_empty() {
         // TODO Put the non-termination reasons in the string
         terminate_versions(c, to_terminate,
-                           format!("This branch didn't apply a chron update at any point"));
+                           format!("This branch didn't apply a chron update at any point"))
+            .expect("Error terminating versions");
     }
     // NOTE: At this point, new_entities doesn't yet contain any of the branches that came from
     // applying the observation, because we haven't saved them to the DB and don't have their ids
