@@ -22,15 +22,6 @@ pub struct Ingest {
     pub started_at: NaiveDateTime,
     pub events_parsed: i32,
 }
-#[derive(Insertable)]
-#[table_name = "ingest_approvals"]
-pub struct NewIngestApproval<'a> {
-    pub at: NaiveDateTime,
-    pub chronicler_entity_type: &'a str,
-    pub chronicler_time: NaiveDateTime,
-    pub chronicler_entity_id: uuid::Uuid,
-    pub message: &'a str,
-}
 
 #[derive(Identifiable, Queryable, Debug, Serialize)]
 pub struct IngestApproval {
@@ -115,12 +106,12 @@ pub fn get_pending_approvals(conn: &diesel::PgConnection) -> Result<Vec<IngestAp
         .load(conn)
 }
 
-pub fn set_approval(conn: &diesel::PgConnection, approval_id: i32, message: &str, approved: bool) -> Result<(), diesel::result::Error> {
+pub fn set_approval(conn: &diesel::PgConnection, approval_id: i32, explanation: &str, approved: bool) -> Result<(), diesel::result::Error> {
     use crate::schema::ingest_approvals::dsl;
     diesel::update(dsl::ingest_approvals.find(approval_id))
         .set((
             dsl::approved.eq(approved),
-            dsl::message.eq(message)
+            dsl::explanation.eq(explanation)
         ))
         .execute(conn)?;
     Ok(())

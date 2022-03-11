@@ -8,4 +8,6 @@ CREATE TABLE ingest_approvals
     message                 TEXT NOT NULL,
     approved                BOOLEAN,
     explanation             TEXT
+
+    CONSTRAINT approvals_explained CHECK ( approved = (explanation IS NOT NULL)  )
 );

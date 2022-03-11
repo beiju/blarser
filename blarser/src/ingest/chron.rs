@@ -6,10 +6,12 @@ use futures::{pin_mut, stream, Stream, StreamExt};
 use rocket::{info};
 use uuid::Uuid;
 use itertools::Itertools;
+use tokio::sync::oneshot;
 
 use crate::api::{chronicler, ChroniclerItem};
 use crate::ingest::task::IngestState;
 use crate::{sim, EntityStateInterface};
+use crate::ingest::approvals_db::{ApprovalState, get_approval};
 use crate::state::{ChronObservationEvent, Event, MergedSuccessors, add_chron_event, add_initial_versions, get_events_for_entity_after, delete_versions_for_entity_after, get_current_versions, save_versions, terminate_versions};
 use crate::sim::entity_dispatch;
 
@@ -115,13 +117,25 @@ async fn ingest_update<EntityT: 'static + sim::Entity>(ingest: &mut IngestState,
     wait_for_feed_ingest(ingest, latest).await;
 
     let _lock = ingest.damn_mutex.lock().await;
-    ingest.db.run(move |c| {
+    let approval = ingest.db.run(move |c| {
         c.transaction(|| {
-            do_ingest::<EntityT>(c, ingest_id, earliest, latest, item.valid_from, item.entity_id, entity_raw);
+            let approval = do_ingest::<EntityT>(c, ingest_id, earliest, latest, item.valid_from, item.entity_id, entity_raw);
 
-            Ok::<_, diesel::result::Error>(())
+            Ok::<_, diesel::result::Error>(approval)
         })
     }).await.unwrap();
+
+    if let Some(approval) = approval {
+        let (send, recv) = oneshot::channel();
+        {
+            let mut pending_approvals = ingest.pending_approvals.lock().unwrap();
+            pending_approvals.insert(approval, send);
+        }
+        let approval_result = recv.await
+            .expect("Channel closed while awaiting approval");
+        info!("Approval {}", approval_result);
+        todo!()
+    }
 }
 
 fn do_ingest<EntityT: 'static + sim::Entity>(
@@ -132,7 +146,7 @@ fn do_ingest<EntityT: 'static + sim::Entity>(
     perceived_at: DateTime<Utc>,
     entity_id: Uuid,
     entity_raw: EntityT::Raw
-) {
+) -> Option<i32> {
     info!("Placing {} {} between {} and {}", EntityT::name(), entity_id, start_time, end_time);
 
     // The order for this is important! First get events by reading the versions after start_time,
@@ -194,12 +208,23 @@ fn do_ingest<EntityT: 'static + sim::Entity>(
         any_applied = versions.iter().any(|(applied, _, _)| *applied);
     }
 
-    if !any_applied {
-        // Throw up an alert -- this Chron update couldn't be applied at all
-        todo!()
-    }
 
-    info!("Finished ingest for {} {}", EntityT::name(), entity_id);
+    if !any_applied {
+        let approval_message = "Couldn't save"; // TODO
+        info!("Need approval for {} {}: {}", EntityT::name(), entity_id, approval_message);
+        let approval = get_approval(c, EntityT::name(), entity_id, perceived_at, approval_message)
+            .expect("Error saving approval");
+        match approval {
+            ApprovalState::Pending(approval_id) => { Some(approval_id) }
+            ApprovalState::Approved(_explanation) => { todo!() }
+            ApprovalState::Rejected => {
+                panic!("Hit rejected approval")
+            }
+        }
+    } else {
+        info!("Finished ingest for {} {}", EntityT::name(), entity_id);
+        None
+    }
 }
 
 async fn wait_for_feed_ingest(ingest: &mut IngestState, wait_until_time: DateTime<Utc>) {

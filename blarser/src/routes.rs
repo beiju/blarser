@@ -80,7 +80,7 @@ pub struct Approval {
 }
 
 #[rocket::post("/approve", data = "<approval>")]
-pub async fn approve(_task: &State<IngestTask>, conn: BlarserDbConn, approval: Form<Approval>) -> Result<Redirect, ServerError> {
+pub async fn approve(task: &State<IngestTask>, conn: BlarserDbConn, approval: Form<Approval>) -> Result<Redirect, ServerError> {
     let redirect_to = if approval.from_route == "index" {
         Ok(uri!(index))
     } else if approval.from_route == "approvals" {
@@ -89,12 +89,14 @@ pub async fn approve(_task: &State<IngestTask>, conn: BlarserDbConn, approval: F
         Err(ServerError::InternalError(format!("Unexpected value in from_route: {}", approval.from_route)))
     }?;
 
+    let approval_id = approval.approval_id;
+    let approved = approval.approved;
     conn.run(move |c|
         set_approval(c, approval.approval_id, &approval.message, approval.approved)
     ).await
         .map_err(|err: DieselError| ServerError::InternalError(err.to_string()))?;
 
-    // task.notify_callback(approval_id);
+    task.notify_approval(approval_id, approved);
 
     Ok(Redirect::to(redirect_to))
 }
