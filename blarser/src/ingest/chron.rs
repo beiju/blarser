@@ -113,6 +113,8 @@ async fn ingest_update<EntityT: 'static + sim::Entity>(ingest: &mut IngestState,
     let ingest_id = ingest.ingest_id;
     let (earliest, latest) = EntityT::time_range_for_update(item.valid_from, &entity_raw);
     wait_for_feed_ingest(ingest, latest).await;
+
+    let _lock = ingest.damn_mutex.lock().await;
     ingest.db.run(move |c| {
         c.transaction(|| {
             do_ingest::<EntityT>(c, ingest_id, earliest, latest, item.valid_from, item.entity_id, entity_raw);

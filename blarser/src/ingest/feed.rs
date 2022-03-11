@@ -1,5 +1,5 @@
 use chrono::{DateTime, Duration, Utc};
-use diesel::PgConnection;
+use diesel::{Connection, PgConnection};
 use rocket::info;
 use futures::{pin_mut, StreamExt};
 
@@ -16,12 +16,16 @@ pub async fn ingest_feed(mut ingest: IngestState, start_at_time: &'static str) {
 
     pin_mut!(feed_events);
 
+    let mutex = ingest.damn_mutex.clone();
     while let Some(feed_event) = feed_events.next().await {
+        let lock = mutex.lock().await;
         let feed_event_time = feed_event.created;
         // Doing a "manual borrow" of ingest because I can't figure out how to please the borrow
         // checker with a proper borrow
         ingest = apply_timed_events_until(ingest, feed_event_time).await;
         ingest = apply_feed_event(ingest, feed_event).await;
+
+        std::mem::drop(lock); // Needs to be dropped before wait_for_chron_ingest
 
         wait_for_chron_ingest(&mut ingest, feed_event_time).await
     }
@@ -62,13 +66,18 @@ fn apply_timed_event<EntityT: sim::Entity>(c: &mut PgConnection, ingest_id: i32,
 
 async fn apply_feed_event(ingest: IngestState, event: EventuallyEvent) -> IngestState {
     ingest.db.run(move |c| {
-        let from_event = add_feed_event(c, ingest.ingest_id, event.clone());
+        c.transaction(|| {
+            let from_event = add_feed_event(c, ingest.ingest_id, event.clone());
 
-        let mut state = FeedStateInterface::new(c, ingest.ingest_id, from_event, event.created);
+            let mut state = FeedStateInterface::new(c, ingest.ingest_id, from_event, event.created);
 
-        info!("Applying feed event {:?}", event);
-        event.apply(&mut state);
-    }).await;
+            info!("Applying feed event {:?}", event);
+            event.apply(&mut state);
+
+            Ok::<_, diesel::result::Error>(())
+        })
+    }).await
+        .expect("Ingest failed");
 
     ingest
 }

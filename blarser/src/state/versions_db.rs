@@ -115,6 +115,7 @@ pub async fn add_initial_versions(conn: &BlarserDbConn, ingest_id: i32, start_ti
 }
 
 pub fn get_version_with_next_timed_event(c: &mut PgConnection, ingest_id: i32, before: DateTime<Utc>) -> Option<(String, serde_json::Value, DateTime<Utc>)> {
+    info!("DBG get_version_with_next_timed_event");
     use crate::schema::versions::dsl as versions;
     use crate::schema::versions_parents::dsl as parents;
     use crate::schema::events::dsl as events;
@@ -139,6 +140,7 @@ pub fn get_version_with_next_timed_event(c: &mut PgConnection, ingest_id: i32, b
 }
 
 pub fn get_current_versions(c: &PgConnection, ingest_id: i32, entity_type: &str, entity_id: Option<Uuid>) -> Vec<(i32, serde_json::Value, DateTime<Utc>)> {
+    info!("DBG get_current_versions");
     use crate::schema::versions::dsl as versions;
     use crate::schema::versions_parents::dsl as parents;
     use crate::schema::events::dsl as events;
@@ -167,6 +169,7 @@ pub fn get_current_versions(c: &PgConnection, ingest_id: i32, entity_type: &str,
 }
 
 pub fn get_possible_versions_at(c: &PgConnection, ingest_id: i32, entity_type: &str, entity_id: Option<Uuid>, at_time: DateTime<Utc>) -> Vec<(i32, serde_json::Value, DateTime<Utc>)> {
+    info!("DBG get_possible_versions_at");
     // Diesel doesn't support having the same table appear multiple times in a query, but I need to
     // have a version and its child (or parent, depending on how you look at things) in the query so
     // I can check that one is before at_time and the other is after. Rather than drop down to raw
@@ -201,6 +204,7 @@ pub fn get_possible_versions_at(c: &PgConnection, ingest_id: i32, entity_type: &
 }
 
 pub fn save_versions<EntityT: sim::Entity>(c: &PgConnection, ingest_id: i32, from_event: i32, start_time: DateTime<Utc>, successors: Vec<(EntityT, Vec<i32>)>) -> Vec<i32> {
+    info!("DBG save_versions");
     let (new_versions, parents): (Vec<_>, Vec<_>) = successors.into_iter().map(|(entity, parents)| {
         let next_timed_event = entity.next_timed_event(start_time)
             .map(|event| event.time);
@@ -244,6 +248,7 @@ pub fn save_versions<EntityT: sim::Entity>(c: &PgConnection, ingest_id: i32, fro
 }
 
 pub fn get_recently_updated_entities(c: &PgConnection, ingest_id: i32, count: i64) -> QueryResult<Vec<(String, Uuid, serde_json::Value)>> {
+    info!("DBG get_recently_updated_entities");
     use crate::schema::versions::dsl as versions;
     use crate::schema::versions_parents::dsl as parents;
     use crate::schema::events::dsl as events;
@@ -262,6 +267,7 @@ pub fn get_recently_updated_entities(c: &PgConnection, ingest_id: i32, count: i6
 }
 
 pub fn get_entity_debug(c: &PgConnection, ingest_id: i32, entity_id: Uuid) -> QueryResult<Vec<(Version, Event, Vec<Parent>)>> {
+    info!("DBG get_entity_debug");
     use crate::schema::versions::dsl as versions;
     use crate::schema::events::dsl as events;
     let (versions, events): (Vec<Version>, Vec<Event>) = versions::versions
@@ -282,6 +288,7 @@ pub fn get_entity_debug(c: &PgConnection, ingest_id: i32, entity_id: Uuid) -> Qu
 }
 
 pub fn get_events_for_entity_after(c: &PgConnection, ingest_id: i32, entity_type: &str, entity_id: Uuid, start_time: DateTime<Utc>) -> QueryResult<Vec<Event>> {
+    info!("DBG get_events_for_entity_after");
     use crate::schema::versions::dsl as versions;
     use crate::schema::events::dsl as events;
 
@@ -302,6 +309,7 @@ pub fn get_events_for_entity_after(c: &PgConnection, ingest_id: i32, entity_type
 }
 
 pub fn delete_versions_for_entity_after(c: &PgConnection, ingest_id: i32, entity_type: &str, entity_id: Uuid, start_time: DateTime<Utc>) -> QueryResult<usize> {
+    info!("DBG delete_versions_for_entity_after");
     use crate::schema::versions::dsl as versions;
     use crate::schema::events::dsl as events;
 
@@ -319,6 +327,7 @@ pub fn delete_versions_for_entity_after(c: &PgConnection, ingest_id: i32, entity
 
 
 pub fn terminate_versions(c: &PgConnection, to_update: Vec<i32>, reason: String) -> QueryResult<()> {
+    info!("DBG terminate_versions");
     use crate::schema::versions::dsl as versions;
 
     diesel::update(versions::versions.filter(versions::id.eq_any(to_update)))

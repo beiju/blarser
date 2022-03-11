@@ -98,25 +98,12 @@ impl<'conn> FeedStateInterface<'conn> {
 
 fn read_entity_common<EntityT: sim::Entity, ReadT, Reader>(c: &PgConnection, ingest_id: i32, at_time: DateTime<Utc>, id: Option<Uuid>, reader: Reader) -> Vec<ReadT> where ReadT: Eq, Reader: Fn(EntityT) -> ReadT {
     let mut unique_vals = Vec::new();
-    let versions = versions_db::get_current_versions(c, ingest_id, EntityT::name(), id);
+    let versions = versions_db::get_possible_versions_at(c, ingest_id, EntityT::name(), id, at_time);
 
     assert!(!versions.is_empty(),
             "Error: There are no versions for the requested entity");
 
     for (_, version_json, version_time) in versions {
-        //
-        //
-        // Oops.
-        //
-        // I know why this fails. It's because I replaced get_versions_at_time (or whatever) with
-        // get_current_versions. That doesn't work when entity A gets a chron update, so it gets
-        // rolled back in time, then the events from it need to be re-played, and those events need
-        // to read data from entity B, which has not been rolled back in time. At least I put the
-        // assert in! Solution is simple, just go back in the git history and bring back
-        // get_versions_at_time.
-        //
-        //
-        //
         assert!(version_time <= at_time);
         let version: EntityT = serde_json::from_value(version_json)
             .expect("Couldn't deserialize stored entity version");

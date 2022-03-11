@@ -1,8 +1,8 @@
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex as StdMutex};
 use chrono::{DateTime, Utc};
 use diesel::{insert_into, RunQueryDsl};
 use rocket::info;
-use tokio::sync::{OnceCell, watch};
+use tokio::sync::{OnceCell, watch, Mutex as TokioMutex};
 
 use tokio::task::JoinHandle;
 
@@ -15,8 +15,8 @@ const BLARSER_START: &str = "2021-12-06T15:00:00Z";
 
 pub struct IngestTask {
     latest_ingest_id: OnceCell<i32>,
-    feed_task: Mutex<Option<JoinHandle<()>>>,
-    chron_task: Mutex<Option<JoinHandle<()>>>,
+    feed_task: StdMutex<Option<JoinHandle<()>>>,
+    chron_task: StdMutex<Option<JoinHandle<()>>>,
 }
 
 pub struct IngestState {
@@ -24,14 +24,15 @@ pub struct IngestState {
     pub db: BlarserDbConn,
     pub notify_progress: watch::Sender<DateTime<Utc>>,
     pub receive_progress: watch::Receiver<DateTime<Utc>>,
+    pub damn_mutex: Arc<TokioMutex<()>>,
 }
 
 impl IngestTask {
     pub fn new() -> IngestTask {
         IngestTask {
             latest_ingest_id: OnceCell::new(),
-            feed_task: Mutex::new(None),
-            chron_task: Mutex::new(None)
+            feed_task: StdMutex::new(None),
+            chron_task: StdMutex::new(None)
         }
     }
 
@@ -57,11 +58,13 @@ impl IngestTask {
         let (send_feed_progress, recv_feed_progress) = watch::channel(blarser_start);
         let (send_chron_progress, recv_chron_progress) = watch::channel(blarser_start);
 
+        let mutex = Arc::new(TokioMutex::new(()));
         let feed_ingest = IngestState {
             ingest_id,
             db: feed_db,
             notify_progress: send_feed_progress,
             receive_progress: recv_chron_progress,
+            damn_mutex: mutex.clone()
         };
 
         let mut chron_ingest = IngestState {
@@ -69,6 +72,7 @@ impl IngestTask {
             db: chron_db,
             notify_progress: send_chron_progress,
             receive_progress: recv_feed_progress,
+            damn_mutex: mutex
         };
 
         let start_time_parsed = DateTime::parse_from_rfc3339(BLARSER_START)
