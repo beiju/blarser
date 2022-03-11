@@ -36,7 +36,7 @@ impl Display for Conflict {
 }
 
 pub trait PartialInformationCompare: Sized + Debug + Serialize {
-    type Raw: 'static + for<'de> Deserialize<'de> + Serialize + Debug + Send;
+    type Raw: 'static + for<'de> Deserialize<'de> + Serialize + Debug + Send + Sync + Clone;
     type Diff<'d>: PartialInformationDiff<'d > where Self: 'd;
 
     fn diff<'d>(&'d self, observed: &'d Self::Raw, time: DateTime<Utc>) -> Self::Diff<'d>;
@@ -54,7 +54,7 @@ pub struct HashMapDiff<'d, KeyT, ValT: PartialInformationCompare> {
 }
 
 impl<K, V> PartialInformationCompare for HashMap<K, V>
-    where K: 'static + Debug + Eq + Hash + Clone + for<'de> Deserialize<'de> + Serialize + Send,
+    where K: 'static + Debug + Eq + Hash + Clone + for<'de> Deserialize<'de> + Serialize + Send + Sync,
           V: 'static + PartialInformationCompare {
     type Raw = HashMap<K, V::Raw>;
     type Diff<'d> = HashMapDiff<'d, K, V>;

@@ -131,7 +131,7 @@ pub enum RangedDiff<'d, T> {
 }
 
 impl<T> PartialInformationCompare for Ranged<T>
-    where T: 'static + Clone + Debug + PartialOrd + for<'de> Deserialize<'de> + Serialize + Send {
+    where T: 'static + Clone + Debug + PartialOrd + for<'de> Deserialize<'de> + Serialize + Send + Sync {
     type Raw = T;
     type Diff<'d> = RangedDiff<'d, T>;
 

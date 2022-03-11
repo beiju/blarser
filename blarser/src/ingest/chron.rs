@@ -7,6 +7,7 @@ use rocket::{info};
 use uuid::Uuid;
 use itertools::Itertools;
 use tokio::sync::oneshot;
+use thiserror::Error;
 
 use crate::api::{chronicler, ChroniclerItem};
 use crate::ingest::task::IngestState;
@@ -106,6 +107,15 @@ pub async fn ingest_chron(mut ingest: IngestState, start_at_time: &'static str) 
     }
 }
 
+#[derive(Debug, Error)]
+enum IngestError {
+    #[error("Needs approval: {0}")]
+    NeedsApproval(String),
+
+    #[error(transparent)]
+    DieselError(#[from] diesel::result::Error),
+}
+
 async fn ingest_update<EntityT: 'static + sim::Entity>(ingest: &mut IngestState, item: ChroniclerItem) {
     let entity_raw: EntityT::Raw = serde_json::from_value(item.data)
         .expect("Error deserializing raw entity");
@@ -117,24 +127,53 @@ async fn ingest_update<EntityT: 'static + sim::Entity>(ingest: &mut IngestState,
     wait_for_feed_ingest(ingest, latest).await;
 
     let _lock = ingest.damn_mutex.lock().await;
-    let approval = ingest.db.run(move |c| {
-        c.transaction(|| {
-            let approval = do_ingest::<EntityT>(c, ingest_id, earliest, latest, item.valid_from, item.entity_id, entity_raw);
+    // I can't find a way to do a proper borrow of entity_raw, so I'm just moving it through the
+    // async tree
+    let (approval, entity_raw) = ingest.db.run(move |c| {
+        let approval_result = c.transaction(|| {
+            do_ingest::<EntityT>(c, ingest_id, earliest, latest, item.valid_from, item.entity_id, &entity_raw, false)
+        });
 
-            Ok::<_, diesel::result::Error>(approval)
-        })
-    }).await.unwrap();
-
-    if let Some(approval) = approval {
-        let (send, recv) = oneshot::channel();
-        {
-            let mut pending_approvals = ingest.pending_approvals.lock().unwrap();
-            pending_approvals.insert(approval, send);
+        if let Err(IngestError::NeedsApproval(approval)) = approval_result {
+            (Some(approval), entity_raw)
+        } else {
+            approval_result.expect("Error re-doing ingest");
+            (None, entity_raw)
         }
-        let approval_result = recv.await
-            .expect("Channel closed while awaiting approval");
-        info!("Approval {}", approval_result);
-        todo!()
+    }).await;
+
+    if let Some(message) = approval {
+        let approval = ingest.db.run(move |c| {
+            get_approval(c, EntityT::name(), item.entity_id, item.valid_from, &message)
+        }).await
+            .expect("Error saving approval to db");
+
+        let approved = match approval {
+            ApprovalState::Pending(approval_id) => {
+                let (send, recv) = oneshot::channel();
+                {
+                    let mut pending_approvals = ingest.pending_approvals.lock().unwrap();
+                    pending_approvals.insert(approval_id, send);
+                }
+                recv.await
+                    .expect("Channel closed while awaiting approval")
+            }
+            ApprovalState::Approved(_) => { true }
+            ApprovalState::Rejected => { false }
+        };
+
+        if approved {
+            ingest.db.run(move |c| {
+                c.transaction(|| {
+                    do_ingest::<EntityT>(c, ingest_id, earliest, latest, item.valid_from, item.entity_id, &entity_raw, true)
+                        .expect("Ingest failed even with force=true");
+
+                    Ok::<_, diesel::result::Error>(())
+                })
+            }).await.unwrap();
+        } else {
+            panic!("Approval rejected")
+        }
     }
 }
 
@@ -145,8 +184,9 @@ fn do_ingest<EntityT: 'static + sim::Entity>(
     end_time: DateTime<Utc>,
     perceived_at: DateTime<Utc>,
     entity_id: Uuid,
-    entity_raw: EntityT::Raw
-) -> Option<i32> {
+    entity_raw: &EntityT::Raw,
+    force: bool,
+) -> Result<(), IngestError> {
     info!("Placing {} {} between {} and {}", EntityT::name(), entity_id, start_time, end_time);
 
     // The order for this is important! First get events by reading the versions after start_time,
@@ -180,7 +220,7 @@ fn do_ingest<EntityT: 'static + sim::Entity>(
 
     for event in events {
         let event_time = event.event_time;
-        versions = advance_version(c, ingest_id, versions, event, event_id, &entity_raw, entity_id, observation_event.applied_at, end_time);
+        versions = advance_version(c, ingest_id, versions, event, event_id, entity_raw, entity_id, observation_event.applied_at, end_time, force);
         observation_event.applied_at = event_time;
         event_id = add_chron_event(c, ingest_id, observation_event.clone());
     }
@@ -192,14 +232,17 @@ fn do_ingest<EntityT: 'static + sim::Entity>(
         for (already_applied, version_id, mut entity) in versions {
             if already_applied {
                 any_applied = true;
-            } else {
-                let conflicts = entity.observe(&entity_raw);
+            } else if !force {
+                let conflicts = entity.observe(entity_raw);
                 if conflicts.is_empty() {
                     any_applied = true;
                     last_successors.add_successor(version_id, entity);
                 } else {
                     info!("Not applying observation because of conflicts: \n- {}", conflicts.into_iter().map(|c| c.to_string()).join("\n- "))
                 }
+            } else {
+                any_applied = true;
+                last_successors.add_successor(version_id, EntityT::from_raw((*entity_raw).clone()));
             }
         }
 
@@ -208,22 +251,14 @@ fn do_ingest<EntityT: 'static + sim::Entity>(
         any_applied = versions.iter().any(|(applied, _, _)| *applied);
     }
 
-
     if !any_applied {
-        let approval_message = "Couldn't save"; // TODO
+        let approval_message = "Couldn't save";
+        // TODO
         info!("Need approval for {} {}: {}", EntityT::name(), entity_id, approval_message);
-        let approval = get_approval(c, EntityT::name(), entity_id, perceived_at, approval_message)
-            .expect("Error saving approval");
-        match approval {
-            ApprovalState::Pending(approval_id) => { Some(approval_id) }
-            ApprovalState::Approved(_explanation) => { todo!() }
-            ApprovalState::Rejected => {
-                panic!("Hit rejected approval")
-            }
-        }
+        Err(IngestError::NeedsApproval(approval_message.to_string()))
     } else {
         info!("Finished ingest for {} {}", EntityT::name(), entity_id);
-        None
+        Ok(())
     }
 }
 
@@ -253,7 +288,8 @@ fn advance_version<EntityT: 'static + sim::Entity>(
     entity_raw: &EntityT::Raw,
     entity_id: Uuid,
     earliest_time: DateTime<Utc>,
-    end_time: DateTime<Utc>
+    end_time: DateTime<Utc>,
+    force: bool,
 ) -> Vec<(bool, i32, EntityT)> {
     let mut new_entities = Vec::new();
 
@@ -267,12 +303,16 @@ fn advance_version<EntityT: 'static + sim::Entity>(
         // If we haven't already applied the observation, and it's valid to apply the observation
         // here, add the branch where we apply the observation here
         if !observation_already_applied {
-            let mut entity_after_observation = entity.clone();
-            let conflicts = entity_after_observation.observe(entity_raw);
-            if conflicts.is_empty() {
-                versions_from_observation.add_successor(version_id, entity_after_observation);
+            if force {
+                versions_from_observation.add_successor(version_id, EntityT::from_raw(entity_raw.clone()));
             } else {
-                info!("Not applying observation because of conflicts: \n- {}", conflicts.into_iter().map(|c| c.to_string()).join("\n- "))
+                let mut entity_after_observation = entity.clone();
+                let conflicts = entity_after_observation.observe(entity_raw);
+                if conflicts.is_empty() {
+                    versions_from_observation.add_successor(version_id, entity_after_observation);
+                } else {
+                    info!("Not applying observation because of conflicts: \n- {}", conflicts.into_iter().map(|c| c.to_string()).join("\n- "))
+                }
             }
         }
 
@@ -296,8 +336,8 @@ fn advance_version<EntityT: 'static + sim::Entity>(
     let saved_version_ids = save_versions(c, ingest_id, update_id, earliest_time, versions_from_observation.clone().into_inner());
     new_entities.extend(
         versions_from_observation.into_inner().into_iter()
-                .zip_eq(saved_version_ids)
-                .map(|((entity, _), id)| (true, id, entity))
+            .zip_eq(saved_version_ids)
+            .map(|((entity, _), id)| (true, id, entity))
     );
 
     let mut state: EntityStateInterface<EntityT> = EntityStateInterface::new(c, ingest_id, event_time, entity_id, new_entities);
