@@ -182,7 +182,7 @@ fn walk(state: &impl StateInterface, event: &EventuallyEvent) {
         let batter_mod = game.team_at_bat().batter_mod.clone();
         game.push_base_runner(batter_id, batter_name, batter_mod, Base::First);
         game.end_at_bat();
-        game.game_update_common(&event);
+        game.game_update_pitch(&event);
 
         Ok(vec![game])
     });
@@ -289,7 +289,7 @@ fn home_run(state: &impl StateInterface, event: &EventuallyEvent) {
         parse::parse_home_run(&batter_name, &event.description)
             .expect("Error parsing HomeRun description");
 
-        game.game_update_common(event);
+        game.game_update_pitch(event);
         game.end_at_bat();
 
         for runner_id in game.base_runners.clone() {
@@ -322,7 +322,7 @@ fn hit(state: &impl StateInterface, event: &EventuallyEvent) {
             game.score_runner(runner_id);
         }
 
-        game.game_update_common(event);
+        game.game_update_pitch(event);
         game.advance_runners(hit_type as i32 + 1);
         let batter_mod = game.team_at_bat().batter_mod.clone();
         game.push_base_runner(batter_id, batter_name, batter_mod, hit_type);
@@ -394,7 +394,7 @@ fn strike(state: &impl StateInterface, event: &EventuallyEvent) {
     let game_id = event.game_id().expect(concat!("Strike event must have a game id"));
     state.with_game(game_id, |mut game| {
         game.at_bat_strikes += 1;
-        game.game_update_common(event);
+        game.game_update_pitch(event);
 
         Ok(vec![game])
     })
@@ -404,7 +404,7 @@ fn ball(state: &impl StateInterface, event: &EventuallyEvent) {
     let game_id = event.game_id().expect(concat!("Ball event must have a game id"));
     state.with_game(game_id, |mut game| {
         game.at_bat_balls += 1;
-        game.game_update_common(event);
+        game.game_update_pitch(event);
 
         Ok(vec![game])
     })
@@ -416,7 +416,7 @@ fn foul_ball(state: &impl StateInterface, event: &EventuallyEvent) {
         if game.at_bat_strikes < 2 {
             game.at_bat_strikes += 1;
         }
-        game.game_update_common(event);
+        game.game_update_pitch(event);
 
         Ok(vec![game])
     })
@@ -504,8 +504,6 @@ fn storm_warning(state: &impl StateInterface, event: &EventuallyEvent) {
     let game_id = event.game_id().expect(concat!("StormWarning event must have a game id"));
     state.with_game(game_id, |mut game| {
         game.game_start_phase = 11; // sure why not
-        // TODO Reinstate this after implementing cached sub-objects
-        // game.state.snowfall_events = Some(0);
 
         game.game_update_common(event);
 
@@ -524,7 +522,7 @@ fn snowflakes(state: &impl StateInterface, event: &EventuallyEvent) {
     state.with_game(game_id, |mut game| {
         game.game_update_common(event);
         game.game_start_phase = 20;
-        // TODO Remove this once the todo in storm_warning is fixed
+
         if game.state.snowfall_events.is_none() {
             game.state.snowfall_events = Some(0)
         }

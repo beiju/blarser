@@ -8,7 +8,7 @@ use uuid::Uuid;
 use partial_information::{MaybeKnown, PartialInformationCompare, Ranged};
 use partial_information_derive::PartialInformationCompare;
 
-use crate::api::{EventType, EventuallyEvent};
+use crate::api::{EventType, EventuallyEvent, Weather};
 use crate::parse::{Base};
 use crate::sim::{Entity};
 use crate::sim::entity::{EarliestEvent, TimedEvent, TimedEventType};
@@ -193,6 +193,14 @@ impl Entity for Game {
 }
 
 impl Game {
+    pub(crate) fn game_update_pitch(&mut self, first_event: &EventuallyEvent) {
+        self.game_update_common(first_event);
+
+        if self.weather == (Weather::Snowy as i32) && self.state.snowfall_events.is_none() {
+            self.state.snowfall_events = Some(0);
+        }
+    }
+
     pub(crate) fn game_update_common(&mut self, first_event: &EventuallyEvent) {
         let events = &first_event.metadata.siblings;
 
@@ -316,7 +324,7 @@ impl Game {
     }
 
     pub(crate) fn out(&mut self, event: &EventuallyEvent, outs_added: i32) {
-        self.game_update_common(event);
+        self.game_update_pitch(event);
 
         let end_of_half_inning = self.half_inning_outs + outs_added == 3;
         if end_of_half_inning {
@@ -467,7 +475,7 @@ impl Game {
             self.bases_occupied[baserunner_index] += 1;
         }
 
-        self.game_update_common(event);
+        self.game_update_pitch(event);
 
     }
 
@@ -475,7 +483,7 @@ impl Game {
         let baserunner_index = self.get_baserunner_with_id(thief_id, base);
         self.remove_base_runner(baserunner_index);
 
-        self.game_update_common(event);
+        self.game_update_pitch(event);
 
         self.half_inning_outs += 1;
         if self.half_inning_outs >= self.team_at_bat().outs {
