@@ -8,7 +8,7 @@ async function addEntityView(entityType, entityId) {
     const nodeRadius = 20;
     const layout = d3
         .sugiyama() // base layout
-        .decross(d3.decrossOpt()) // minimize number of crossings
+        // .decross(d3.decrossOpt()) // minimize number of crossings
         .nodeSize((node) => [(node ? 3.6 : 0.25) * nodeRadius, 3 * nodeRadius]); // set node size instead of constraining to fit
     const {width, height} = layout(dag);
 
@@ -51,15 +51,16 @@ async function addEntityView(entityType, entityId) {
         .attr("transform", ({x, y}) => `translate(${x}, ${y})`)
         .attr("title", ({data}) => data.event)
         .attr("data-bs-content", ({data}) => (
-            (data.terminated ? `<p>Terminated: ${data.terminated}</p>` : "")
-            + `<pre class="tooltip-diff">${data.diff}</pre>`
+            (data.terminated ? `<p>Terminated: ${data.terminated}</p>` : "") +
+            (data.observedBy ? `<p>Observed by: ${data.observedBy}</p>` : "") +
+            `<pre class="tooltip-diff">${data.diff}</pre>`
         ));
 
     // Plot node circles
     nodes
         .append("circle")
         .attr("r", nodeRadius)
-        .attr("fill", (n) => n.data.terminated ? "red" : "blue");
+        .attr("fill", (n) => n.data.terminated ? "red" : (n.data.observedBy ? "green" : "blue"));
 
     // Add text to nodes
     nodes

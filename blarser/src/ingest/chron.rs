@@ -201,7 +201,7 @@ fn do_ingest<EntityT: 'static + sim::Entity>(
 
         if event.event_time <= end_time {
             to_terminate = Some(versions.iter().map(|(v, _)| v.id).collect());
-            observe_generation::<EntityT>(&mut new_generation, versions, entity_raw);
+            observe_generation::<EntityT>(&mut new_generation, versions, entity_raw, perceived_at);
         }
 
         advance_generation(c, ingest_id, &mut new_generation, EntityT::name(), entity_id, event, prev_generation);
@@ -221,18 +221,18 @@ fn do_ingest<EntityT: 'static + sim::Entity>(
 
 fn advance_generation(c: &PgConnection, ingest_id: i32, new_generation: &mut MergedSuccessors<NewVersion>, entity_type: &'static str, entity_id: Uuid, event: Event, prev_generation: Vec<Version>) {
     for prev_version in prev_generation {
-        let next_timed_event = prev_version.next_timed_event;
         let parent = prev_version.id;
 
         let state = EntityStateInterface::new(c, event.event_time, prev_version);
         event.apply(&state);
-        for successor in state.get_successors() {
+        for (successor, next_timed_event) in state.get_successors() {
             let new_version = NewVersion {
                 ingest_id,
                 entity_type,
                 entity_id,
                 data: successor,
                 from_event: event.id,
+                observed_by: None,
                 next_timed_event,
             };
 
@@ -241,9 +241,9 @@ fn advance_generation(c: &PgConnection, ingest_id: i32, new_generation: &mut Mer
     }
 }
 
-fn observe_generation<EntityT: sim::Entity>(new_generation: &mut MergedSuccessors<NewVersion>, versions: Vec<(Version, Vec<Parent>)>, entity_raw: &EntityT::Raw) {
+fn observe_generation<EntityT: sim::Entity>(new_generation: &mut MergedSuccessors<NewVersion>, versions: Vec<(Version, Vec<Parent>)>, entity_raw: &EntityT::Raw, perceived_at: DateTime<Utc>) {
     for (version, parents) in versions {
-        match observe_entity::<EntityT>(version, entity_raw) {
+        match observe_entity::<EntityT>(version, entity_raw, perceived_at) {
             Ok(new_version) => {
                 let parent_ids = parents.into_iter()
                     .map(|parent| parent.parent)
@@ -258,7 +258,7 @@ fn observe_generation<EntityT: sim::Entity>(new_generation: &mut MergedSuccessor
     }
 }
 
-fn observe_entity<EntityT: sim::Entity>(version: Version, entity_raw: &EntityT::Raw) -> Result<NewVersion, Vec<Conflict>> {
+fn observe_entity<EntityT: sim::Entity>(version: Version, entity_raw: &EntityT::Raw, perceived_at: DateTime<Utc>) -> Result<NewVersion, Vec<Conflict>> {
     let mut entity: EntityT = serde_json::from_value(version.data)
         .expect("Couldn't parse stored version data");
 
@@ -274,6 +274,7 @@ fn observe_entity<EntityT: sim::Entity>(version: Version, entity_raw: &EntityT::
         data: serde_json::to_value(entity)
             .expect("Failed to serialize entity"),
         from_event: version.from_event,
+        observed_by: Some(perceived_at),
         next_timed_event: version.next_timed_event,
     })
 }

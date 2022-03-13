@@ -20,6 +20,7 @@ pub struct NewVersion {
     pub entity_id: Uuid,
     pub data: serde_json::Value,
     pub from_event: i32,
+    pub observed_by: Option<DateTime<Utc>>,
     pub next_timed_event: Option<DateTime<Utc>>,
 }
 
@@ -30,6 +31,7 @@ impl PartialEq for NewVersion {
             self.entity_id == other.entity_id &&
             self.data == other.data &&
             self.from_event == other.from_event &&
+            self.observed_by == other.observed_by &&
             self.next_timed_event == other.next_timed_event
     }
 }
@@ -45,6 +47,7 @@ pub struct Version {
     pub terminated: Option<String>,
     pub data: serde_json::Value,
     pub from_event: i32,
+    pub observed_by: Option<DateTime<Utc>>,
     pub next_timed_event: Option<DateTime<Utc>>,
 }
 
@@ -95,6 +98,7 @@ impl NewVersion {
             data: serde_json::to_value(entity)
                 .expect("Failed to serialize PartialInformation entity"),
             from_event,
+            observed_by: Some(item.valid_from),
             next_timed_event,
         }
     }
@@ -224,6 +228,7 @@ pub fn save_versions_from_entities<EntityT: sim::Entity>(c: &PgConnection, inges
             data: serde_json::to_value(entity)
                 .expect("Failed to serialize new version"),
             from_event,
+            observed_by: None,
             next_timed_event,
         };
 

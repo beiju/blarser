@@ -22,7 +22,7 @@ pub struct EntityStateInterface<'conn> {
     conn: &'conn PgConnection,
     at_time: DateTime<Utc>,
     version: Version,
-    successors: RefCell<Vec<serde_json::Value>>,
+    successors: RefCell<Vec<(serde_json::Value, Option<DateTime<Utc>>)>>,
 }
 
 type ApplyResult<EntityT> = Result<Vec<EntityT>, anyhow::Error>;
@@ -167,7 +167,7 @@ impl<'conn> EntityStateInterface<'conn> {
         }
     }
 
-    pub fn get_successors(self) -> Vec<serde_json::Value> {
+    pub fn get_successors(self) -> Vec<(serde_json::Value, Option<DateTime<Utc>>)> {
         self.successors.into_inner()
     }
 }
@@ -193,7 +193,9 @@ impl<'conn> StateInterface for EntityStateInterface<'conn> {
         match f(entity) {
             Ok(successors) => {
                 self.successors.borrow_mut().extend(successors.into_iter().map(|successor| {
-                    serde_json::to_value(successor).expect("Error serializing successor version")
+                    let next_timed_event = successor.next_timed_event(self.at_time).map(|e| e.time);
+                    let json = serde_json::to_value(successor).expect("Error serializing successor version");
+                    (json, next_timed_event)
                 }));
             }
             Err(_failure) => {

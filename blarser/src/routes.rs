@@ -186,5 +186,6 @@ fn build_json(prev_entity_str: &mut String, version: &Version, event: Event, ver
         "diff": diff_str,
         "parentIds": parents,
         "terminated": version.terminated,
+        "observedBy": version.observed_by,
     }))
 }

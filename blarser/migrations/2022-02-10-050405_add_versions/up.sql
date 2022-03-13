@@ -23,6 +23,8 @@ CREATE TABLE versions (
     data               JSONB NOT NULL,
     from_event         INT NOT NULL,
 
+    observed_by        TIMESTAMP WITH TIME ZONE,
+
     next_timed_event   TIMESTAMP WITH TIME ZONE,
 
     CONSTRAINT ingest_fk FOREIGN KEY(ingest_id) REFERENCES ingests(id) ON DELETE RESTRICT,
