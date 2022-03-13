@@ -279,7 +279,7 @@ pub fn get_recently_updated_entities(c: &PgConnection, ingest_id: i32, count: i6
         .get_results::<(String, Uuid, serde_json::Value)>(c)
 }
 
-pub fn get_entity_debug(c: &PgConnection, ingest_id: i32, entity_id: Uuid) -> QueryResult<Vec<(Version, Event, Vec<Parent>)>> {
+pub fn get_entity_debug(c: &PgConnection, ingest_id: i32, entity_type: &str, entity_id: Uuid) -> QueryResult<Vec<(Version, Event, Vec<Parent>)>> {
     use crate::schema::versions::dsl as versions;
     use crate::schema::events::dsl as events;
     let (versions, events): (Vec<Version>, Vec<Event>) = versions::versions
@@ -287,6 +287,7 @@ pub fn get_entity_debug(c: &PgConnection, ingest_id: i32, entity_id: Uuid) -> Qu
         // Is from the right ingest
         .filter(versions::ingest_id.eq(ingest_id))
         // Is the right entity
+        .filter(versions::entity_type.eq(entity_type))
         .filter(versions::entity_id.eq(entity_id))
         .get_results::<(Version, Event)>(c)?
         .into_iter()

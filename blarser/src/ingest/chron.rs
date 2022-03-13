@@ -193,17 +193,15 @@ fn do_ingest<EntityT: 'static + sim::Entity>(
     let (events, generations) = get_entity_update_tree(c, ingest_id, EntityT::name(), entity_id, start_time)
         .expect("Error getting events for Chronicler ingest");
 
-    let mut terminate_generation = None;
+    let mut to_terminate = None;
 
     let mut prev_generation = Vec::new();
     for (event, versions) in events.into_iter().zip(generations) {
         let mut new_generation = MergedSuccessors::new();
 
-        if event.event_time < end_time {
-            observe_generation::<EntityT>(&mut new_generation, versions, entity_raw)
-        } else if terminate_generation.is_none() {
-            // The first generation after the end of the placement window (end_time) gets terminated
-            terminate_generation = Some(versions);
+        if event.event_time <= end_time {
+            to_terminate = Some(versions.iter().map(|(v, _)| v.id).collect());
+            observe_generation::<EntityT>(&mut new_generation, versions, entity_raw);
         }
 
         advance_generation(c, ingest_id, &mut new_generation, EntityT::name(), entity_id, event, prev_generation);
@@ -212,10 +210,9 @@ fn do_ingest<EntityT: 'static + sim::Entity>(
             .expect("Error saving updated versions");
     }
 
-    if let Some(to_terminate) = terminate_generation {
-        terminate_versions(c, to_terminate.iter().map(|(v, _)| v.id).collect(),
-                           format!("Failed to apply observation at {}", perceived_at))
-            .expect("Failed to terminate versions");
+    if let Some(to_terminate) = to_terminate {
+        terminate_versions(c, to_terminate,format!("Failed to apply observation at {}", perceived_at))
+                .expect("Failed to terminate versions");
     }
 
     // todo!()

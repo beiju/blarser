@@ -14,7 +14,7 @@
 
                     <ul class="list-unstyled" id="entity-list">
                         {{#each entities}}
-                            <li data-entity-id="{{id}}">
+                            <li data-entity-type="{{type}}" data-entity-id="{{id}}">
                                 <label>
                                     <input type="checkbox" name="{{id}}_debug" />
                                     {{name}}

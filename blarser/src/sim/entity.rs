@@ -48,13 +48,8 @@ pub trait Entity: for<'de> Deserialize<'de> + PartialInformationCompare + Clone 
 }
 
 pub fn entity_description(entity_type: &str, entity_json: serde_json::Value) -> String {
-    match entity_type {
-        "sim" => entity_description_typed::<sim::Sim>(entity_json),
-        "game" => entity_description_typed::<sim::Game>(entity_json),
-        "player" => entity_description_typed::<sim::Player>(entity_json),
-        "team" => entity_description_typed::<sim::Team>(entity_json),
-        other => format!("({})", other),
-    }
+    entity_dispatch!(entity_type => entity_description_typed(entity_json);
+                     other => format!("({})", other))
 }
 
 fn entity_description_typed<EntityT: Entity>(entity_json: serde_json::Value) -> String {
@@ -66,7 +61,7 @@ fn entity_description_typed<EntityT: Entity>(entity_json: serde_json::Value) -> 
 // Helper used in next_timed_event
 pub struct EarliestEvent {
     limit: DateTime<Utc>,
-    lowest: Option<TimedEvent>
+    lowest: Option<TimedEvent>,
 }
 
 impl EarliestEvent {
@@ -76,7 +71,7 @@ impl EarliestEvent {
 
     pub fn push(&mut self, new_event: TimedEvent) {
         // The = is important
-        if new_event.time <= self.limit { return }
+        if new_event.time <= self.limit { return; }
 
         match &self.lowest {
             None => {

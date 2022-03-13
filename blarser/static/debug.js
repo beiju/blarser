@@ -1,8 +1,8 @@
 let tooltip;
 
-async function addEntityView(entityId) {
+async function addEntityView(entityType, entityId) {
     // fetch data and render
-    const resp = await fetch("/debug/" + entityId);
+    const resp = await fetch(`/debug/${entityType}/${entityId}`);
     const data = await resp.json();
     const dag = d3.dagStratify()(data);
     const nodeRadius = 20;
@@ -20,14 +20,6 @@ async function addEntityView(entityId) {
         .attr("id", entityId)
         .attr("viewBox", [0, 0, width, height].join(" "))
         .attr("width", width);
-    const defs = svgSelection.append("defs"); // For gradients
-
-    const steps = dag.size();
-    const interp = d3.interpolateRainbow;
-    const colorMap = new Map();
-    for (const [i, node] of dag.idescendants().entries()) {
-        colorMap.set(node.data.id, interp(i / steps));
-    }
 
     // How to draw edges
     const line = d3
@@ -46,27 +38,7 @@ async function addEntityView(entityId) {
         .attr("d", ({points}) => line(points))
         .attr("fill", "none")
         .attr("stroke-width", 3)
-        .attr("stroke", ({source, target}) => {
-            // encodeURIComponents for spaces, hope id doesn't have a `--` in it
-            const gradId = encodeURIComponent(`${source.data.id}--${target.data.id}`);
-            const grad = defs
-                .append("linearGradient")
-                .attr("id", gradId)
-                .attr("gradientUnits", "userSpaceOnUse")
-                .attr("x1", source.x)
-                .attr("x2", target.x)
-                .attr("y1", source.y)
-                .attr("y2", target.y);
-            grad
-                .append("stop")
-                .attr("offset", "0%")
-                .attr("stop-color", colorMap.get(source.data.id));
-            grad
-                .append("stop")
-                .attr("offset", "100%")
-                .attr("stop-color", colorMap.get(target.data.id));
-            return `url(#${gradId})`;
-        });
+        .attr("stroke", "black");
 
     // Select nodes
     const nodes = svgSelection
@@ -78,13 +50,16 @@ async function addEntityView(entityId) {
         .attr("class", "version")
         .attr("transform", ({x, y}) => `translate(${x}, ${y})`)
         .attr("title", ({data}) => data.event)
-        .attr("data-bs-content", ({data}) => `<pre class="tooltip-diff">${data.diff}</pre>`);
+        .attr("data-bs-content", ({data}) => (
+            (data.terminated ? `<p>Terminated: ${data.terminated}</p>` : "")
+            + `<pre class="tooltip-diff">${data.diff}</pre>`
+        ));
 
     // Plot node circles
     nodes
         .append("circle")
         .attr("r", nodeRadius)
-        .attr("fill", (n) => colorMap.get(n.data.id));
+        .attr("fill", (n) => n.data.terminated ? "red" : "blue");
 
     // Add text to nodes
     nodes
@@ -126,9 +101,9 @@ document.addEventListener("DOMContentLoaded", function (event) {
         console.log("Checked entity id", li.dataset.entityId, checked);
 
         if (checked) {
-            addEntityView(li.dataset.entityId);
+            addEntityView(li.dataset.entityType, li.dataset.entityId);
         } else {
-            removeEntityView(li.dataset.entityId);
+            removeEntityView(li.dataset.entityType, li.dataset.entityId);
         }
     });
 });

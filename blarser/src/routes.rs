@@ -109,6 +109,7 @@ pub async fn debug(conn: BlarserDbConn, ingest: &State<IngestTask>) -> Result<Te
     #[derive(Serialize)]
     struct DebugEntityParams {
         name: String,
+        r#type: String,
         id: Uuid,
     }
 
@@ -124,6 +125,7 @@ pub async fn debug(conn: BlarserDbConn, ingest: &State<IngestTask>) -> Result<Te
         .into_iter()
         .map(|(entity_type, entity_id, entity_json)| DebugEntityParams {
             name: sim::entity_description(&entity_type, entity_json),
+            r#type: entity_type,
             id: entity_id,
         })
         .collect();
@@ -131,13 +133,13 @@ pub async fn debug(conn: BlarserDbConn, ingest: &State<IngestTask>) -> Result<Te
     Ok(Template::render("debug", DebugTemplateParams { entities }))
 }
 
-#[rocket::get("/debug/<entity_id>")]
-pub async fn entity_debug_json(conn: BlarserDbConn, ingest: &State<IngestTask>, entity_id: Uuid) -> Result<Value, ServerError> {
+#[rocket::get("/debug/<entity_type>/<entity_id>")]
+pub async fn entity_debug_json(conn: BlarserDbConn, ingest: &State<IngestTask>, entity_type: String, entity_id: Uuid) -> Result<Value, ServerError> {
     let ingest_id = ingest.latest_ingest()
         .ok_or(ServerError::InternalError(format!("There is no ingest yet")))?;
 
     let versions_info = conn.run(move |c| {
-        get_entity_debug(c, ingest_id, entity_id)
+        get_entity_debug(c, ingest_id, &entity_type, entity_id)
     }).await
         .map_err(|e| ServerError::InternalError(anyhow!(e).context("In entity debug json route").to_string()))?;
 
@@ -183,5 +185,6 @@ fn build_json(prev_entity_str: &mut String, version: &Version, event: Event, ver
         "event": event_str,
         "diff": diff_str,
         "parentIds": parents,
+        "terminated": version.terminated,
     }))
 }
