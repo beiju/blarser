@@ -6,7 +6,7 @@ use log::info;
 use uuid::Uuid;
 
 use crate::sim;
-use crate::state::versions_db;
+use crate::state::{Version, versions_db};
 use crate::state::merged_successors::MergedSuccessors;
 
 pub struct FeedStateInterface<'conn> {
@@ -18,13 +18,11 @@ pub struct FeedStateInterface<'conn> {
     // TODO: Cache parameters
 }
 
-pub struct EntityStateInterface<'conn, EntityT: sim::Entity> {
+pub struct EntityStateInterface<'conn> {
     conn: &'conn PgConnection,
-    ingest_id: i32,
     at_time: DateTime<Utc>,
-    entity_id: Uuid,
-    versions: Vec<(bool, i32, EntityT)>,
-    successors: RefCell<MergedSuccessors<(bool, EntityT)>>,
+    version: Version,
+    successors: RefCell<Vec<serde_json::Value>>,
 }
 
 type ApplyResult<EntityT> = Result<Vec<EntityT>, anyhow::Error>;
@@ -154,54 +152,52 @@ impl<'conn> StateInterface for FeedStateInterface<'conn> {
             todo!()
         }
 
-        versions_db::save_versions(&self.conn, self.ingest_id, self.from_event, self.at_time, all_successors.into_inner());
+        versions_db::save_versions_from_entities(&self.conn, self.ingest_id, self.from_event, self.at_time, all_successors.into_inner())
+            .expect("Error saving successors to database");
     }
 }
 
-impl<'conn, EntityT: sim::Entity> EntityStateInterface<'conn, EntityT> {
-    pub fn new(c: &'conn PgConnection, ingest_id: i32, at_time: DateTime<Utc>, entity_id: Uuid, versions: Vec<(bool, i32, EntityT)>) -> EntityStateInterface<'conn, EntityT> {
+impl<'conn> EntityStateInterface<'conn> {
+    pub fn new(c: &'conn PgConnection, at_time: DateTime<Utc>, version: Version) -> EntityStateInterface<'conn> {
         EntityStateInterface {
             conn: c,
-            ingest_id,
             at_time,
-            entity_id,
-            versions,
-            successors: RefCell::new(MergedSuccessors::new()),
+            version,
+            successors: RefCell::new(Vec::new()),
         }
     }
 
-    pub fn get_successors(self) -> Vec<((bool, EntityT), Vec<i32>)> {
-        self.successors.into_inner().into_inner()
+    pub fn get_successors(self) -> Vec<serde_json::Value> {
+        self.successors.into_inner()
     }
 }
 
-impl<'conn, MainEntityT: 'static + sim::Entity> StateInterface for EntityStateInterface<'conn, MainEntityT> {
+impl<'conn> StateInterface for EntityStateInterface<'conn> {
     fn read_entity<EntityT, ReadT, Reader>(&self, id: Option<Uuid>, reader: Reader) -> Vec<ReadT>
         where EntityT: sim::Entity, ReadT: Eq, Reader: Fn(EntityT) -> ReadT {
-        read_entity_common(self.conn, self.ingest_id, self.at_time, id, reader)
+        read_entity_common(self.conn, self.version.ingest_id, self.at_time, id, reader)
     }
 
     fn with_entity<EntityT: 'static + sim::Entity, F: Fn(EntityT) -> ApplyResult<EntityT>>(&self, id: Option<Uuid>, f: F) {
-        if id.map(|id| id != self.entity_id).unwrap_or(false) {
+        if EntityT::name() != self.version.entity_type {
             return
         }
 
-        for (a_bool, version_id, version) in &self.versions {
-            // Round-trip through Any to get a type cast
-            let version_any = version as &dyn Any;
-            if let Some(version) = version_any.downcast_ref::<EntityT>() {
-                match f(version.clone()) {
-                    Ok(successors) => {
-                        self.successors.borrow_mut().add_successors(*version_id, successors.into_iter().map(|successor| {
-                            let successor_any = &successor as &dyn Any;
-                            let successor = successor_any.downcast_ref::<MainEntityT>().unwrap();
-                            (*a_bool, successor.clone())
-                        }))
-                    }
-                    Err(_failure) => {
-                        todo!()
-                    }
-                }
+        if id.map(|id| id != self.version.entity_id).unwrap_or(false) {
+            return
+        }
+
+        let entity = serde_json::from_value(self.version.data.clone())
+            .expect("Couldn't deserialize stored entity data");
+
+        match f(entity) {
+            Ok(successors) => {
+                self.successors.borrow_mut().extend(successors.into_iter().map(|successor| {
+                    serde_json::to_value(successor).expect("Error serializing successor version")
+                }));
+            }
+            Err(_failure) => {
+                todo!()
             }
         }
 

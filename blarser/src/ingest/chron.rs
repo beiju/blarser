@@ -8,12 +8,13 @@ use uuid::Uuid;
 use itertools::Itertools;
 use tokio::sync::oneshot;
 use thiserror::Error;
+use partial_information::{Conflict, PartialInformationCompare};
 
 use crate::api::{chronicler, ChroniclerItem};
 use crate::ingest::task::IngestState;
 use crate::{sim, EntityStateInterface};
 use crate::ingest::approvals_db::{ApprovalState, get_approval};
-use crate::state::{ChronObservationEvent, Event, MergedSuccessors, add_chron_event, add_initial_versions, get_events_for_entity_after, delete_versions_for_entity_after, get_current_versions, save_versions, terminate_versions};
+use crate::state::{ChronObservationEvent, Event, MergedSuccessors, add_chron_event, add_initial_versions, get_events_for_entity_after, delete_versions_for_entity_after, get_current_versions, save_versions_from_entities, terminate_versions, get_possible_versions_at, get_entity_update_tree, Version, Parent, NewVersion, save_versions};
 use crate::sim::entity_dispatch;
 
 fn initial_state(start_at_time: &'static str) -> impl Stream<Item=(&'static str, ChroniclerItem)> {
@@ -189,77 +190,95 @@ fn do_ingest<EntityT: 'static + sim::Entity>(
 ) -> Result<(), IngestError> {
     info!("Placing {} {} between {} and {}", EntityT::name(), entity_id, start_time, end_time);
 
-    // The order for this is important! First get events by reading the versions after start_time,
-    // then delete the versions after start_time, then get the leaf versions which will now be the
-    // exact set of versions we need to start the ingest from.
-    let events = get_events_for_entity_after(c, ingest_id, EntityT::name(), entity_id, start_time)
+    let (events, generations) = get_entity_update_tree(c, ingest_id, EntityT::name(), entity_id, start_time)
         .expect("Error getting events for Chronicler ingest");
 
-    delete_versions_for_entity_after(c, ingest_id, EntityT::name(), entity_id, start_time)
-        .expect("Error deleting to-be-replaced versions");
+    let mut terminate_generation = None;
 
-    let mut versions: Vec<_> = get_current_versions(c, ingest_id, EntityT::name(), Some(entity_id))
-        .into_iter()
-        .map(|(version_id, value, version_time)| {
-            assert!(version_time <= start_time);
-            let entity: EntityT = serde_json::from_value(value)
-                .expect("Couldn't parse stored version");
-            (false, version_id, entity)
-        })
-        .collect();
-    info!("Applying {} events to {} versions", events.len(), versions.len());
+    let mut prev_generation = Vec::new();
+    for (event, versions) in events.into_iter().zip(generations) {
+        let mut new_generation = MergedSuccessors::new();
 
-    let mut observation_event = ChronObservationEvent {
-        entity_type: EntityT::name().to_string(),
-        entity_id,
-        perceived_at,
-        applied_at: start_time,
-    };
-
-    let mut event_id = add_chron_event(c, ingest_id, observation_event.clone());
-
-    for event in events {
-        let event_time = event.event_time;
-        versions = advance_version(c, ingest_id, versions, event, event_id, entity_raw, entity_id, observation_event.applied_at, end_time, force);
-        observation_event.applied_at = event_time;
-        event_id = add_chron_event(c, ingest_id, observation_event.clone());
-    }
-
-    let mut any_applied = false;
-    if observation_event.applied_at < end_time {
-        // Now need to apply to the latest version, after all events in this time range
-        let mut last_successors = MergedSuccessors::new();
-        for (already_applied, version_id, mut entity) in versions {
-            if already_applied {
-                any_applied = true;
-            } else if !force {
-                let conflicts = entity.observe(entity_raw);
-                if conflicts.is_empty() {
-                    any_applied = true;
-                    last_successors.add_successor(version_id, entity);
-                } else {
-                    info!("Not applying observation because of conflicts: \n- {}", conflicts.into_iter().map(|c| c.to_string()).join("\n- "))
-                }
-            } else {
-                any_applied = true;
-                last_successors.add_successor(version_id, EntityT::from_raw((*entity_raw).clone()));
-            }
+        if event.event_time < end_time {
+            observe_generation::<EntityT>(&mut new_generation, versions, entity_raw)
+        } else if terminate_generation.is_none() {
+            // The first generation after the end of the placement window (end_time) gets terminated
+            terminate_generation = Some(versions);
         }
 
-        save_versions(c, ingest_id, event_id, observation_event.applied_at, last_successors.into_inner());
-    } else {
-        any_applied = versions.iter().any(|(applied, _, _)| *applied);
+        advance_generation(c, ingest_id, &mut new_generation, EntityT::name(), entity_id, event, prev_generation);
+
+        prev_generation = save_versions(c, new_generation.into_inner())
+            .expect("Error saving updated versions");
     }
 
-    if !any_applied {
-        let approval_message = "Couldn't save";
-        // TODO
-        info!("Need approval for {} {}: {}", EntityT::name(), entity_id, approval_message);
-        Err(IngestError::NeedsApproval(approval_message.to_string()))
-    } else {
-        info!("Finished ingest for {} {}", EntityT::name(), entity_id);
-        Ok(())
+    if let Some(to_terminate) = terminate_generation {
+        terminate_versions(c, to_terminate.iter().map(|(v, _)| v.id).collect(),
+                           format!("Failed to apply observation at {}", perceived_at))
+            .expect("Failed to terminate versions");
     }
+
+    // todo!()
+    Ok(())
+}
+
+fn advance_generation(c: &PgConnection, ingest_id: i32, new_generation: &mut MergedSuccessors<NewVersion>, entity_type: &'static str, entity_id: Uuid, event: Event, prev_generation: Vec<Version>) {
+    for prev_version in prev_generation {
+        let next_timed_event = prev_version.next_timed_event;
+        let parent = prev_version.id;
+
+        let state = EntityStateInterface::new(c, event.event_time, prev_version);
+        event.apply(&state);
+        for successor in state.get_successors() {
+            let new_version = NewVersion {
+                ingest_id,
+                entity_type,
+                entity_id,
+                data: successor,
+                from_event: event.id,
+                next_timed_event,
+            };
+
+            new_generation.add_successor(parent, new_version);
+        }
+    }
+}
+
+fn observe_generation<EntityT: sim::Entity>(new_generation: &mut MergedSuccessors<NewVersion>, versions: Vec<(Version, Vec<Parent>)>, entity_raw: &EntityT::Raw) {
+    for (version, parents) in versions {
+        match observe_entity::<EntityT>(version, entity_raw) {
+            Ok(new_version) => {
+                let parent_ids = parents.into_iter()
+                    .map(|parent| parent.parent)
+                    .collect();
+                new_generation.add_multi_parent_successor(parent_ids, new_version);
+            }
+            Err(conflicts) => {
+                info!("Skipping observation because of conflicts:\n- {}",
+                        conflicts.into_iter().map(|c| c.to_string()).join("\n- "));
+            }
+        }
+    }
+}
+
+fn observe_entity<EntityT: sim::Entity>(version: Version, entity_raw: &EntityT::Raw) -> Result<NewVersion, Vec<Conflict>> {
+    let mut entity: EntityT = serde_json::from_value(version.data)
+        .expect("Couldn't parse stored version data");
+
+    let conflicts = entity.observe(entity_raw);
+    if !conflicts.is_empty() {
+        return Err(conflicts);
+    }
+
+    Ok(NewVersion {
+        ingest_id: version.ingest_id,
+        entity_type: EntityT::name(),
+        entity_id: version.entity_id,
+        data: serde_json::to_value(entity)
+            .expect("Failed to serialize entity"),
+        from_event: version.from_event,
+        next_timed_event: version.next_timed_event,
+    })
 }
 
 async fn wait_for_feed_ingest(ingest: &mut IngestState, wait_until_time: DateTime<Utc>) {
@@ -277,86 +296,4 @@ async fn wait_for_feed_ingest(ingest: &mut IngestState, wait_until_time: DateTim
         ingest.receive_progress.changed().await
             .expect("Error communicating with Eventually ingest");
     }
-}
-
-fn advance_version<EntityT: 'static + sim::Entity>(
-    c: &PgConnection,
-    ingest_id: i32,
-    entities: Vec<(bool, i32, EntityT)>,
-    event: Event,
-    update_id: i32,
-    entity_raw: &EntityT::Raw,
-    entity_id: Uuid,
-    earliest_time: DateTime<Utc>,
-    end_time: DateTime<Utc>,
-    force: bool,
-) -> Vec<(bool, i32, EntityT)> {
-    let mut new_entities = Vec::new();
-
-    // Save for use after moving event
-    let event_id = event.id;
-    let event_time = event.event_time;
-
-    let mut versions_from_observation = MergedSuccessors::new();
-    let mut to_terminate = Vec::new();
-    for (observation_already_applied, version_id, entity) in entities {
-        // If we haven't already applied the observation, and it's valid to apply the observation
-        // here, add the branch where we apply the observation here
-        if !observation_already_applied {
-            if force {
-                versions_from_observation.add_successor(version_id, EntityT::from_raw(entity_raw.clone()));
-            } else {
-                let mut entity_after_observation = entity.clone();
-                let conflicts = entity_after_observation.observe(entity_raw);
-                if conflicts.is_empty() {
-                    versions_from_observation.add_successor(version_id, entity_after_observation);
-                } else {
-                    info!("Not applying observation because of conflicts: \n- {}", conflicts.into_iter().map(|c| c.to_string()).join("\n- "))
-                }
-            }
-        }
-
-        if event_time > end_time && !observation_already_applied {
-            // Terminate the branch
-            to_terminate.push(version_id);
-        } else {
-            // Always add the branch where we don't apply the observation
-            new_entities.push((observation_already_applied, version_id, entity));
-        }
-    }
-    if !to_terminate.is_empty() {
-        // TODO Put the non-termination reasons in the string
-        terminate_versions(c, to_terminate,
-                           format!("This branch didn't apply a chron update at any point"))
-            .expect("Error terminating versions");
-    }
-    // NOTE: At this point, new_entities doesn't yet contain any of the branches that came from
-    // applying the observation, because we haven't saved them to the DB and don't have their ids
-    // yet.
-    let saved_version_ids = save_versions(c, ingest_id, update_id, earliest_time, versions_from_observation.clone().into_inner());
-    new_entities.extend(
-        versions_from_observation.into_inner().into_iter()
-            .zip_eq(saved_version_ids)
-            .map(|((entity, _), id)| (true, id, entity))
-    );
-
-    let mut state: EntityStateInterface<EntityT> = EntityStateInterface::new(c, ingest_id, event_time, entity_id, new_entities);
-    event.apply(&mut state);
-
-    let successors = state.get_successors();
-    let (successors, successors_to_save): (Vec<_>, Vec<_>) = successors.into_iter()
-        .map(|((applied, successor), parent_ids)| {
-            (
-                (applied, successor.clone()), // These ones are saved for the next iteration
-                (successor, parent_ids), // These ones are passed to the database function
-            )
-        })
-        .unzip();
-
-    info!("Saving {} successors for {} {}", successors_to_save.len(), EntityT::name(), entity_id);
-    let successor_ids = save_versions(c, ingest_id, event_id, event_time, successors_to_save);
-
-    successors.into_iter().zip_eq(successor_ids)
-        .map(|((applied, version), version_id)| (applied, version_id, version))
-        .collect()
 }

@@ -3,6 +3,7 @@ use uuid::Uuid;
 use chrono::{DateTime, Utc};
 use itertools::{Itertools, izip};
 use diesel::prelude::*;
+use diesel::result::Error;
 use rocket::info;
 
 use crate::api::ChroniclerItem;
@@ -13,16 +14,28 @@ use crate::state::events_db::{Event, add_start_event};
 
 #[derive(Insertable)]
 #[table_name = "versions"]
-struct NewVersion {
-    ingest_id: i32,
-    entity_type: &'static str,
-    entity_id: Uuid,
-    data: serde_json::Value,
-    from_event: i32,
-    next_timed_event: Option<DateTime<Utc>>,
+pub struct NewVersion {
+    pub ingest_id: i32,
+    pub entity_type: &'static str,
+    pub entity_id: Uuid,
+    pub data: serde_json::Value,
+    pub from_event: i32,
+    pub next_timed_event: Option<DateTime<Utc>>,
 }
 
-#[derive(Identifiable, Queryable, PartialEq, Debug)]
+impl PartialEq for NewVersion {
+    fn eq(&self, other: &Self) -> bool {
+        self.ingest_id == other.ingest_id &&
+            self.entity_type == other.entity_type &&
+            self.entity_id == other.entity_id &&
+            self.data == other.data &&
+            self.from_event == other.from_event &&
+            self.next_timed_event == other.next_timed_event
+    }
+}
+
+#[derive(Identifiable, Queryable, Associations, PartialEq, Debug)]
+#[belongs_to(parent = "Event", foreign_key = "from_event")]
 #[table_name = "versions"]
 pub struct Version {
     pub id: i32,
@@ -115,7 +128,6 @@ pub async fn add_initial_versions(conn: &BlarserDbConn, ingest_id: i32, start_ti
 }
 
 pub fn get_version_with_next_timed_event(c: &mut PgConnection, ingest_id: i32, before: DateTime<Utc>) -> Option<(String, serde_json::Value, DateTime<Utc>)> {
-    info!("DBG get_version_with_next_timed_event");
     use crate::schema::versions::dsl as versions;
     use crate::schema::versions_parents::dsl as parents;
     use crate::schema::events::dsl as events;
@@ -140,7 +152,6 @@ pub fn get_version_with_next_timed_event(c: &mut PgConnection, ingest_id: i32, b
 }
 
 pub fn get_current_versions(c: &PgConnection, ingest_id: i32, entity_type: &str, entity_id: Option<Uuid>) -> Vec<(i32, serde_json::Value, DateTime<Utc>)> {
-    info!("DBG get_current_versions");
     use crate::schema::versions::dsl as versions;
     use crate::schema::versions_parents::dsl as parents;
     use crate::schema::events::dsl as events;
@@ -169,7 +180,6 @@ pub fn get_current_versions(c: &PgConnection, ingest_id: i32, entity_type: &str,
 }
 
 pub fn get_possible_versions_at(c: &PgConnection, ingest_id: i32, entity_type: &str, entity_id: Option<Uuid>, at_time: DateTime<Utc>) -> Vec<(i32, serde_json::Value, DateTime<Utc>)> {
-    info!("DBG get_possible_versions_at");
     // Diesel doesn't support having the same table appear multiple times in a query, but I need to
     // have a version and its child (or parent, depending on how you look at things) in the query so
     // I can check that one is before at_time and the other is after. Rather than drop down to raw
@@ -203,9 +213,8 @@ pub fn get_possible_versions_at(c: &PgConnection, ingest_id: i32, entity_type: &
     }.expect("Error getting versions at time")
 }
 
-pub fn save_versions<EntityT: sim::Entity>(c: &PgConnection, ingest_id: i32, from_event: i32, start_time: DateTime<Utc>, successors: Vec<(EntityT, Vec<i32>)>) -> Vec<i32> {
-    info!("DBG save_versions");
-    let (new_versions, parents): (Vec<_>, Vec<_>) = successors.into_iter().map(|(entity, parents)| {
+pub fn save_versions_from_entities<EntityT: sim::Entity>(c: &PgConnection, ingest_id: i32, from_event: i32, start_time: DateTime<Utc>, successors: Vec<(EntityT, Vec<i32>)>) -> QueryResult<Vec<Version>> {
+    let new_versions = successors.into_iter().map(|(entity, parents)| {
         let next_timed_event = entity.next_timed_event(start_time)
             .map(|event| event.time);
         let version = NewVersion {
@@ -219,21 +228,27 @@ pub fn save_versions<EntityT: sim::Entity>(c: &PgConnection, ingest_id: i32, fro
         };
 
         (version, parents)
-    }).unzip();
+    });
 
+    save_versions(c, new_versions)
+}
+
+pub fn save_versions<T>(c: &PgConnection, new_versions: T) -> QueryResult<Vec<Version>>
+    where T: IntoIterator<Item=(NewVersion, Vec<i32>)> {
+    let (new_versions, parents): (Vec<_>, Vec<_>) = new_versions.into_iter().unzip();
     c.transaction(|| {
         use crate::schema::versions::dsl as versions;
         use crate::schema::versions_parents::dsl as parents;
 
-        let children = insert_into(versions::versions)
+        let inserted_versions = insert_into(versions::versions)
             .values(new_versions)
-            .returning(versions::id)
-            .get_results::<i32>(c)?;
+            .returning(versions::versions::all_columns())
+            .get_results::<Version>(c)?;
 
-        let new_parents: Vec<_> = parents.into_iter().zip(&children)
-            .flat_map(|(parents, child)| {
+        let new_parents: Vec<_> = parents.into_iter().zip(&inserted_versions)
+            .flat_map(|(parents, version)| {
                 parents.into_iter().map(move |parent| {
-                    NewParent { parent, child: *child }
+                    NewParent { parent, child: version.id }
                 })
             })
             .collect();
@@ -242,13 +257,11 @@ pub fn save_versions<EntityT: sim::Entity>(c: &PgConnection, ingest_id: i32, fro
             .values(new_parents)
             .execute(c)?;
 
-        Ok::<_, diesel::result::Error>(children)
+        Ok::<_, diesel::result::Error>(inserted_versions)
     })
-        .expect("Failed to save successors")
 }
 
 pub fn get_recently_updated_entities(c: &PgConnection, ingest_id: i32, count: i64) -> QueryResult<Vec<(String, Uuid, serde_json::Value)>> {
-    info!("DBG get_recently_updated_entities");
     use crate::schema::versions::dsl as versions;
     use crate::schema::versions_parents::dsl as parents;
     use crate::schema::events::dsl as events;
@@ -267,7 +280,6 @@ pub fn get_recently_updated_entities(c: &PgConnection, ingest_id: i32, count: i6
 }
 
 pub fn get_entity_debug(c: &PgConnection, ingest_id: i32, entity_id: Uuid) -> QueryResult<Vec<(Version, Event, Vec<Parent>)>> {
-    info!("DBG get_entity_debug");
     use crate::schema::versions::dsl as versions;
     use crate::schema::events::dsl as events;
     let (versions, events): (Vec<Version>, Vec<Event>) = versions::versions
@@ -288,7 +300,6 @@ pub fn get_entity_debug(c: &PgConnection, ingest_id: i32, entity_id: Uuid) -> Qu
 }
 
 pub fn get_events_for_entity_after(c: &PgConnection, ingest_id: i32, entity_type: &str, entity_id: Uuid, start_time: DateTime<Utc>) -> QueryResult<Vec<Event>> {
-    info!("DBG get_events_for_entity_after");
     use crate::schema::versions::dsl as versions;
     use crate::schema::events::dsl as events;
 
@@ -308,8 +319,53 @@ pub fn get_events_for_entity_after(c: &PgConnection, ingest_id: i32, entity_type
         .get_results::<Event>(c)
 }
 
+pub fn get_event_for_entity_preceding(c: &PgConnection, ingest_id: i32, entity_type: &str, entity_id: Uuid, start_time: DateTime<Utc>) -> QueryResult<Event> {
+    use crate::schema::versions::dsl as versions;
+    use crate::schema::events::dsl as events;
+
+    versions::versions
+        .inner_join(events::events.on(versions::from_event.eq(events::id)))
+        // Is from the right ingest
+        .filter(versions::ingest_id.eq(ingest_id))
+        // Is the right entity
+        .filter(versions::entity_type.eq(entity_type))
+        .filter(versions::entity_id.eq(entity_id))
+        // Is before the desired time
+        .filter(events::event_time.le(start_time))
+        // Just the event
+        .select(events::events::all_columns())
+        // Just the most recent one
+        .order(events::event_time.desc())
+        .limit(1)
+        .get_result::<Event>(c)
+}
+
+pub fn get_entity_update_tree(c: &PgConnection, ingest_id: i32, entity_type: &str, entity_id: Uuid, start_time: DateTime<Utc>) -> QueryResult<(Vec<Event>, Vec<Vec<(Version, Vec<Parent>)>>)> {
+    use crate::schema::versions::dsl as versions;
+    use crate::schema::events::dsl as events;
+    use crate::schema::versions_parents::dsl as parents;
+
+    let mut loaded_events = get_events_for_entity_after(c, ingest_id, entity_type, entity_id, start_time)?;
+
+    loaded_events.insert(0, get_event_for_entity_preceding(c, ingest_id, entity_type, entity_id, start_time)?);
+
+    let loaded_versions = Version::belonging_to(&loaded_events)
+        .filter(versions::entity_type.eq(entity_type))
+        .filter(versions::entity_id.eq(entity_id))
+        .load::<Version>(c)?;
+
+    let grouped_parents = Parent::belonging_to(&loaded_versions)
+        .load::<Parent>(c)?
+        .grouped_by(&loaded_versions);
+
+    let versions_with_parents = loaded_versions.into_iter()
+        .zip(grouped_parents)
+        .grouped_by(&loaded_events);
+
+    Ok((loaded_events, versions_with_parents))
+}
+
 pub fn delete_versions_for_entity_after(c: &PgConnection, ingest_id: i32, entity_type: &str, entity_id: Uuid, start_time: DateTime<Utc>) -> QueryResult<usize> {
-    info!("DBG delete_versions_for_entity_after");
     use crate::schema::versions::dsl as versions;
     use crate::schema::events::dsl as events;
 
@@ -327,7 +383,6 @@ pub fn delete_versions_for_entity_after(c: &PgConnection, ingest_id: i32, entity
 
 
 pub fn terminate_versions(c: &PgConnection, to_update: Vec<i32>, reason: String) -> QueryResult<()> {
-    info!("DBG terminate_versions");
     use crate::schema::versions::dsl as versions;
 
     diesel::update(versions::versions.filter(versions::id.eq_any(to_update)))

@@ -15,12 +15,16 @@ pub use versions_db::{
     get_events_for_entity_after,
     delete_versions_for_entity_after,
     get_current_versions,
+    get_possible_versions_at,
+    get_entity_update_tree,
     get_recently_updated_entities,
     get_version_with_next_timed_event,
     save_versions,
+    save_versions_from_entities,
     terminate_versions,
     Parent,
     Version,
+    NewVersion,
 };
 pub use events::IngestEvent;
 pub use merged_successors::MergedSuccessors;
