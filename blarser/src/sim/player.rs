@@ -128,8 +128,8 @@ impl Entity for Player {
     }
 
     fn time_range_for_update(valid_from: DateTime<Utc>, _: &Self::Raw) -> (DateTime<Utc>, DateTime<Utc>) {
-        // Players are timestamped before the fetch
-        (valid_from, valid_from + Duration::minutes(1))
+        // Players are timestamped before the fetch, but there seems to be some caching
+        (valid_from - Duration::minutes(6), valid_from + Duration::minutes(1))
     }
 }
 
