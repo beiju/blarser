@@ -14,10 +14,17 @@ use crate::sim::entity::TimedEvent;
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
 pub struct Standings {
+    #[serde(rename="__v")]
+    pub version: Option<i32>,
+
+    #[serde(alias="_id")]
     pub id: Uuid,
+
+    #[serde(default)]
     pub runs: HashMap<Uuid, f32>,
     pub wins: HashMap<Uuid, i32>,
     pub losses: HashMap<Uuid, i32>,
+    #[serde(default)]
     pub games_played: HashMap<Uuid, i32>,
 }
 

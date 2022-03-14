@@ -8,13 +8,13 @@ use uuid::Uuid;
 use itertools::Itertools;
 use tokio::sync::oneshot;
 use thiserror::Error;
-use partial_information::{Conflict, PartialInformationCompare};
+use partial_information::Conflict;
 
 use crate::api::{chronicler, ChroniclerItem};
 use crate::ingest::task::IngestState;
 use crate::{sim, EntityStateInterface};
 use crate::ingest::approvals_db::{ApprovalState, get_approval};
-use crate::state::{ChronObservationEvent, Event, MergedSuccessors, add_chron_event, add_initial_versions, get_events_for_entity_after, delete_versions_for_entity_after, get_current_versions, save_versions_from_entities, terminate_versions, get_possible_versions_at, get_entity_update_tree, Version, Parent, NewVersion, save_versions};
+use crate::state::{Event, MergedSuccessors, add_chron_event, add_initial_versions, get_events_for_entity_after, delete_versions_for_entity_after, get_current_versions, save_versions_from_entities, terminate_versions, get_possible_versions_at, get_entity_update_tree, Version, Parent, NewVersion, save_versions};
 use crate::sim::entity_dispatch;
 
 fn initial_state(start_at_time: &'static str) -> impl Stream<Item=(&'static str, ChroniclerItem)> {
@@ -235,6 +235,10 @@ fn do_ingest<EntityT: 'static + sim::Entity>(
     if let Some(to_terminate) = to_terminate {
         terminate_versions(c, to_terminate,format!("Failed to apply observation at {}", perceived_at))
                 .expect("Failed to terminate versions");
+    }
+
+    if version_conflicts.is_some() {
+        info!("Conflicts!");
     }
 
     version_conflicts

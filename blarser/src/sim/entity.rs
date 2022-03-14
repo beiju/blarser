@@ -91,21 +91,33 @@ impl EarliestEvent {
 
 #[macro_export]
 macro_rules! entity_dispatch {
-    ($type_var:ident => $func:ident($($args:expr),*); $fallback_pattern:ident => $fallback_arm:expr) => {
+    ($type_var:ident => $func:ident($($args:expr),*); $fallback_pattern:pat => $fallback_arm:expr) => {
         match $type_var {
             "sim" => $func::<crate::sim::Sim>($($args),*),
             "game" => $func::<crate::sim::Game>($($args),*),
             "team" => $func::<crate::sim::Team>($($args),*),
             "player" => $func::<crate::sim::Player>($($args),*),
+            "standings" => $func::<crate::sim::Standings>($($args),*),
             $fallback_pattern => $fallback_arm,
         }
     };
-    ($type_var:ident => $func:ident($($args:expr),*).await; $fallback_pattern:ident => $fallback_arm:expr) => {
+    ($type_var:ident => $func:ident($($args:expr),*).await; $fallback_pattern:pat => $fallback_arm:expr) => {
         match $type_var {
             "sim" => $func::<crate::sim::Sim>($($args),*).await,
             "game" => $func::<crate::sim::Game>($($args),*).await,
             "team" => $func::<crate::sim::Team>($($args),*).await,
             "player" => $func::<crate::sim::Player>($($args),*).await,
+            "standings" => $func::<crate::sim::Standings>($($args),*).await,
+            $fallback_pattern => $fallback_arm,
+        }
+    };
+    ($type_var:ident => $ns:ident::$func:ident($($args:expr),*); $fallback_pattern:pat => $fallback_arm:expr) => {
+        match $type_var {
+            "sim" => $ns::$func::<crate::sim::Sim>($($args),*),
+            "game" => $ns::$func::<crate::sim::Game>($($args),*),
+            "team" => $ns::$func::<crate::sim::Team>($($args),*),
+            "player" => $ns::$func::<crate::sim::Player>($($args),*),
+            "standings" => $ns::$func::<crate::sim::Standings>($($args),*),
             $fallback_pattern => $fallback_arm,
         }
     };

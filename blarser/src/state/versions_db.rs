@@ -8,7 +8,7 @@ use rocket::info;
 
 use crate::api::ChroniclerItem;
 use crate::db::BlarserDbConn;
-use crate::sim;
+use crate::{entity_dispatch, sim};
 use crate::schema::*;
 use crate::state::events_db::{Event, add_start_event};
 
@@ -69,16 +69,9 @@ pub struct Parent {
 
 impl NewVersion {
     fn for_initial_state(ingest_id: i32, from_event: i32, start_time: DateTime<Utc>, entity_type: &str, item: ChroniclerItem) -> Option<NewVersion> {
-        let version = match entity_type {
-            "sim" => Self::for_initial_state_typed::<sim::Sim>(ingest_id, from_event, start_time, item),
-            "game" => Self::for_initial_state_typed::<sim::Game>(ingest_id, from_event, start_time, item),
-            "team" => Self::for_initial_state_typed::<sim::Team>(ingest_id, from_event, start_time, item),
-            "player" => Self::for_initial_state_typed::<sim::Player>(ingest_id, from_event, start_time, item),
-            _ => {
-                // TODO Remove this once all entity types are implemented
-                return None;
-            }
-        };
+        let version = entity_dispatch!(
+            entity_type => Self::for_initial_state_typed(ingest_id, from_event, start_time, item);
+            _ => return None);
 
         Some(version)
     }
