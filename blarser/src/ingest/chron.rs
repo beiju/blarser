@@ -14,7 +14,7 @@ use crate::api::{chronicler, ChroniclerItem};
 use crate::ingest::task::IngestState;
 use crate::{sim, EntityStateInterface};
 use crate::ingest::approvals_db::{ApprovalState, get_approval};
-use crate::state::{Event, MergedSuccessors, add_chron_event, add_initial_versions, get_events_for_entity_after, delete_versions_for_entity_after, get_current_versions, save_versions_from_entities, terminate_versions, get_possible_versions_at, get_entity_update_tree, Version, Parent, NewVersion, save_versions};
+use crate::state::{Event, MergedSuccessors, add_initial_versions, terminate_versions, get_entity_update_tree, Version, Parent, NewVersion, save_versions};
 use crate::sim::entity_dispatch;
 
 fn initial_state(start_at_time: &'static str) -> impl Stream<Item=(&'static str, ChroniclerItem)> {
@@ -187,9 +187,9 @@ async fn ingest_update<EntityT: 'static + sim::Entity>(ingest: &mut IngestState,
         if approved {
             ingest.db.run(move |c| {
                 c.transaction(|| {
-                    do_ingest::<EntityT>(c, ingest_id, earliest, latest, item.valid_from, item.entity_id, &entity_raw, true)
-                        .expect("Ingest failed even with force=true");
+                    let conflicts = do_ingest::<EntityT>(c, ingest_id, earliest, latest, item.valid_from, item.entity_id, &entity_raw, true);
 
+                    assert!(conflicts.is_none(), "Generated conflicts even with force=true");
                     Ok::<_, diesel::result::Error>(())
                 })
             }).await.unwrap();
@@ -223,7 +223,7 @@ fn do_ingest<EntityT: 'static + sim::Entity>(
 
         if event.event_time <= end_time {
             to_terminate = Some(versions.iter().map(|(v, _)| v.id).collect());
-            observe_generation::<EntityT>(&mut new_generation, &mut version_conflicts, versions, entity_raw, perceived_at);
+            observe_generation::<EntityT>(&mut new_generation, &mut version_conflicts, versions, entity_raw, perceived_at, force);
         }
 
         advance_generation(c, ingest_id, &mut new_generation, EntityT::name(), entity_id, event, prev_generation);
@@ -276,11 +276,12 @@ fn observe_generation<EntityT: sim::Entity>(
     version_conflicts: &mut Option<Vec<(i32, String)>>,
     versions: Vec<(Version, Vec<Parent>)>,
     entity_raw: &EntityT::Raw,
-    perceived_at: DateTime<Utc>
+    perceived_at: DateTime<Utc>,
+    force: bool,
 ) {
     for (version, parents) in versions {
         let version_id = version.id;
-        match observe_entity::<EntityT>(version, entity_raw, perceived_at) {
+        match observe_entity::<EntityT>(version, entity_raw, perceived_at, force) {
             Ok(new_version) => {
                 let parent_ids = parents.into_iter()
                     .map(|parent| parent.parent)
@@ -300,13 +301,17 @@ fn observe_generation<EntityT: sim::Entity>(
     }
 }
 
-fn observe_entity<EntityT: sim::Entity>(version: Version, entity_raw: &EntityT::Raw, perceived_at: DateTime<Utc>) -> Result<NewVersion, Vec<Conflict>> {
+fn observe_entity<EntityT: sim::Entity>(version: Version, entity_raw: &EntityT::Raw, perceived_at: DateTime<Utc>, force: bool) -> Result<NewVersion, Vec<Conflict>> {
     let mut entity: EntityT = serde_json::from_value(version.data)
         .expect("Couldn't parse stored version data");
 
-    let conflicts = entity.observe(entity_raw);
-    if !conflicts.is_empty() {
-        return Err(conflicts);
+    if force {
+        entity = EntityT::from_raw(entity_raw.clone());
+    } else {
+        let conflicts = entity.observe(entity_raw);
+        if !conflicts.is_empty() {
+            return Err(conflicts);
+        }
     }
 
     Ok(NewVersion {

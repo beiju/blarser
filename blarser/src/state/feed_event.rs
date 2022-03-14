@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use itertools::Itertools;
+use serde::Deserialize;
 use uuid::Uuid;
 use partial_information::{MaybeKnown, Ranged};
 
@@ -36,6 +37,7 @@ impl IngestEvent for EventuallyEvent {
             EventType::GameOver => game_over(state, self),
             EventType::StormWarning => storm_warning(state, self),
             EventType::Snowflakes => snowflakes(state, self),
+            EventType::ModExpires => mod_expires(state, self),
             _ => todo!(),
         }
     }
@@ -639,6 +641,35 @@ fn snowflakes(state: &impl StateInterface, event: &EventuallyEvent) {
             });
         }
     }
+}
+
+
+fn mod_expires(state: &impl StateInterface, event: &EventuallyEvent) {
+    let player_id = event.player_id().expect("ModExpires event must have a player id");
+
+    #[derive(Deserialize)]
+    struct ModExpiresMetadata {
+        mods: Vec<String>,
+        r#type: i32,
+    }
+
+    let metadata: ModExpiresMetadata = serde_json::from_value(event.metadata.other.clone())
+        .expect("Failed to extract metadata from ModExpires event");
+
+    state.with_player(player_id, |mut player| {
+        let mod_list = match &metadata.r#type {
+            3 => { &mut player.game_attr }
+            _ => { todo!() }
+        }.as_mut().expect("Tried to remove mod from nonexistent list");
+
+        for remove_mod in &metadata.mods {
+            let index = mod_list.iter().position(|m| m == remove_mod)
+                .expect("Tried to remove mod that didn't exist in the list");
+            mod_list.remove(index);
+        }
+
+        Ok(vec![player])
+    });
 }
 
 
