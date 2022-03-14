@@ -110,8 +110,8 @@ pub async fn ingest_chron(mut ingest: IngestState, start_at_time: &'static str) 
 
 #[derive(Debug, Error)]
 enum IngestError {
-    #[error("Needs approval: {0}")]
-    NeedsApproval(String),
+    #[error("Needs approval: {0:?}")]
+    NeedsApproval(Vec<(i32, String)>),
 
     #[error(transparent)]
     DieselError(#[from] diesel::result::Error),
@@ -132,18 +132,39 @@ async fn ingest_update<EntityT: 'static + sim::Entity>(ingest: &mut IngestState,
     // async tree
     let (approval, entity_raw) = ingest.db.run(move |c| {
         let approval_result = c.transaction(|| {
-            do_ingest::<EntityT>(c, ingest_id, earliest, latest, item.valid_from, item.entity_id, &entity_raw, false)
+            let conflicts = do_ingest::<EntityT>(
+                c,
+                ingest_id,
+                earliest,
+                latest,
+                item.valid_from,
+                item.entity_id,
+                &entity_raw,
+                false
+            );
+
+            // Round-trip through the Result machinery to get diesel to cancel the transaction
+            match conflicts {
+                None => { Ok(()) }
+                Some(c) => { Err(IngestError::NeedsApproval(c)) }
+            }
         });
 
         if let Err(IngestError::NeedsApproval(approval)) = approval_result {
             (Some(approval), entity_raw)
         } else {
-            approval_result.expect("Error re-doing ingest");
+            approval_result.expect("Unexpected database error in chronicler ingest");
             (None, entity_raw)
         }
     }).await;
 
-    if let Some(message) = approval {
+    if let Some(conflicts) = approval {
+        // TODO Make a fun html debug view from conflicts info
+        let message = conflicts.into_iter()
+            .map(|(id, reason)| {
+                format!("Can't apply observation to version {}:\n{}", id, reason)
+            })
+            .join("\n");
         let approval = ingest.db.run(move |c| {
             get_approval(c, EntityT::name(), item.entity_id, item.valid_from, &message)
         }).await
@@ -187,7 +208,7 @@ fn do_ingest<EntityT: 'static + sim::Entity>(
     entity_id: Uuid,
     entity_raw: &EntityT::Raw,
     force: bool,
-) -> Result<(), IngestError> {
+) -> Option<Vec<(i32, String)>> {
     info!("Placing {} {} between {} and {}", EntityT::name(), entity_id, start_time, end_time);
 
     let (events, generations) = get_entity_update_tree(c, ingest_id, EntityT::name(), entity_id, start_time)
@@ -196,12 +217,13 @@ fn do_ingest<EntityT: 'static + sim::Entity>(
     let mut to_terminate = None;
 
     let mut prev_generation = Vec::new();
+    let mut version_conflicts = Some(Vec::new());
     for (event, versions) in events.into_iter().zip(generations) {
         let mut new_generation = MergedSuccessors::new();
 
         if event.event_time <= end_time {
             to_terminate = Some(versions.iter().map(|(v, _)| v.id).collect());
-            observe_generation::<EntityT>(&mut new_generation, versions, entity_raw, perceived_at);
+            observe_generation::<EntityT>(&mut new_generation, &mut version_conflicts, versions, entity_raw, perceived_at);
         }
 
         advance_generation(c, ingest_id, &mut new_generation, EntityT::name(), entity_id, event, prev_generation);
@@ -215,8 +237,7 @@ fn do_ingest<EntityT: 'static + sim::Entity>(
                 .expect("Failed to terminate versions");
     }
 
-    // todo!()
-    Ok(())
+    version_conflicts
 }
 
 fn advance_generation(c: &PgConnection, ingest_id: i32, new_generation: &mut MergedSuccessors<NewVersion>, entity_type: &'static str, entity_id: Uuid, event: Event, prev_generation: Vec<Version>) {
@@ -246,18 +267,30 @@ fn advance_generation(c: &PgConnection, ingest_id: i32, new_generation: &mut Mer
     }
 }
 
-fn observe_generation<EntityT: sim::Entity>(new_generation: &mut MergedSuccessors<NewVersion>, versions: Vec<(Version, Vec<Parent>)>, entity_raw: &EntityT::Raw, perceived_at: DateTime<Utc>) {
+fn observe_generation<EntityT: sim::Entity>(
+    new_generation: &mut MergedSuccessors<NewVersion>,
+    version_conflicts: &mut Option<Vec<(i32, String)>>,
+    versions: Vec<(Version, Vec<Parent>)>,
+    entity_raw: &EntityT::Raw,
+    perceived_at: DateTime<Utc>
+) {
     for (version, parents) in versions {
+        let version_id = version.id;
         match observe_entity::<EntityT>(version, entity_raw, perceived_at) {
             Ok(new_version) => {
                 let parent_ids = parents.into_iter()
                     .map(|parent| parent.parent)
                     .collect();
                 new_generation.add_multi_parent_successor(parent_ids, new_version);
+
+                // Successful application! Don't need to track conflicts any more.
+                *version_conflicts = None;
             }
             Err(conflicts) => {
-                info!("Skipping observation because of conflicts:\n- {}",
-                        conflicts.into_iter().map(|c| c.to_string()).join("\n- "));
+                if let Some(version_conflicts) = version_conflicts {
+                    let conflicts = format!("- {}", conflicts.into_iter().map(|c| c.to_string()).join("\n- "));
+                    version_conflicts.push((version_id, conflicts));
+                }
             }
         }
     }
