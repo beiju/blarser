@@ -287,15 +287,15 @@ fn observe_entity<EntityT: sim::Entity>(version: Version, entity_raw: &EntityT::
 async fn wait_for_feed_ingest(ingest: &mut IngestState, wait_until_time: DateTime<Utc>) {
     ingest.notify_progress.send(wait_until_time)
         .expect("Error communicating with Chronicler ingest");
-    info!("Chron ingest sent {} as requested time", wait_until_time);
+    // info!("Chron ingest sent {} as requested time", wait_until_time);
 
     loop {
         let feed_time = *ingest.receive_progress.borrow();
         if wait_until_time < feed_time {
             break;
         }
-        info!("Chronicler ingest waiting for Eventually ingest to catch up (at {} and we need {}, difference of {}s)",
-            feed_time, wait_until_time, (wait_until_time - feed_time).num_seconds());
+        // info!("Chronicler ingest waiting for Eventually ingest to catch up (at {} and we need {}, difference of {}s)",
+        //     feed_time, wait_until_time, (wait_until_time - feed_time).num_seconds());
         ingest.receive_progress.changed().await
             .expect("Error communicating with Eventually ingest");
     }

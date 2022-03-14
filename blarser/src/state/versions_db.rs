@@ -412,8 +412,6 @@ pub fn terminate_versions(c: &PgConnection, mut to_update: Vec<i32>, reason: Str
         id: i32,
     }
 
-    info!("Primary termination: {} versions", to_update.len());
-
     while !to_update.is_empty() {
         diesel::update(versions::versions.filter(versions::id.eq_any(to_update)))
             .set(versions::terminated.eq(Some(&reason)))
@@ -431,8 +429,6 @@ pub fn terminate_versions(c: &PgConnection, mut to_update: Vec<i32>, reason: Str
             .into_iter()
             .map(|v| v.id)
             .collect();
-
-        info!("Subsequent termination: {} versions", to_update.len());
     }
 
     Ok(())

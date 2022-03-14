@@ -85,7 +85,7 @@ async fn apply_feed_event(ingest: IngestState, event: EventuallyEvent) -> Ingest
 async fn wait_for_chron_ingest(ingest: &mut IngestState, feed_event_time: DateTime<Utc>) {
     ingest.notify_progress.send(feed_event_time)
         .expect("Error communicating with Chronicler ingest");
-    info!("Feed ingest sent progress {}", feed_event_time);
+    // info!("Feed ingest sent progress {}", feed_event_time);
 
     loop {
         let chron_requests_time = *ingest.receive_progress.borrow();
@@ -93,8 +93,8 @@ async fn wait_for_chron_ingest(ingest: &mut IngestState, feed_event_time: DateTi
         if feed_event_time < stop_at {
             break;
         }
-        info!("Eventually ingest waiting for Chronicler ingest to catch up (at {} and we are at {}, {}s ahead)",
-                    chron_requests_time, feed_event_time, (feed_event_time - chron_requests_time).num_seconds());
+        // info!("Eventually ingest waiting for Chronicler ingest to catch up (at {} and we are at {}, {}s ahead)",
+        //             chron_requests_time, feed_event_time, (feed_event_time - chron_requests_time).num_seconds());
         ingest.receive_progress.changed().await
             .expect("Error communicating with Chronicler ingest");
     }

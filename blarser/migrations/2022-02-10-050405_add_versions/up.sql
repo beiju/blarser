@@ -31,6 +31,8 @@ CREATE TABLE versions (
     CONSTRAINT from_event_fk FOREIGN KEY(from_event) REFERENCES events(id) ON DELETE RESTRICT
 );
 
+CREATE INDEX versions_index ON versions (ingest_id, entity_type, entity_id);
+
 CREATE TABLE versions_parents (
     id                  SERIAL PRIMARY KEY,
     parent              INT NOT NULL,
