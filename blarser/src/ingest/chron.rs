@@ -220,10 +220,15 @@ fn do_ingest<EntityT: 'static + sim::Entity>(
 }
 
 fn advance_generation(c: &PgConnection, ingest_id: i32, new_generation: &mut MergedSuccessors<NewVersion>, entity_type: &'static str, entity_id: Uuid, event: Event, prev_generation: Vec<Version>) {
+    let event_time = event.event_time;
+    let from_event = event.id;
+    let event = event.parse()
+        .expect("Failed to decode event");
+
     for prev_version in prev_generation {
         let parent = prev_version.id;
 
-        let state = EntityStateInterface::new(c, event.event_time, prev_version);
+        let state = EntityStateInterface::new(c, event_time, prev_version);
         event.apply(&state);
         for (successor, next_timed_event) in state.get_successors() {
             let new_version = NewVersion {
@@ -231,7 +236,7 @@ fn advance_generation(c: &PgConnection, ingest_id: i32, new_generation: &mut Mer
                 entity_type,
                 entity_id,
                 data: successor,
-                from_event: event.id,
+                from_event,
                 observed_by: None,
                 next_timed_event,
             };

@@ -8,8 +8,8 @@ async function addEntityView(entityType, entityId) {
     const nodeRadius = 20;
     const layout = d3
         .sugiyama() // base layout
-        // .decross(d3.decrossOpt()) // minimize number of crossings
-        .nodeSize((node) => [(node ? 3.6 : 0.25) * nodeRadius, 3 * nodeRadius]); // set node size instead of constraining to fit
+        .decross(d3.decrossOpt()) // minimize number of crossings
+        .nodeSize((node) => [(node ? 15.6 : 0.25) * nodeRadius, 3 * nodeRadius]); // set node size instead of constraining to fit
     const {width, height} = layout(dag);
 
     // --------------------------------
@@ -58,14 +58,15 @@ async function addEntityView(entityType, entityId) {
 
     // Plot node circles
     nodes
-        .append("circle")
-        .attr("r", nodeRadius)
+        .append("ellipse")
+        .attr("rx", nodeRadius*5)
+        .attr("ry", nodeRadius)
         .attr("fill", (n) => n.data.terminated ? "red" : (n.data.observedBy ? "green" : "blue"));
 
     // Add text to nodes
     nodes
         .append("text")
-        .text((d) => d.data.id)
+        .text((d) => d.data.type)
         .attr("font-weight", "bold")
         .attr("font-family", "sans-serif")
         .attr("text-anchor", "middle")

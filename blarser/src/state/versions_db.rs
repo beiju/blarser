@@ -358,6 +358,7 @@ pub fn get_entity_update_tree(c: &PgConnection, ingest_id: i32, entity_type: &st
     let loaded_versions = Version::belonging_to(&loaded_events)
         .filter(versions::entity_type.eq(entity_type))
         .filter(versions::entity_id.eq(entity_id))
+        .filter(versions::terminated.is_null())
         .load::<Version>(c)?;
 
     let grouped_parents = Parent::belonging_to(&loaded_versions)

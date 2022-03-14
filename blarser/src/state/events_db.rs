@@ -1,3 +1,4 @@
+use std::fmt::{Display, Formatter};
 use chrono::{DateTime, Utc};
 use diesel::{insert_into, PgConnection, RunQueryDsl};
 use diesel_derive_enum::DbEnum;
@@ -39,57 +40,86 @@ pub struct Event {
     pub event_data: serde_json::Value,
 }
 
-impl Event {
-    pub fn description(self) -> Result<String, serde_json::error::Error> {
-        match self.event_source {
-            EventSource::Start => { Ok("Start".to_string()) }
-            EventSource::Feed => {
-                let event: EventuallyEvent = serde_json::from_value(self.event_data)?;
-                let description = if event.metadata.siblings.is_empty() {
-                    event.description
-                } else {
-                    event.metadata.siblings.into_iter()
-                        .map(|event| event.description)
-                        .join("\n")
-                };
+pub enum EventData {
+    Start,
+    Feed(EventuallyEvent),
+    Timed(TimedEvent),
+    Manual(ChronObservationEvent)
+}
 
-                Ok(description)
+impl EventData {
+    pub fn apply(&self, state: &impl StateInterface) {
+        match self {
+            EventData::Start => {
+                panic!("Can't re-apply a Start event!")
             }
-            EventSource::Timed => {
-                let event: TimedEventType = serde_json::from_value(self.event_data)?;
-                Ok(event.description())
+            EventData::Feed(feed_event) => {
+                feed_event.apply(state)
             }
-            EventSource::Chron => {
-                let event: ChronObservationEvent = serde_json::from_value(self.event_data)?;
-                Ok(event.description())
+            EventData::Timed(timed_event) => {
+                info!("In chronicler, re-applying timed event {:?}", timed_event.event_type);
+                timed_event.apply(state)
+            }
+            EventData::Manual(_) => {
+                panic!("Can't re-apply a Manual event!")
             }
         }
     }
 
-    pub fn apply(&self, state: &impl StateInterface) {
-        match self.event_source {
-            EventSource::Start => {
-                panic!("Can't re-apply a Start event!")
+    pub fn type_str(&self) -> String {
+        match self {
+            EventData::Start => { "Start".to_string() }
+            EventData::Feed(e) => { format!("{:?}", e.r#type) }
+            EventData::Timed(t) => { format!("{:?}", t.event_type) }
+            EventData::Manual(_) => { "Manual".to_string() }
+        }
+    }
+}
+
+impl Display for EventData {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EventData::Start => { write!(f, "Start") }
+            EventData::Feed(event) => {
+                if event.metadata.siblings.is_empty() {
+                    write!(f, "{}", event.description)
+                } else {
+                    write!(f, "{}", event.metadata.siblings.iter()
+                        .map(|event| &event.description)
+                        .join("\n"))
+                }
             }
-            EventSource::Feed => {
-                let feed_event: EventuallyEvent = serde_json::from_value(self.event_data.clone())
-                    .expect("Failed to parse saved EventuallyEvent");
-                info!("In chronicler, re-applying feed event {:?}", feed_event.description);
-                feed_event.apply(state)
+            EventData::Timed(event) => {
+                write!(f, "{}", event.event_type.description())
             }
-            EventSource::Timed => {
-                let timed_event = TimedEvent {
-                    time: self.event_time,
-                    event_type: serde_json::from_value(self.event_data.clone())
-                        .expect("Failed to parse saved TimedEvent"),
-                };
-                info!("In chronicler, re-applying timed event {:?}", timed_event.event_type);
-                timed_event.apply(state)
-            }
-            EventSource::Chron => {
-                todo!()
+            EventData::Manual(event) => {
+                write!(f, "{}", event.description())
             }
         }
+    }
+}
+
+impl Event {
+    pub fn parse(self) -> Result<EventData, serde_json::error::Error> {
+        match self.event_source {
+            EventSource::Start => { Ok(EventData::Start) }
+            EventSource::Feed => {
+                let event: EventuallyEvent = serde_json::from_value(self.event_data)?;
+                Ok(EventData::Feed(event))
+            }
+            EventSource::Timed => {
+                let event: TimedEventType = serde_json::from_value(self.event_data)?;
+                Ok(EventData::Timed(TimedEvent {
+                    time: self.event_time,
+                    event_type: event
+                }))
+            }
+            EventSource::Chron => {
+                let event: ChronObservationEvent = serde_json::from_value(self.event_data)?;
+                Ok(EventData::Manual(event))
+            }
+        }
+
     }
 }
 

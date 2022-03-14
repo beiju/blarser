@@ -164,7 +164,7 @@ fn build_json(prev_entity_str: &mut String, version: &Version, event: Event, ver
         .map(|parent| parent.parent.to_string())
         .collect();
 
-    let event_str = event.description()
+    let event = event.parse()
         .map_err(|e| anyhow!(e))?;
 
     let entity_str = serde_json::to_string_pretty(&version.data)
@@ -182,7 +182,8 @@ fn build_json(prev_entity_str: &mut String, version: &Version, event: Event, ver
 
     Ok(json!({
         "id": version.id.to_string(),
-        "event": event_str,
+        "event": event.to_string(),
+        "type": event.type_str(),
         "diff": diff_str,
         "parentIds": parents,
         "terminated": version.terminated,
