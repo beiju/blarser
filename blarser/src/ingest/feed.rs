@@ -89,7 +89,7 @@ async fn wait_for_chron_ingest(ingest: &mut IngestState, feed_event_time: DateTi
 
     loop {
         let chron_requests_time = *ingest.receive_progress.borrow();
-        let stop_at = chron_requests_time + Duration::minutes(1);
+        let stop_at = chron_requests_time + Duration::seconds(8);
         if feed_event_time < stop_at {
             break;
         }

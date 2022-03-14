@@ -204,9 +204,11 @@ pub fn get_possible_versions_at(c: &PgConnection, ingest_id: i32, entity_type: &
         // Has not been terminated
         .filter(versions::terminated.is_null())
         // Was created before the requested time
-        .filter(versions::event_time.le(at_time))
+        // This needs to be lt, rather than le, to work correctly in FeedStateInterface::read_entity
+        .filter(versions::event_time.lt(at_time))
         // Has no children, or at least one child is after the requested time
-        .filter(versions::end_time.is_null().or(versions::end_time.gt(at_time)));
+        // This needs to be ge, rather than gt, to work correctly in FeedStateInterface::read_entity
+        .filter(versions::end_time.is_null().or(versions::end_time.ge(at_time)));
 
     match entity_id {
         Some(entity_id) => {

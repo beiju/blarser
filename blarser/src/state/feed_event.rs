@@ -188,6 +188,22 @@ fn walk(state: &impl StateInterface, event: &EventuallyEvent) {
     });
 }
 
+fn increment_consecutive_hits(state: &impl StateInterface, batter_id: Uuid) {
+    state.with_player(batter_id, |mut player| {
+        *player.consecutive_hits.as_mut()
+            .expect("For now, all players are expected to have consecutive_hits") += 1;
+        Ok(vec![player])
+    });
+}
+
+fn reset_consecutive_hits(state: &impl StateInterface, batter_id: Uuid) {
+    state.with_player(batter_id, |mut player| {
+        *player.consecutive_hits.as_mut()
+            .expect("For now, all players are expected to have consecutive_hits") = 0;
+        Ok(vec![player])
+    });
+}
+
 fn strikeout(state: &impl StateInterface, event: &EventuallyEvent) {
     let game_id = event.game_id().expect("Strikeout event must have a game id");
     let event_batter_id = event.player_id()
@@ -211,12 +227,20 @@ fn strikeout(state: &impl StateInterface, event: &EventuallyEvent) {
 
         Ok(vec![game])
     });
+
+    reset_consecutive_hits(state, event_batter_id);
 }
 
 fn fielding_out(state: &impl StateInterface, event: &EventuallyEvent) {
     // Ground outs and flyouts are different event types, but the logic is so similar that it's
     // easier to combine them
     let game_id = event.game_id().expect("GroundOut/Flyout event must have a game id");
+
+    // Need to read this before updating the game
+    let batter_id = state.read_game(game_id, |game| {
+        game.team_at_bat()
+            .batter.expect("Batter must exist during GroundOut/FlyOut event")
+    }).into_iter().exactly_one().expect("Can't handle ambiguity in player at bat");
 
     state.with_game(game_id, |mut game| {
         let batter_id = game.team_at_bat().batter.clone()
@@ -270,6 +294,8 @@ fn fielding_out(state: &impl StateInterface, event: &EventuallyEvent) {
 
         Ok(vec![game])
     });
+
+    reset_consecutive_hits(state, batter_id);
 }
 
 fn home_run(state: &impl StateInterface, event: &EventuallyEvent) {
@@ -298,6 +324,8 @@ fn home_run(state: &impl StateInterface, event: &EventuallyEvent) {
 
         Ok(vec![game])
     });
+
+    increment_consecutive_hits(state, event_batter_id);
 }
 
 fn hit(state: &impl StateInterface, event: &EventuallyEvent) {
@@ -330,6 +358,8 @@ fn hit(state: &impl StateInterface, event: &EventuallyEvent) {
 
         Ok(vec![game])
     });
+
+    increment_consecutive_hits(state, event_batter_id);
 }
 
 fn game_end(state: &impl StateInterface, event: &EventuallyEvent) {
