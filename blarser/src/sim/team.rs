@@ -3,7 +3,7 @@ use std::fmt::{Display, Formatter};
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use partial_information::{PartialInformationCompare};
+use partial_information::{PartialInformationCompare, Spurious};
 use partial_information_derive::PartialInformationCompare;
 
 use crate::sim::Entity;
@@ -73,7 +73,7 @@ pub struct Team {
     pub main_color: String,
     pub shame_runs: f32,
     pub shorthand: String,
-    pub win_streak: Option<i32>,
+    pub win_streak: Option<Spurious<i32>>,
     pub division_id: Option<Uuid>,
     pub team_spirit: i32,
     pub subleague_id: Option<Uuid>,

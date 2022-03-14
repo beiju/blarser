@@ -375,13 +375,13 @@ fn game_end(state: &impl StateInterface, event: &EventuallyEvent) {
         .expect("GameEnd event's gameTags must include the winner and one other team");
 
     state.with_team(winner_id, |mut team| {
-        *team.win_streak.as_mut().expect("GameEnd currently expects Team.win_streak to exist") += 1;
+        **team.win_streak.as_mut().expect("GameEnd currently expects Team.win_streak to exist") += 1;
 
         Ok(vec![team])
     });
 
     state.with_team(loser_id, |mut team| {
-        *team.win_streak.as_mut().expect("GameEnd currently expects Team.win_streak to exist") -= 1;
+        **team.win_streak.as_mut().expect("GameEnd currently expects Team.win_streak to exist") -= 1;
 
         Ok(vec![team])
     });
