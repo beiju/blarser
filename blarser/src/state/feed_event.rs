@@ -227,8 +227,6 @@ fn strikeout(state: &impl StateInterface, event: &EventuallyEvent) {
 
         Ok(vec![game])
     });
-
-    reset_consecutive_hits(state, event_batter_id);
 }
 
 fn fielding_out(state: &impl StateInterface, event: &EventuallyEvent) {
@@ -396,6 +394,47 @@ fn game_end(state: &impl StateInterface, event: &EventuallyEvent) {
 
         Ok(vec![game])
     });
+
+    let (home_id, home_runs, away_runs) = state.read_game(game_id, |game| (
+        game.home.team,
+        game.home.score.expect("Home score must exist in GameEnd event"),
+        game.away.score.expect("Away score must exist in GameEnd event"),
+    )).into_iter().exactly_one().expect("Can't handle ambiguity in runs scored");
+
+    let season_id = state.read_sim(|sim| sim.season_id)
+        .into_iter().exactly_one().expect("Can't handle ambiguity in season_id");
+
+    let standings_id = state.read_season(season_id, |season| season.standings)
+        .into_iter().exactly_one().expect("Can't handle ambiguity in standings");
+
+    state.with_standings(standings_id, |mut standings| {
+        let winner_id: Uuid = serde_json::from_value(
+            event.metadata.other.get("winner")
+                .expect("GameEnd event must have a winner in the metadata")
+                .clone())
+            .expect("Winner property of GameEnd event must be a uuid");
+
+        let loser_id = *event.team_tags.iter()
+            .filter(|&id| *id != winner_id)
+            .exactly_one()
+            .expect("gameTags of GameEnd event must contain exactly one winner and one loser");
+
+        standings.games_played.insert(winner_id, 1);
+        standings.games_played.insert(loser_id, 1);
+        standings.wins.insert(winner_id, 1);
+        standings.wins.insert(loser_id, 0);
+        standings.losses.insert(winner_id, 0);
+        standings.losses.insert(loser_id, 1);
+        if home_id == winner_id {
+            standings.runs.insert(winner_id, home_runs);
+            standings.runs.insert(loser_id, away_runs);
+        } else {
+            standings.runs.insert(winner_id, away_runs);
+            standings.runs.insert(loser_id, home_runs);
+        }
+
+        Ok(vec![standings])
+    });
 }
 
 fn batter_up(state: &impl StateInterface, event: &EventuallyEvent) {
@@ -506,7 +545,7 @@ fn win_collected_regular(state: &impl StateInterface, event: &EventuallyEvent) {
         game.game_update_common(event);
 
         Ok(vec![game])
-    })
+    });
 }
 
 fn game_over(state: &impl StateInterface, event: &EventuallyEvent) {

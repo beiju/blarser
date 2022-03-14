@@ -98,6 +98,7 @@ macro_rules! entity_dispatch {
             "team" => $func::<crate::sim::Team>($($args),*),
             "player" => $func::<crate::sim::Player>($($args),*),
             "standings" => $func::<crate::sim::Standings>($($args),*),
+            "season" => $func::<crate::sim::Season>($($args),*),
             $fallback_pattern => $fallback_arm,
         }
     };
@@ -108,6 +109,7 @@ macro_rules! entity_dispatch {
             "team" => $func::<crate::sim::Team>($($args),*).await,
             "player" => $func::<crate::sim::Player>($($args),*).await,
             "standings" => $func::<crate::sim::Standings>($($args),*).await,
+            "season" => $func::<crate::sim::Season>($($args),*).await,
             $fallback_pattern => $fallback_arm,
         }
     };
@@ -118,6 +120,7 @@ macro_rules! entity_dispatch {
             "team" => $ns::$func::<crate::sim::Team>($($args),*),
             "player" => $ns::$func::<crate::sim::Player>($($args),*),
             "standings" => $ns::$func::<crate::sim::Standings>($($args),*),
+            "season" => $ns::$func::<crate::sim::Season>($($args),*),
             $fallback_pattern => $fallback_arm,
         }
     };

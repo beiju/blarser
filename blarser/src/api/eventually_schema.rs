@@ -47,21 +47,24 @@ pub struct EventMetadata {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct EventuallyEvent {
     pub id: Uuid,
     pub created: DateTime<Utc>,
     pub r#type: EventType,
     pub category: i32,
     pub metadata: EventMetadata,
+    pub blurb: String,
     pub description: String,
     pub player_tags: Vec<Uuid>,
     pub game_tags: Vec<Uuid>,
     pub team_tags: Vec<Uuid>,
+    pub sim: String,
     pub day: i32,
     pub season: i32,
     pub tournament: i32,
     pub phase: i32,
+    pub nuts: i32,
 }
 
 impl EventuallyEvent {

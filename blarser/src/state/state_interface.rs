@@ -29,7 +29,7 @@ type ApplyResult<EntityT> = Result<Vec<EntityT>, anyhow::Error>;
 
 macro_rules! reader_with_id {
     ($fn_name:ident, $read_type:path) => {
-        fn $fn_name<ReadT: Eq, Reader: Fn($read_type) -> ReadT>(&self, id: Uuid, reader: Reader) -> Vec<ReadT> {
+        fn $fn_name<ReadT: PartialEq, Reader: Fn($read_type) -> ReadT>(&self, id: Uuid, reader: Reader) -> Vec<ReadT> {
             self.read_entity(Some(id), reader)
         }
     };
@@ -37,7 +37,7 @@ macro_rules! reader_with_id {
 
 macro_rules! reader_with_nil_id {
     ($fn_name:ident, $read_type:path) => {
-        fn $fn_name<ReadT: Eq, Reader: Fn($read_type) -> ReadT>(&self, reader: Reader) -> Vec<ReadT> {
+        fn $fn_name<ReadT: PartialEq, Reader: Fn($read_type) -> ReadT>(&self, reader: Reader) -> Vec<ReadT> {
             self.read_entity(Some(Uuid::nil()), reader)
         }
     };
@@ -69,17 +69,21 @@ macro_rules! writer_with_nil_id {
 
 pub trait StateInterface {
     fn read_entity<EntityT, ReadT, Reader>(&self, id: Option<Uuid>, reader: Reader) -> Vec<ReadT>
-        where EntityT: sim::Entity, ReadT: Eq, Reader: Fn(EntityT) -> ReadT;
+        where EntityT: sim::Entity, ReadT: PartialEq, Reader: Fn(EntityT) -> ReadT;
     fn with_entity<EntityT: 'static + sim::Entity, F: Fn(EntityT) -> ApplyResult<EntityT>>(&self, id: Option<Uuid>, f: F);
 
     reader_with_nil_id! {read_sim, sim::Sim}
     reader_with_id! {read_player, sim::Player}
     reader_with_id! {read_team, sim::Team}
     reader_with_id! {read_game, sim::Game}
+    reader_with_id! {read_standings, sim::Standings}
+    reader_with_id! {read_season, sim::Season}
     writer_with_nil_id! {with_sim, sim::Sim}
     writer_with_id! {with_player, sim::Player}
     writer_with_id! {with_team, sim::Team}
     writer_with_id! {with_game, sim::Game}
+    writer_with_id! {with_standings, sim::Standings}
+    writer_with_id! {with_season, sim::Season}
     writer_each! {with_each_game, sim::Game}
 }
 
@@ -94,7 +98,7 @@ impl<'conn> FeedStateInterface<'conn> {
     }
 }
 
-fn read_entity_common<EntityT: sim::Entity, ReadT, Reader>(c: &PgConnection, ingest_id: i32, at_time: DateTime<Utc>, id: Option<Uuid>, reader: Reader) -> Vec<ReadT> where ReadT: Eq, Reader: Fn(EntityT) -> ReadT {
+fn read_entity_common<EntityT: sim::Entity, ReadT, Reader>(c: &PgConnection, ingest_id: i32, at_time: DateTime<Utc>, id: Option<Uuid>, reader: Reader) -> Vec<ReadT> where ReadT: PartialEq, Reader: Fn(EntityT) -> ReadT {
     let mut unique_vals = Vec::new();
     let versions = versions_db::get_possible_versions_at(c, ingest_id, EntityT::name(), id, at_time);
 
@@ -118,7 +122,7 @@ fn read_entity_common<EntityT: sim::Entity, ReadT, Reader>(c: &PgConnection, ing
 
 impl<'conn> StateInterface for FeedStateInterface<'conn> {
     fn read_entity<EntityT, ReadT, Reader>(&self, id: Option<Uuid>, reader: Reader) -> Vec<ReadT>
-        where EntityT: sim::Entity, ReadT: Eq, Reader: Fn(EntityT) -> ReadT {
+        where EntityT: sim::Entity, ReadT: PartialEq, Reader: Fn(EntityT) -> ReadT {
         read_entity_common::<EntityT, _, _>(self.conn, self.ingest_id, self.at_time, id, reader)
     }
 
@@ -174,7 +178,7 @@ impl<'conn> EntityStateInterface<'conn> {
 
 impl<'conn> StateInterface for EntityStateInterface<'conn> {
     fn read_entity<EntityT, ReadT, Reader>(&self, id: Option<Uuid>, reader: Reader) -> Vec<ReadT>
-        where EntityT: sim::Entity, ReadT: Eq, Reader: Fn(EntityT) -> ReadT {
+        where EntityT: sim::Entity, ReadT: PartialEq, Reader: Fn(EntityT) -> ReadT {
         read_entity_common(self.conn, self.version.ingest_id, self.at_time, id, reader)
     }
 
