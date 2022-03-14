@@ -145,7 +145,7 @@ pub fn get_version_with_next_timed_event(c: &mut PgConnection, ingest_id: i32, b
         .filter(versions::next_timed_event.le(before))
         // Is a leaf node
         .filter(parents::child.is_null())
-        // Is not terminated
+        // Has not been terminated
         .filter(versions::terminated.is_null())
         // Get earliest
         .order(versions::next_timed_event.asc())
@@ -166,6 +166,8 @@ pub fn get_current_versions(c: &PgConnection, ingest_id: i32, entity_type: &str,
         .filter(versions::ingest_id.eq(ingest_id))
         // Has the right entity type (entity id handled below)
         .filter(versions::entity_type.eq(entity_type))
+        // Has not been terminated
+        .filter(versions::terminated.is_null())
         // Has no children
         .left_join(parents::versions_parents.on(parents::parent.eq(versions::id)))
         .filter(parents::child.is_null());
@@ -199,6 +201,8 @@ pub fn get_possible_versions_at(c: &PgConnection, ingest_id: i32, entity_type: &
         .filter(versions::ingest_id.eq(ingest_id))
         // Has the right entity type
         .filter(versions::entity_type.eq(entity_type))
+        // Has not been terminated
+        .filter(versions::terminated.is_null())
         // Was created before the requested time
         .filter(versions::event_time.le(at_time))
         // Has no children, or at least one child is after the requested time
@@ -266,22 +270,32 @@ pub fn save_versions<T>(c: &PgConnection, new_versions: T) -> QueryResult<Vec<Ve
     })
 }
 
-pub fn get_recently_updated_entities(c: &PgConnection, ingest_id: i32, count: i64) -> QueryResult<Vec<(String, Uuid, serde_json::Value)>> {
+pub fn get_recently_updated_entities(c: &PgConnection, ingest_id: i32, count: usize) -> QueryResult<Vec<(String, Uuid, serde_json::Value)>> {
     use crate::schema::versions::dsl as versions;
     use crate::schema::versions_parents::dsl as parents;
     use crate::schema::events::dsl as events;
-    versions::versions
-        .select((versions::entity_type, versions::entity_id, versions::data))
+    let mut intermediate = versions::versions
         .left_join(parents::versions_parents.on(parents::parent.eq(versions::id)))
         .inner_join(events::events.on(events::id.eq(versions::from_event)))
+        .select((versions::entity_type, versions::entity_id, versions::data, events::event_time))
         // Is from the right ingest
         .filter(versions::ingest_id.eq(ingest_id))
         // Has no children
         .filter(parents::child.is_null())
-        // Order by event
-        .order(events::event_time.desc())
-        .limit(count)
-        .get_results::<(String, Uuid, serde_json::Value)>(c)
+        // Only once per entity
+        .distinct_on((versions::entity_type, versions::entity_id))
+        // Order by event (distinct_on requires ordering by those columns first)
+        .order((versions::entity_type, versions::entity_id, events::event_time.desc()))
+        .get_results::<(String, Uuid, serde_json::Value, DateTime<Utc>)>(c)?;
+
+    intermediate.sort_unstable_by_key(|(_, _, _, time)| std::cmp::Reverse(*time));
+
+    Ok(
+        intermediate.into_iter()
+            .take(count)
+            .map(|(t, id, val, _)| (t, id, val))
+            .collect()
+    )
 }
 
 pub fn get_entity_debug(c: &PgConnection, ingest_id: i32, entity_type: &str, entity_id: Uuid) -> QueryResult<Vec<(Version, Event, Vec<Parent>)>> {
@@ -389,12 +403,37 @@ pub fn delete_versions_for_entity_after(c: &PgConnection, ingest_id: i32, entity
 }
 
 
-pub fn terminate_versions(c: &PgConnection, to_update: Vec<i32>, reason: String) -> QueryResult<()> {
+pub fn terminate_versions(c: &PgConnection, mut to_update: Vec<i32>, reason: String) -> QueryResult<()> {
     use crate::schema::versions::dsl as versions;
 
-    diesel::update(versions::versions.filter(versions::id.eq_any(to_update)))
-        .set(versions::terminated.eq(Some(reason)))
-        .execute(c)?;
+    #[derive(QueryableByName)]
+    #[table_name = "versions"]
+    struct VersionId {
+        id: i32,
+    }
+
+    info!("Primary termination: {} versions", to_update.len());
+
+    while !to_update.is_empty() {
+        diesel::update(versions::versions.filter(versions::id.eq_any(to_update)))
+            .set(versions::terminated.eq(Some(&reason)))
+            .execute(c)?;
+
+        to_update = diesel::sql_query("
+            select v.id
+            from versions v
+                     join versions_parents vp on vp.child = v.id
+                     join versions p on p.id = vp.parent
+            where v.terminated is null
+            group by v.id
+            having count(*) = count(p.terminated)
+        ").get_results::<VersionId>(c)?
+            .into_iter()
+            .map(|v| v.id)
+            .collect();
+
+        info!("Subsequent termination: {} versions", to_update.len());
+    }
 
     Ok(())
 }

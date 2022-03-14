@@ -5,7 +5,7 @@ use serde::Serialize;
 use rocket::form::{Form, FromForm};
 use rocket::response::{Redirect};
 use rocket::serde::json::{json, Value};
-use rocket::{State, uri};
+use rocket::{error, State, uri};
 use uuid::Uuid;
 use anyhow::anyhow;
 use text_diff::Difference;
@@ -121,7 +121,10 @@ pub async fn debug(conn: BlarserDbConn, ingest: &State<IngestTask>) -> Result<Te
     let entities = conn.run(move |c| {
         get_recently_updated_entities(c, ingest_id, 500)
     }).await
-        .map_err(|e| ServerError::InternalError(anyhow!(e).context("In debug route").to_string()))?
+        .map_err(|e| {
+            error!("Diesel error: {}", e);
+            ServerError::InternalError(anyhow!(e).context("In debug route").to_string())
+        })?
         .into_iter()
         .map(|(entity_type, entity_id, entity_json)| DebugEntityParams {
             name: sim::entity_description(&entity_type, entity_json),
