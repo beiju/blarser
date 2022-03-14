@@ -1,5 +1,5 @@
 use std::fmt::{Display, Formatter};
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Duration, Timelike, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use partial_information::PartialInformationCompare;
@@ -74,6 +74,17 @@ impl Entity for Sim {
             time: self.earlseason_date,
             event_type: TimedEventType::EarlseasonStart
         });
+
+        if self.phase == 2 {
+            let time = after_time
+                .with_minute(0).unwrap()
+                .with_second(0).unwrap() + Duration::hours(1);
+
+            earliest.push(TimedEvent {
+                time,
+                event_type: TimedEventType::DayAdvance
+            });
+        }
 
         earliest.into_inner()
     }

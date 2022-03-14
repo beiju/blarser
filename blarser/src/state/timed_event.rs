@@ -44,6 +44,7 @@ fn earlseason_start(state: &impl StateInterface) {
 }
 
 fn day_advance(state: &impl StateInterface) {
+    // TODO Check that there are no games going to handle spillover
     state.with_sim(|mut sim| {
         sim.day += 1;
 
