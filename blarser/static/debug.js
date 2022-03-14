@@ -8,7 +8,7 @@ async function addEntityView(entityType, entityId) {
     const nodeRadius = 20;
     const layout = d3
         .sugiyama() // base layout
-        .decross(d3.decrossOpt()) // minimize number of crossings
+        .decross(d3.decrossTwoLayer()) // minimize number of crossings
         .nodeSize((node) => [(node ? 15.6 : 0.25) * nodeRadius, 3 * nodeRadius]); // set node size instead of constraining to fit
     const {width, height} = layout(dag);
 
