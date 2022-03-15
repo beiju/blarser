@@ -1,6 +1,8 @@
 #![feature(let_chains)]
 #![feature(trivial_bounds)] // Necessary for partial_information
 #![feature(generic_associated_types)]
+#![feature(map_first_last)] // Used in ObservationStream in chron ingest
+
 
 #[macro_use]
 extern crate diesel;

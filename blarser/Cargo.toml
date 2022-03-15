@@ -37,6 +37,7 @@ owning_ref = "0.4.1"
 partial_information = { path = "../partial_information" }
 partial_information_derive = { path = "../partial_information_derive" }
 text-diff = "0.4.0"
+async-trait = "0.1.52"
 
 
 [dependencies.rocket_sync_db_pools]

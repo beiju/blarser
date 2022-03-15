@@ -3,7 +3,6 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use partial_information::PartialInformationCompare;
-use crate::sim;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TimedEventType {
