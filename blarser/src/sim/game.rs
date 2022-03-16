@@ -286,6 +286,11 @@ impl Game {
             self.score_update = String::new();
             self.score_ledger = String::new();
         }
+
+        // TODO This isn't going to properly handle un-shame
+        if events.iter().any(|e| e.r#type == EventType::ShamingRun) {
+            self.shame = true;
+        }
     }
 
     pub(crate) fn team_at_bat(&self) -> &GameByTeam {

@@ -154,7 +154,7 @@ pub enum EventType {
     Strike = 13,
     Ball = 14,
     FoulBall = 15,
-    Shame = 20,
+    ShamingRun = 20,
     HomeFieldAdvantage = 21,
     HitByPitch = 22,
     BatterSkipped = 23,
@@ -242,6 +242,7 @@ pub enum EventType {
     ReverbRotationShuffle = 132,
     // At this point I got bored typing them all and only filled in the ones I encountered
     AddedModFromOtherMod = 146,
+    TeamShamed = 155,
     RunsScored = 209,
     WinCollectedRegular = 214,
     WinCollectedPostseason = 215,

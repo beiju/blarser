@@ -39,6 +39,7 @@ impl IngestEvent for EventuallyEvent {
             EventType::StormWarning => storm_warning(state, self),
             EventType::Snowflakes => snowflakes(state, self),
             EventType::ModExpires => mod_expires(state, self),
+            EventType::ShamingRun => shame(state, self),
             _ => todo!(),
         }
     }
@@ -723,8 +724,28 @@ fn mod_expires(state: &impl StateInterface, event: &EventuallyEvent) {
     });
 }
 
+fn shame(state: &impl StateInterface, event: &EventuallyEvent) {
+    // Make a new event with the shame stripped off
+    let (_shame_event, other_events) = event.metadata.siblings.split_first()
+        .expect("Shame event must have siblings");
+    let mut other_event = other_events.first().cloned()
+        .expect("Shame event must have another event inside it");
+    other_event.metadata.siblings = event.metadata.siblings.clone();
 
-pub fn separate_scoring_events(siblings: &Vec<EventuallyEvent>, hitter_id: Uuid) -> (Vec<Uuid>, Vec<&EventuallyEvent>) {
+    other_event.apply(state);
+
+    // let game_id = shame_event.game_id()
+    //     .expect("Shame event must have a game id");
+    // let (shaming_team_id, shamed_team_id) = state.read_game(game_id, |game| {
+    //     (game.team_at_bat().team, game.team_fielding().team)
+    // }).into_iter().exactly_one().expect("Can't handle ambiguity in who was shamed");
+    //
+    // state.with_team(shaming_team_id, |mut team| {
+    //     team.state.
+    // });
+}
+
+pub fn separate_scoring_events(siblings: &[EventuallyEvent], hitter_id: Uuid) -> (Vec<Uuid>, Vec<&EventuallyEvent>) {
     // The first event is never a scoring event, and it mixes up the rest of the logic because the
     // "hit" or "walk" event type is reused
     let (first, rest) = siblings.split_first()
