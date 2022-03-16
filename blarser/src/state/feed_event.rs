@@ -273,10 +273,6 @@ fn fielding_out(state: &impl StateInterface, event: &EventuallyEvent) {
         game.out(event, outs_added);
         game.end_at_bat();
 
-        if event.id.to_string() == "df44b236-a500-4e3d-859a-9c96a24effd0" || event.id.to_string() == "174a3a89-e3de-46a1-bd81-d8a4897d2fe2" {
-            println!("BREAK");
-        }
-
         let games: Vec<_> = if let parse::FieldingOut::FieldersChoice(runner_name_parsed, out_at_base) = out {
             let runner_idx = game.get_baserunner_with_name(runner_name_parsed, out_at_base);
             game.remove_base_runner(runner_idx);
@@ -365,10 +361,6 @@ fn hit(state: &impl StateInterface, event: &EventuallyEvent) {
 
         game.game_update_pitch(event);
         game.end_at_bat();
-
-        if event.id.to_string() == "df44b236-a500-4e3d-859a-9c96a24effd0" || event.id.to_string() == "174a3a89-e3de-46a1-bd81-d8a4897d2fe2" {
-            println!("BREAK");
-        }
 
         // Must advance runners before putting the batter on first because otherwise forced batter
         // advancement would mess things up
