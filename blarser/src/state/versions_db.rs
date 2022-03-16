@@ -1,9 +1,8 @@
+use diesel::prelude::*;
 use diesel::{Connection, insert_into, Insertable, QueryDsl, RunQueryDsl};
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
 use itertools::{Itertools, izip};
-use diesel::prelude::*;
-use diesel::result::Error;
 use rocket::info;
 
 use crate::api::ChroniclerItem;
@@ -20,7 +19,7 @@ pub struct NewVersion {
     pub entity_id: Uuid,
     pub data: serde_json::Value,
     pub from_event: i32,
-    pub observed_by: Option<DateTime<Utc>>,
+    pub observations: Vec<DateTime<Utc>>,
     pub next_timed_event: Option<DateTime<Utc>>,
 }
 
@@ -31,7 +30,7 @@ impl PartialEq for NewVersion {
             self.entity_id == other.entity_id &&
             self.data == other.data &&
             self.from_event == other.from_event &&
-            self.observed_by == other.observed_by &&
+            self.observations == other.observations &&
             self.next_timed_event == other.next_timed_event
     }
 }
@@ -47,7 +46,7 @@ pub struct Version {
     pub terminated: Option<String>,
     pub data: serde_json::Value,
     pub from_event: i32,
-    pub observed_by: Option<DateTime<Utc>>,
+    pub observations: Vec<DateTime<Utc>>,
     pub next_timed_event: Option<DateTime<Utc>>,
 }
 
@@ -91,7 +90,7 @@ impl NewVersion {
             data: serde_json::to_value(entity)
                 .expect("Failed to serialize PartialInformation entity"),
             from_event,
-            observed_by: Some(item.valid_from),
+            observations: vec![item.valid_from],
             next_timed_event,
         }
     }
@@ -227,7 +226,7 @@ pub fn save_versions_from_entities<EntityT: sim::Entity>(c: &PgConnection, inges
             data: serde_json::to_value(entity)
                 .expect("Failed to serialize new version"),
             from_event,
-            observed_by: None,
+            observations: Vec::new(),
             next_timed_event,
         };
 
@@ -357,8 +356,6 @@ pub fn get_event_for_entity_preceding(c: &PgConnection, ingest_id: i32, entity_t
 
 pub fn get_entity_update_tree(c: &PgConnection, ingest_id: i32, entity_type: &str, entity_id: Uuid, start_time: DateTime<Utc>) -> QueryResult<(Vec<Event>, Vec<Vec<(Version, Vec<Parent>)>>)> {
     use crate::schema::versions::dsl as versions;
-    use crate::schema::events::dsl as events;
-    use crate::schema::versions_parents::dsl as parents;
 
     let mut loaded_events = get_events_for_entity_after(c, ingest_id, entity_type, entity_id, start_time)?;
 

@@ -51,8 +51,8 @@ async function addEntityView(entityType, entityId) {
         .attr("transform", ({x, y}) => `translate(${x}, ${y})`)
         .attr("title", ({data}) => data.event)
         .attr("data-bs-content", ({data}) => (
-            (data.terminated ? `<p>Terminated: ${data.terminated}</p>` : "") +
-            (data.observedBy ? `<p>Observed by: ${data.observedBy}</p>` : "") +
+            (data.terminated ? `<p>Terminated: ${data.terminated}</p>\n` : "\n") +
+            (data.observations.map(obs => `<p>Observed by: ${obs}</p>`).join("\n")) +
             `<pre class="tooltip-diff">${data.diff}</pre>`
         ));
 
@@ -61,7 +61,7 @@ async function addEntityView(entityType, entityId) {
         .append("ellipse")
         .attr("rx", nodeRadius*5)
         .attr("ry", nodeRadius)
-        .attr("fill", (n) => n.data.terminated ? "red" : (n.data.observedBy ? "green" : "blue"));
+        .attr("fill", (n) => n.data.terminated ? "red" : (n.data.observations.length > 0 ? "green" : "blue"));
 
     // Add text to nodes
     nodes

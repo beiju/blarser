@@ -138,6 +138,16 @@ impl<EntityT: sim::Entity> EntityObservation<EntityT> {
 
         let mut to_terminate = None;
 
+        // // Events in the placement range require different handling to events after the range (in
+        // let catchup_events = events.split_off(events.partition_point(|event| {
+        //     event.event_time <= self.latest_time
+        // }));
+        // Debug
+        // info!("{} == \"2021-12-06 16:23:36.898683 UTC\"", self.perceived_at.to_string());
+        if self.perceived_at.to_string() == "2021-12-06 16:23:36.898683 UTC" {
+            info!("BREAKPOINT HERE");
+        }
+
         let mut prev_generation = Vec::new();
         let mut version_conflicts = Some(Vec::new());
         for (event, versions) in events.into_iter().zip(generations) {
@@ -146,6 +156,10 @@ impl<EntityT: sim::Entity> EntityObservation<EntityT> {
             if event.event_time <= self.latest_time {
                 to_terminate = Some(versions.iter().map(|(v, _)| v.id).collect());
                 observe_generation::<EntityT>(&mut new_generation, &mut version_conflicts, versions, &self.entity_raw, self.perceived_at, force);
+            }
+
+            if prev_generation.len() > 2 {
+                info!("BREAK");
             }
 
             advance_generation(c, ingest_id, &mut new_generation, EntityT::name(), self.entity_id, event, prev_generation);
@@ -289,7 +303,7 @@ fn advance_generation(c: &PgConnection, ingest_id: i32, new_generation: &mut Mer
                 entity_id,
                 data: successor,
                 from_event,
-                observed_by: None,
+                observations: Vec::new(),
                 next_timed_event,
             };
 
@@ -341,6 +355,9 @@ fn observe_entity<EntityT: sim::Entity>(version: Version, entity_raw: &EntityT::
         }
     }
 
+    let mut observations = version.observations;
+    observations.push(perceived_at);
+
     Ok(NewVersion {
         ingest_id: version.ingest_id,
         entity_type: EntityT::name(),
@@ -348,7 +365,7 @@ fn observe_entity<EntityT: sim::Entity>(version: Version, entity_raw: &EntityT::
         data: serde_json::to_value(entity)
             .expect("Failed to serialize entity"),
         from_event: version.from_event,
-        observed_by: Some(perceived_at),
+        observations,
         next_timed_event: version.next_timed_event,
     })
 }

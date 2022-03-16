@@ -23,7 +23,7 @@ CREATE TABLE versions (
     data               JSONB NOT NULL,
     from_event         INT NOT NULL,
 
-    observed_by        TIMESTAMP WITH TIME ZONE,
+    observations       TIMESTAMP WITH TIME ZONE[] NOT NULL,
 
     next_timed_event   TIMESTAMP WITH TIME ZONE,
 

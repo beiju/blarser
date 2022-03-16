@@ -115,7 +115,7 @@ table! {
         terminated -> Nullable<Text>,
         data -> Jsonb,
         from_event -> Int4,
-        observed_by -> Nullable<Timestamptz>,
+        observations -> Array<Timestamptz>,
         next_timed_event -> Nullable<Timestamptz>,
     }
 }

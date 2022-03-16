@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::cell::RefCell;
 use chrono::{DateTime, Utc};
 use diesel::{PgConnection};
