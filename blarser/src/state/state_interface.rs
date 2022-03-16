@@ -131,7 +131,7 @@ impl<'conn> StateInterface for FeedStateInterface<'conn> {
         } else {
             info!("Updating all {} entities", EntityT::name());
         }
-        let versions = versions_db::get_current_versions(&self.conn, self.ingest_id, EntityT::name(), id);
+        let versions = versions_db::get_current_versions(self.conn, self.ingest_id, EntityT::name(), id);
         assert!(!versions.is_empty(), "Tried to modify an entity/entity type that doesn't have any entries");
 
         let mut all_successors = MergedSuccessors::new();
@@ -155,7 +155,7 @@ impl<'conn> StateInterface for FeedStateInterface<'conn> {
             todo!()
         }
 
-        versions_db::save_versions_from_entities(&self.conn, self.ingest_id, self.from_event, self.at_time, all_successors.into_inner())
+        versions_db::save_versions_from_entities(self.conn, self.ingest_id, self.from_event, self.at_time, all_successors.into_inner())
             .expect("Error saving successors to database");
     }
 }

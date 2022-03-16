@@ -17,7 +17,10 @@ impl<T: PartialEq> MergedSuccessors<T> {
             .find(|(old_successor, _)| new_successor == *old_successor);
 
         match found {
-            Some((_, parents)) => { parents.push(parent) }
+            Some((_, parents)) => {
+                assert!(!parents.contains(&parent), "Tried to add multiple identical successors");
+                parents.push(parent)
+            }
             None => { self.0.push((new_successor, vec![parent])) }
         }
     }

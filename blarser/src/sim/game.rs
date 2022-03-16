@@ -122,7 +122,7 @@ pub struct Game {
     pub is_title_match: bool,
     pub queued_events: Vec<i32>,
     pub series_length: i32,
-    pub bases_occupied: Vec<Ranged<i32>>,
+    pub bases_occupied: Vec<i32>,
     pub base_runner_mods: Vec<String>,
     pub game_start_phase: i32,
     pub half_inning_outs: i32,
@@ -395,7 +395,7 @@ impl Game {
         Iterator::zip(baserunner_properties.into_iter(), self.bases_occupied.iter())
             .enumerate()
             .filter_map(|(i, (name, base))| {
-                if expected_property == name && base.could_be(&(which_base as i32 - 1)) {
+                if expected_property == name && *base == (which_base as i32 - 1) {
                     Some(i)
                 } else {
                     None
@@ -412,56 +412,67 @@ impl Game {
         self.baserunner_count -= 1;
     }
 
-    pub(crate) fn advance_runners(&mut self, advance_at_least: i32) {
-        for base in &mut self.bases_occupied {
-            // You can advance by up to 1 "extra" base
-            *base = base.clone() + Ranged::Range(advance_at_least, advance_at_least + 1)
+    pub(crate) fn remove_each_base_runner(self) -> impl Iterator<Item=Self> {
+        // Intended for cases when we know some base runner got out, but we don't know which (i.e.,
+        // double plays)
+        let num_base_runners = self.bases_occupied.len();
+        assert!(num_base_runners > 0, "Tried to remove a baserunner when there weren't any");
+        iter::repeat(self)
+            .take(num_base_runners)
+            .enumerate()
+            .map(|(i, mut game)| {
+                game.remove_base_runner(i);
+                game
+            })
+    }
+
+    pub(crate) fn advance_runners(mut self, advance_at_least: i32) -> Vec<Self> {
+        // Start by advancing everyone by the minimum amount
+        for base in &mut self.bases_occupied { *base += advance_at_least; }
+
+        let num_bases_occupied = self.bases_occupied.len();
+        let mut versions = vec![self];
+        for i in (0..num_bases_occupied).rev() {
+            // Can't modify versions if I iterate it in place, and I need to clone most of the
+            // versions anyway, so might as well clone versions here
+            for mut version in versions.clone() {
+                let base = version.bases_occupied[i];
+
+                // Don't add a version that involves players advancing to the same base as another
+                // player (TODO: except circumstances known to cause handholding)
+                if let Some(next_occupied_base) = version.bases_occupied.get(i + 1) {
+                    if *next_occupied_base == base + 1 {
+                        continue
+                    }
+                }
+
+                version.bases_occupied[i] += 1;
+                versions.push(version);
+            }
         }
+
+        versions
     }
 
     pub(crate) fn push_base_runner(&mut self, runner_id: Uuid, runner_name: String, runner_mod: String, to_base: Base) {
         self.base_runners.push(runner_id);
         self.base_runner_names.push(runner_name);
         self.base_runner_mods.push(runner_mod);
-        self.bases_occupied.push(Ranged::Known(to_base as i32));
+        self.bases_occupied.push(to_base as i32);
         self.baserunner_count += 1;
 
         let mut last_occupied_base: Option<i32> = None;
-        for base in self.bases_occupied.iter_mut().rev() {
-            match base {
-                Ranged::Known(base_num) => {
-                    if let Some(last_occupied_base_num) = last_occupied_base.as_mut() {
-                        if *base_num <= *last_occupied_base_num {
-                            *last_occupied_base_num = *base_num + 1;
+        for base_num in self.bases_occupied.iter_mut().rev() {
+            if let Some(last_occupied_base_num) = last_occupied_base.as_mut() {
+                if *base_num <= *last_occupied_base_num {
+                    *last_occupied_base_num = *base_num + 1;
 
-                            *base = Ranged::Known(*last_occupied_base_num);
-                        } else {
-                            *last_occupied_base_num = *base_num;
-                        }
-                    } else {
-                        last_occupied_base = Some(*base_num);
-                    }
+                    *base_num = *last_occupied_base_num;
+                } else {
+                    *last_occupied_base_num = *base_num;
                 }
-                Ranged::Range(min_base, max_base) => {
-                    if let Some(last_occupied_base_num) = last_occupied_base {
-                        if *min_base <= last_occupied_base_num {
-                            let last_occupied_base_num = *min_base + 1;
-
-                            if last_occupied_base_num == *max_base {
-                                // Then this has collapsed the possibilities
-                                *base = Ranged::Known(last_occupied_base_num);
-                            } else {
-                                // Then this has just narrowed down the range
-                                *min_base = last_occupied_base_num;
-                            }
-                            last_occupied_base = Some(last_occupied_base_num)
-                        } else {
-                            last_occupied_base = Some(*min_base);
-                        }
-                    } else {
-                        last_occupied_base = Some(*min_base);
-                    }
-                }
+            } else {
+                last_occupied_base = Some(*base_num);
             }
         }
     }

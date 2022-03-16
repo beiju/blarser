@@ -243,7 +243,7 @@ fn fielding_out(state: &impl StateInterface, event: &EventuallyEvent) {
     }).into_iter().exactly_one().expect("Can't handle ambiguity in player at bat");
 
     state.with_game(game_id, |mut game| {
-        let batter_id = game.team_at_bat().batter.clone()
+        let batter_id = game.team_at_bat().batter
             .expect("Batter must exist during GroundOut/FlyOut event");
         let batter_name = game.team_at_bat().batter_name.clone()
             .expect("Batter name must exist during GroundOut/FlyOut event");
@@ -270,29 +270,42 @@ fn fielding_out(state: &impl StateInterface, event: &EventuallyEvent) {
             game.score_runner(runner_id);
         }
 
-        if let parse::FieldingOut::FieldersChoice(runner_name_parsed, out_at_base) = out {
-            let runner_idx = game.get_baserunner_with_name(runner_name_parsed, out_at_base);
-            game.remove_base_runner(runner_idx);
-            // Advance runners first to ensure the batter is not allowed past first
-            game.advance_runners(0);
-            let batter_mod = game.team_at_bat().batter_mod.clone();
-            game.push_base_runner(batter_id, batter_name, batter_mod, Base::First);
-        } else if let parse::FieldingOut::DoublePlay = out {
-            if game.baserunner_count == 1 {
-                game.remove_base_runner(0);
-            } else if game.half_inning_outs + 2 < 3 {
-                // Need to figure out how to handle double plays with multiple people on base
-                todo!()
-            }
-            game.advance_runners(0);
-        } else {
-            game.advance_runners(0);
-        }
-
         game.out(event, outs_added);
         game.end_at_bat();
 
-        Ok(vec![game])
+        if event.id.to_string() == "df44b236-a500-4e3d-859a-9c96a24effd0" || event.id.to_string() == "174a3a89-e3de-46a1-bd81-d8a4897d2fe2" {
+            println!("BREAK");
+        }
+
+        let games: Vec<_> = if let parse::FieldingOut::FieldersChoice(runner_name_parsed, out_at_base) = out {
+            let runner_idx = game.get_baserunner_with_name(runner_name_parsed, out_at_base);
+            game.remove_base_runner(runner_idx);
+            // Advance runners first to ensure the batter is not allowed past first. This requires
+            // putting push_base_runner in a map.
+            game.advance_runners(0).into_iter()
+                .update(|game| {
+                    let batter_mod = game.team_at_bat().batter_mod.clone();
+                    game.push_base_runner(batter_id, batter_name.clone(), batter_mod, Base::First);
+                })
+                // That combination of advance_runners and push_base_runner means there can be dupes
+                // (runner advanced 0->1, then batter put on 0 is equivalent to runner stayed on
+                //  0, then batter put on 0 and runner force advanced to 1). This is not the
+                // prettiest way to fix it but it works and it was quick to implement.
+                .unique_by(|g| g.bases_occupied.clone())
+                .collect()
+        } else if let parse::FieldingOut::DoublePlay = out {
+            if game.baserunner_count > 0 {
+                game.remove_each_base_runner().into_iter()
+                    .flat_map(|game| game.advance_runners(0))
+                    .collect()
+            } else {
+                game.advance_runners(0)
+            }
+        } else {
+            game.advance_runners(0)
+        };
+
+        Ok(games)
     });
 
     reset_consecutive_hits(state, batter_id);
@@ -334,7 +347,7 @@ fn hit(state: &impl StateInterface, event: &EventuallyEvent) {
         .expect("Hit event must have exactly one player id");
 
     state.with_game(game_id, |mut game| {
-        let batter_id = game.team_at_bat().batter.clone()
+        let batter_id = game.team_at_bat().batter
             .expect("Batter must exist during Hit event");
         let batter_name = game.team_at_bat().batter_name.clone()
             .expect("Batter name must exist during Hit event");
@@ -351,12 +364,24 @@ fn hit(state: &impl StateInterface, event: &EventuallyEvent) {
         }
 
         game.game_update_pitch(event);
-        game.advance_runners(hit_type as i32 + 1);
-        let batter_mod = game.team_at_bat().batter_mod.clone();
-        game.push_base_runner(batter_id, batter_name, batter_mod, hit_type);
         game.end_at_bat();
 
-        Ok(vec![game])
+        if event.id.to_string() == "df44b236-a500-4e3d-859a-9c96a24effd0" || event.id.to_string() == "174a3a89-e3de-46a1-bd81-d8a4897d2fe2" {
+            println!("BREAK");
+        }
+
+        // Must advance runners before putting the batter on first because otherwise forced batter
+        // advancement would mess things up
+        let games = game.advance_runners(hit_type as i32 + 1).into_iter()
+            .update(|game| {
+                let batter_mod = game.team_at_bat().batter_mod.clone();
+                game.push_base_runner(batter_id, batter_name.clone(), batter_mod, hit_type);
+            })
+            // See note in FieldersChoice
+            .unique_by(|g| g.bases_occupied.clone())
+            .collect();
+
+        Ok(games)
     });
 
     increment_consecutive_hits(state, event_batter_id);

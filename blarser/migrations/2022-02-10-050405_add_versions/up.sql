@@ -37,6 +37,7 @@ CREATE TABLE versions_parents (
     id                  SERIAL PRIMARY KEY,
     parent              INT NOT NULL,
     child               INT NOT NULL,
+    UNIQUE (parent, child),
     CONSTRAINT parent_fk FOREIGN KEY(parent) REFERENCES versions(id) ON DELETE CASCADE,
     CONSTRAINT child_fk FOREIGN KEY(child) REFERENCES versions(id) ON DELETE CASCADE
 );
@@ -56,7 +57,7 @@ CREATE VIEW versions_with_range AS (
            end_event.event_time AS end_time
     FROM versions
     INNER JOIN events start_event ON versions.from_event = start_event.id
-    LEFT JOIN versions_parents vp on versions.id = vp.parent
-    LEFT JOIN versions child_version on vp.child = child_version.id
+    LEFT JOIN versions_parents vp ON versions.id = vp.parent
+    LEFT JOIN versions child_version ON vp.child = child_version.id
     LEFT JOIN events end_event ON child_version.from_event = end_event.id
-)
+);
