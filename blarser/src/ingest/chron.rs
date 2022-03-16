@@ -1,3 +1,5 @@
+use std::cmp::{Ordering, Reverse};
+use std::collections::{BinaryHeap};
 use std::iter;
 use std::pin::Pin;
 use chrono::{DateTime, Utc};
@@ -42,6 +44,26 @@ trait Observation {
     fn sort_time(&self) -> DateTime<Utc>;
 
     async fn do_ingest(self: Box<Self>, ingest: &mut IngestState);
+}
+
+impl Eq for dyn Observation + Send {}
+
+impl PartialEq<Self> for dyn Observation + Send {
+    fn eq(&self, other: &Self) -> bool {
+        self.sort_time().eq(&other.sort_time())
+    }
+}
+
+impl PartialOrd<Self> for dyn Observation + Send {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.sort_time().partial_cmp(&other.sort_time())
+    }
+}
+
+impl Ord for dyn Observation + Send {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.sort_time().cmp(&other.sort_time())
+    }
 }
 
 type BoxedObservation = Box<dyn Observation + Send>;
@@ -206,7 +228,7 @@ fn chron_updates(start_at_time: &'static str) -> impl Stream<Item=BoxedObservati
         })
         .chain(iter::once({
             let stream = chronicler::game_updates(start_at_time)
-                .map(|item| new_observation::<sim::Game>(item));
+                .map(new_observation::<sim::Game>);
 
             Box::pin(stream) as PinnedObservationStream
         }));
@@ -216,27 +238,37 @@ fn chron_updates(start_at_time: &'static str) -> impl Stream<Item=BoxedObservati
 
 fn kmerge_stream(streams: impl Iterator<Item=PinnedObservationStream>) -> impl Stream<Item=BoxedObservation> {
     let peekable_streams: Vec<_> = streams
-        // Two layers of Box::pin :(
-        .map(|s| Box::pin(s.peekable()))
+        .map(|s| (
+            s.fuse(),
+            BinaryHeap::with_capacity(100)
+        ))
         .collect();
 
     stream::unfold(peekable_streams, |mut streams| async {
-        let selected_stream = *stream::iter(&mut streams)
-            .enumerate()
-            .filter_map(|(i, stream)| async move {
-                if let Some(obs) = stream.as_mut().peek().await {
-                    Some((i, obs.sort_time()))
+        // Refill caches
+        for (stream, cache) in &mut streams {
+            while cache.len() < 100 {
+                if let Some(next) = stream.next().await {
+                    cache.push(Reverse(next));
                 } else {
-                    None
+                    break // Avoids infinite loop
                 }
+            }
+        }
+
+        let selected_stream = *streams.iter()
+            .enumerate()
+            .filter_map(|(i, (_, cache))| {
+                cache.peek().map(|Reverse(v)| (i, v))
             })
-            .collect::<Vec<_>>().await
+            .collect::<Vec<_>>()
             .iter()
             .min_by_key(|(_, date)| date)
             .map(|(i, _)| i)
             .expect("TODO: Handle end of all streams");
 
-        let next = streams[selected_stream].next().await
+        let (_, cache) = &mut streams[selected_stream];
+        let Reverse(next) = cache.pop()
             .expect("selected_stream should never refer to a stream that doesn't have a next element");
 
         Some((next, streams))
@@ -245,7 +277,7 @@ fn kmerge_stream(streams: impl Iterator<Item=PinnedObservationStream>) -> impl S
 
 pub async fn init_chron(ingest: &mut IngestState, start_at_time: &'static str, start_time_parsed: DateTime<Utc>) {
     let initial_versions: Vec<_> = initial_state(start_at_time).collect().await;
-    add_initial_versions(&mut ingest.db, ingest.ingest_id, start_time_parsed, initial_versions).await;
+    add_initial_versions(&ingest.db, ingest.ingest_id, start_time_parsed, initial_versions).await;
 
     info!("Finished populating initial Chron values");
 }
