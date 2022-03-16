@@ -109,8 +109,11 @@ impl<EntityT: 'static + sim::Entity> Observation for EntityObservation<EntityT> 
         if let Some(conflicts) = approval {
             // TODO Make a fun html debug view from conflicts info
             let message = conflicts.into_iter()
-                .map(|(id, reason)| {
-                    format!("Can't apply observation to version {}:\n{}", id, reason)
+                .map(|(_, reason)| {
+                    // TODO Print the info about which version the conflict is from, not about which
+                    //   observation we tried to apply
+                    format!("Can't apply observation to {} {} at {}:\n{}",
+                            EntityT::name(), this.entity_id, this.perceived_at, reason)
                 })
                 .join("\n");
 

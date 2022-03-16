@@ -58,10 +58,10 @@ fn apply_timed_event<EntityT: sim::Entity>(c: &mut PgConnection, ingest_id: i32,
 
     let from_event = add_timed_event(c, ingest_id, event.clone());
 
-    let mut state = FeedStateInterface::new(c, ingest_id, from_event, event.time);
+    let state = FeedStateInterface::new(c, ingest_id, from_event, event.time);
 
     info!("Applying timed event {:?}", event);
-    event.apply(&mut state);
+    event.apply(&state);
 }
 
 async fn apply_feed_event(ingest: IngestState, event: EventuallyEvent) -> IngestState {
@@ -69,10 +69,10 @@ async fn apply_feed_event(ingest: IngestState, event: EventuallyEvent) -> Ingest
         c.transaction(|| {
             let from_event = add_feed_event(c, ingest.ingest_id, event.clone());
 
-            let mut state = FeedStateInterface::new(c, ingest.ingest_id, from_event, event.created);
+            let state = FeedStateInterface::new(c, ingest.ingest_id, from_event, event.created);
 
             info!("Applying feed event {:?}", event);
-            event.apply(&mut state);
+            event.apply(&state);
 
             Ok::<_, diesel::result::Error>(())
         })

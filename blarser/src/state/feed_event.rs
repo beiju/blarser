@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use anyhow::anyhow;
 use itertools::Itertools;
 use serde::Deserialize;
 use uuid::Uuid;
@@ -39,7 +40,9 @@ impl IngestEvent for EventuallyEvent {
             EventType::StormWarning => storm_warning(state, self),
             EventType::Snowflakes => snowflakes(state, self),
             EventType::ModExpires => mod_expires(state, self),
-            EventType::ShamingRun => shame(state, self),
+            EventType::ShamingRun => shaming_run(state, self),
+            EventType::TeamWasShamed => team_was_shamed(state, self),
+            EventType::TeamDidShame => team_did_shame(state, self),
             _ => todo!(),
         }
     }
@@ -724,9 +727,26 @@ fn mod_expires(state: &impl StateInterface, event: &EventuallyEvent) {
     });
 }
 
-fn shame(state: &impl StateInterface, event: &EventuallyEvent) {
+fn shaming_run(state: &impl StateInterface, event: &EventuallyEvent) {
+    // Read the away team's score before applying the event
+    let game_id = event.game_id()
+        .expect("Shame event must have a game id");
+    let home_score_before = state.read_game(game_id, |game| {
+        game.home.score.expect("homeScore must exist during a Shame event")
+    }).into_iter().exactly_one()
+        .expect("Can't handle ambiguity in home team score");
+    let home_score_after = event.metadata.siblings.iter()
+        .find(|e| e.r#type == EventType::RunsScored)
+        .expect("Shame event must have a RunsScored sibling")
+        .metadata.other.get("homeScore")
+        .expect("RunsScored event metadata must have homeScore")
+        .as_f64()
+        .expect("homeScore must be a float")
+        as f32;
+    let shame_runs = home_score_after - home_score_before;
+
     // Make a new event with the shame stripped off
-    let (_shame_event, other_events) = event.metadata.siblings.split_first()
+    let (shame_event, other_events) = event.metadata.siblings.split_first()
         .expect("Shame event must have siblings");
     let mut other_event = other_events.first().cloned()
         .expect("Shame event must have another event inside it");
@@ -734,15 +754,62 @@ fn shame(state: &impl StateInterface, event: &EventuallyEvent) {
 
     other_event.apply(state);
 
-    // let game_id = shame_event.game_id()
-    //     .expect("Shame event must have a game id");
-    // let (shaming_team_id, shamed_team_id) = state.read_game(game_id, |game| {
-    //     (game.team_at_bat().team, game.team_fielding().team)
-    // }).into_iter().exactly_one().expect("Can't handle ambiguity in who was shamed");
-    //
-    // state.with_team(shaming_team_id, |mut team| {
-    //     team.state.
-    // });
+    // I have a feeling it's not enough to consider just the shaming run, but I'll get to that when
+    // I have proof of it
+    // The shamed team was first in the event I looked at, hopefully that's true in general
+    let shamed_team_id = *shame_event.team_tags.first()
+        .expect("Shame event must have at least one team tag");
+
+    state.with_team(shamed_team_id, |mut team| {
+        team.shame_runs += shame_runs;
+        Ok(vec![team])
+    });
+}
+
+fn team_was_shamed(state: &impl StateInterface, event: &EventuallyEvent) {
+    let team_id = event.team_id()
+        .expect("TeamWasShamed event must have exactly one team id");
+
+    team_shame_common(state, event, team_id, true);
+}
+
+fn team_did_shame(state: &impl StateInterface, event: &EventuallyEvent) {
+    let team_id = event.team_id()
+        .expect("TeamDidShame event must have exactly one team id");
+
+    team_shame_common(state, event, team_id, false);
+}
+
+fn team_shame_common(state: &impl StateInterface, event: &EventuallyEvent, team_id: Uuid, was_shamed: bool) {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct TeamShameMetadata {
+        total_shames: i32,
+        total_shamings: i32,
+    }
+
+    let metadata: TeamShameMetadata = serde_json::from_value(event.metadata.other.clone())
+        .expect("Failed to parse team shame metadata");
+
+    state.with_team(team_id, |mut team| {
+        if was_shamed {
+            team.total_shames += 1;
+            team.season_shames += 1;
+        } else {
+            team.total_shamings += 1;
+            team.season_shamings += 1;
+        }
+
+        if team.total_shamings != metadata.total_shamings {
+            Err(anyhow!("totalShamings field in event metadata ({}) did not match team's totalShamings ({})",
+                metadata.total_shamings, team.total_shamings))
+        } else if team.total_shames != metadata.total_shames {
+            Err(anyhow!("totalShames field in event metadata ({}) did not match team's totalShames ({})",
+                metadata.total_shames, team.total_shames))
+        } else {
+            Ok(vec![team])
+        }
+    });
 }
 
 pub fn separate_scoring_events(siblings: &[EventuallyEvent], hitter_id: Uuid) -> (Vec<Uuid>, Vec<&EventuallyEvent>) {

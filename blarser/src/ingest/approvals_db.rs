@@ -28,6 +28,7 @@ pub fn get_approval(c: &PgConnection, entity_type: &str, entity_id: Uuid, entity
         .filter(dsl::chronicler_entity_type.eq(entity_type))
         .filter(dsl::chronicler_entity_id.eq(entity_id))
         .filter(dsl::chronicler_time.eq(entity_time))
+        .filter(dsl::message.eq(message))
         .get_result::<IngestApproval>(c)
         .optional()?;
 

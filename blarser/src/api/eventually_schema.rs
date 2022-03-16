@@ -82,6 +82,10 @@ impl EventuallyEvent {
             .cloned()
     }
 
+    pub fn team_id(&self) -> Result<Uuid, anyhow::Error> {
+        self.team_id_excluding(Uuid::nil())
+    }
+
     pub fn player_id_excluding(&self, excluding: Uuid) -> Result<Uuid, anyhow::Error> {
         self.player_tags.iter()
             .filter(|uuid| uuid != &&excluding)
@@ -242,7 +246,8 @@ pub enum EventType {
     ReverbRotationShuffle = 132,
     // At this point I got bored typing them all and only filled in the ones I encountered
     AddedModFromOtherMod = 146,
-    TeamShamed = 155,
+    TeamWasShamed = 154,
+    TeamDidShame = 155,
     RunsScored = 209,
     WinCollectedRegular = 214,
     WinCollectedPostseason = 215,
