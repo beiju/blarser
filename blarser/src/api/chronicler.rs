@@ -7,7 +7,7 @@ use crate::api::chronicler_schema::{ChroniclerItem, ChroniclerResponse, Chronicl
 // This list comes directly from
 // https://github.com/xSke/Chronicler/blob/main/SIBR.Storage.Data/Models/UpdateType.cs
 //noinspection SpellCheckingInspection
-pub const ENDPOINT_NAMES: [&str; 44] = [
+pub const ENDPOINT_NAMES: [&str; 43] = [
     "player",
     "team",
     // Completely covered by "league", "temporal", "sim", and games (handled separately). See
@@ -26,7 +26,8 @@ pub const ENDPOINT_NAMES: [&str; 44] = [
     // This is the ticker, not connected to the sim at all
     // "globalevents",
     "offseasonsetup",
-    "standings",
+    // It's annoying to deal with and not useful for blarsing blaseball
+    // "standings",
     "season",
     "league",
     "subleague",

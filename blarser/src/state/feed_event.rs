@@ -8,6 +8,7 @@ use crate::api::{EventType, EventuallyEvent};
 use crate::state::events::IngestEvent;
 use crate::{StateInterface};
 use crate::parse::{self, Base};
+use crate::sim::{GameByTeam};
 
 impl IngestEvent for EventuallyEvent {
     fn apply(&self, state: &impl StateInterface) {
@@ -169,7 +170,7 @@ fn walk(state: &impl StateInterface, event: &EventuallyEvent) {
     let (scoring_runners, _) = separate_scoring_events(&event.metadata.siblings, event_batter_id);
 
     state.with_game(game_id, |mut game| {
-        let batter_id = game.team_at_bat().batter.clone()
+        let batter_id = game.team_at_bat().batter
             .expect("Batter must exist during Walk event");
         let batter_name = game.team_at_bat().batter_name.clone()
             .expect("Batter name must exist during Walk event");
@@ -184,7 +185,7 @@ fn walk(state: &impl StateInterface, event: &EventuallyEvent) {
         let batter_mod = game.team_at_bat().batter_mod.clone();
         game.push_base_runner(batter_id, batter_name, batter_mod, Base::First);
         game.end_at_bat();
-        game.game_update_pitch(&event);
+        game.game_update_pitch(event);
 
         Ok(vec![game])
     });
@@ -212,7 +213,7 @@ fn strikeout(state: &impl StateInterface, event: &EventuallyEvent) {
         .expect("Strikeout event must have exactly one player id");
 
     state.with_game(game_id, |mut game| {
-        let batter_id = game.team_at_bat().batter.clone()
+        let batter_id = game.team_at_bat().batter
             .expect("Batter must exist during Strikeout event");
         let batter_name = game.team_at_bat().batter_name.clone()
             .expect("Batter name must exist during Strikeout event");
@@ -313,7 +314,7 @@ fn home_run(state: &impl StateInterface, event: &EventuallyEvent) {
         .expect("HomeRun event must have exactly one player id");
 
     state.with_game(game_id, |mut game| {
-        let batter_id = game.team_at_bat().batter.clone()
+        let batter_id = game.team_at_bat().batter
             .expect("Batter must exist during HomeRun event");
         let batter_name = game.team_at_bat().batter_name.clone()
             .expect("Batter name must exist during HomeRun event");
@@ -414,56 +415,56 @@ fn game_end(state: &impl StateInterface, event: &EventuallyEvent) {
         Ok(vec![game])
     });
 
-    let (home_id, home_runs, away_runs) = state.read_game(game_id, |game| (
-        game.home.team,
-        game.home.score.expect("Home score must exist in GameEnd event"),
-        game.away.score.expect("Away score must exist in GameEnd event"),
-    )).into_iter().exactly_one().expect("Can't handle ambiguity in runs scored");
-
-    let season_id = state.read_sim(|sim| sim.season_id)
-        .into_iter().exactly_one().expect("Can't handle ambiguity in season_id");
-
-    let standings_id = state.read_season(season_id, |season| season.standings)
-        .into_iter().exactly_one().expect("Can't handle ambiguity in standings");
-
-    state.with_standings(standings_id, |mut standings| {
-        let winner_id: Uuid = serde_json::from_value(
-            event.metadata.other.get("winner")
-                .expect("GameEnd event must have a winner in the metadata")
-                .clone())
-            .expect("Winner property of GameEnd event must be a uuid");
-
-        let loser_id = *event.team_tags.iter()
-            .filter(|&id| *id != winner_id)
-            .exactly_one()
-            .expect("gameTags of GameEnd event must contain exactly one winner and one loser");
-
-        standings.games_played.insert(winner_id, 1);
-        standings.games_played.insert(loser_id, 1);
-        standings.wins.insert(winner_id, 1);
-        standings.wins.insert(loser_id, 0);
-        standings.losses.insert(winner_id, 0);
-        standings.losses.insert(loser_id, 1);
-        if home_id == winner_id {
-            standings.runs.insert(winner_id, home_runs);
-            standings.runs.insert(loser_id, away_runs);
-        } else {
-            standings.runs.insert(winner_id, away_runs);
-            standings.runs.insert(loser_id, home_runs);
-        }
-
-        Ok(vec![standings])
-    });
+    // let (home_id, home_runs, away_runs) = state.read_game(game_id, |game| (
+    //     game.home.team,
+    //     game.home.score.expect("Home score must exist in GameEnd event"),
+    //     game.away.score.expect("Away score must exist in GameEnd event"),
+    // )).into_iter().exactly_one().expect("Can't handle ambiguity in runs scored");
+    //
+    // let season_id = state.read_sim(|sim| sim.season_id)
+    //     .into_iter().exactly_one().expect("Can't handle ambiguity in season_id");
+    //
+    // let standings_id = state.read_season(season_id, |season| season.standings)
+    //     .into_iter().exactly_one().expect("Can't handle ambiguity in standings");
+    //
+    // state.with_standings(standings_id, |mut standings| {
+    //     let winner_id: Uuid = serde_json::from_value(
+    //         event.metadata.other.get("winner")
+    //             .expect("GameEnd event must have a winner in the metadata")
+    //             .clone())
+    //         .expect("Winner property of GameEnd event must be a uuid");
+    //
+    //     let loser_id = *event.team_tags.iter()
+    //         .filter(|&id| *id != winner_id)
+    //         .exactly_one()
+    //         .expect("gameTags of GameEnd event must contain exactly one winner and one loser");
+    //
+    //     standings.games_played.insert(winner_id, 1);
+    //     standings.games_played.insert(loser_id, 1);
+    //     standings.wins.insert(winner_id, 1);
+    //     standings.wins.insert(loser_id, 0);
+    //     standings.losses.insert(winner_id, 0);
+    //     standings.losses.insert(loser_id, 1);
+    //     if home_id == winner_id {
+    //         standings.runs.insert(winner_id, home_runs);
+    //         standings.runs.insert(loser_id, away_runs);
+    //     } else {
+    //         standings.runs.insert(winner_id, away_runs);
+    //         standings.runs.insert(loser_id, home_runs);
+    //     }
+    //
+    //     Ok(vec![standings])
+    // });
 }
 
 fn batter_up(state: &impl StateInterface, event: &EventuallyEvent) {
     let game_id = event.game_id().expect(concat!("BatterUp event must have a game id"));
     state.with_game(game_id, |mut game| {
-        let (batter_count, batter_id) = state.read_team(game.team_at_bat().team, |team| {
+        let (batter_count, batter_id) = *state.read_team(game.team_at_bat().team, |team| {
             let batter_count = 1 + game.team_at_bat().team_batter_count
                 .expect("Team batter count must be populated during a game");
             (batter_count, team.batter_for_count(batter_count as usize))
-        }).iter().exactly_one().expect("Can't handle ambiguity in team lineup order").clone();
+        }).iter().exactly_one().expect("Can't handle ambiguity in team lineup order");
 
         let batter_name = state.read_player(batter_id, |player| { player.name })
             .iter().exactly_one().expect("Can't handle ambiguity in player name").clone();
@@ -607,6 +608,16 @@ fn snowflakes(state: &impl StateInterface, event: &EventuallyEvent) {
     parse::parse_snowfall(&snow_event.description)
         .expect("Error parsing Snowflakes description");
 
+    // All this is to figure out whether a current pitcher was frozen, and if so, store which team's
+    // pitcher it was
+    let frozen_pitcher_teams = state.read_game(game_id, |game| {
+        (
+            pitcher_was_frozen(event, game.team_at_bat()),
+            pitcher_was_frozen(event, game.team_fielding()),
+        )
+    }).into_iter().exactly_one()
+        .expect("Can't handle ambiguity in whether the pitchers were frozen");
+
     state.with_game(game_id, |mut game| {
         game.game_update_common(event);
         game.game_start_phase = 20;
@@ -640,8 +651,8 @@ fn snowflakes(state: &impl StateInterface, event: &EventuallyEvent) {
                 .expect("Pitcher must be Known in Snowfall event");
 
             if frozen_players.contains(pitcher_id) {
-                game.team_fielding().pitcher = None;
-                game.team_fielding().pitcher_name = Some("".to_string().into());
+                game.team_fielding_mut().pitcher = None;
+                game.team_fielding_mut().pitcher_name = Some("".to_string().into());
             }
         }
 
@@ -658,6 +669,29 @@ fn snowflakes(state: &impl StateInterface, event: &EventuallyEvent) {
             });
         }
     }
+
+    for team_id in [frozen_pitcher_teams.0, frozen_pitcher_teams.1].into_iter().flatten() {
+        state.with_team(team_id, |mut team| {
+            team.rotation_slot += 1;
+
+            Ok(vec![team])
+        });
+    }
+}
+
+fn pitcher_was_frozen(event: &EventuallyEvent, game_team: &GameByTeam) -> Option<Uuid> {
+    game_team.pitcher.as_ref()
+        .and_then(|maybe_pitcher| maybe_pitcher.known())
+        .and_then(|&pitcher_id| {
+            event.metadata.siblings.iter()
+                .find_map(|sibling| {
+                    let matches = sibling.r#type == EventType::AddedMod &&
+                        sibling.metadata.other.get("mod").map(|mod_name| mod_name == "FROZEN").unwrap_or(false) &&
+                        sibling.player_id().expect("ModAdded event must have a player id") == pitcher_id;
+
+                    if matches { Some(game_team.team) } else { None }
+                })
+        })
 }
 
 

@@ -154,7 +154,7 @@ pub enum EventType {
     Strike = 13,
     Ball = 14,
     FoulBall = 15,
-    SolarPanelsOverflow = 20,
+    Shame = 20,
     HomeFieldAdvantage = 21,
     HitByPitch = 22,
     BatterSkipped = 23,

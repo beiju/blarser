@@ -304,7 +304,15 @@ impl Game {
         }
     }
 
-    pub(crate) fn team_fielding(&mut self) -> &mut GameByTeam {
+    pub(crate) fn team_fielding(&self) -> &GameByTeam {
+        if self.top_of_inning {
+            &self.home
+        } else {
+            &self.away
+        }
+    }
+
+    pub(crate) fn team_fielding_mut(&mut self) -> &mut GameByTeam {
         if self.top_of_inning {
             &mut self.home
         } else {
