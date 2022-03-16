@@ -11,6 +11,7 @@ CREATE TABLE events (
     CONSTRAINT ingest_fk FOREIGN KEY(ingest_id) REFERENCES ingests(id) ON DELETE RESTRICT
 );
 
+CREATE INDEX events_time ON events (event_time);
 
 CREATE TABLE versions (
     id                 SERIAL PRIMARY KEY,
