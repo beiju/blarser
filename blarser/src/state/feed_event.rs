@@ -1,3 +1,4 @@
+use std::cmp::{max, min};
 use std::collections::HashSet;
 use anyhow::anyhow;
 use itertools::Itertools;
@@ -398,17 +399,8 @@ fn game_end(state: &impl StateInterface, event: &EventuallyEvent) {
     let loser_id = event.team_id_excluding(winner_id)
         .expect("GameEnd event's gameTags must include the winner and one other team");
 
-    state.with_team(winner_id, |mut team| {
-        **team.win_streak.as_mut().expect("GameEnd currently expects Team.win_streak to exist") += 1;
-
-        Ok(vec![team])
-    });
-
-    state.with_team(loser_id, |mut team| {
-        **team.win_streak.as_mut().expect("GameEnd currently expects Team.win_streak to exist") -= 1;
-
-        Ok(vec![team])
-    });
+    update_win_streak(state, winner_id, true);
+    update_win_streak(state, loser_id, false);
 
     state.with_game(game_id, |mut game| {
         game.phase = 7;
@@ -459,6 +451,23 @@ fn game_end(state: &impl StateInterface, event: &EventuallyEvent) {
     //
     //     Ok(vec![standings])
     // });
+}
+
+fn update_win_streak(state: &impl StateInterface, team_id: Uuid, team_won: bool) {
+    state.with_team(team_id, |mut team| {
+        let win_streak = team.win_streak.as_mut()
+            .expect("GameEnd currently expects Team.win_streak to exist");
+
+        // win_streak is a weird value whose magnitude indicates length of streak and sign indicates
+        // whether it is a winning or losing streak
+        if team_won {
+            **win_streak = max(**win_streak, 0) + 1;
+        } else {
+            **win_streak = min(**win_streak, 0) - 1;
+        }
+
+        Ok(vec![team])
+    });
 }
 
 fn batter_up(state: &impl StateInterface, event: &EventuallyEvent) {
