@@ -11,12 +11,12 @@ use anyhow::anyhow;
 use blarser::db::BlarserDbConn;
 use blarser::ingest::IngestTask;
 use blarser::state::{Event, get_entity_debug, get_recently_updated_entities, Parent, Version};
-use crate::routes::ServerError;
+use crate::routes::ApiError;
 
 #[rocket::get("/debug")]
-pub async fn debug(conn: BlarserDbConn, ingest: &State<IngestTask>) -> Result<Template, ServerError> {
+pub async fn debug(conn: BlarserDbConn, ingest: &State<IngestTask>) -> Result<Template, ApiError> {
     let ingest_id = ingest.latest_ingest()
-        .ok_or(ServerError::InternalError(format!("There is no ingest yet")))?;
+        .ok_or(ApiError::InternalError(format!("There is no ingest yet")))?;
 
     #[derive(Serialize)]
     struct DebugEntityParams {
@@ -35,7 +35,7 @@ pub async fn debug(conn: BlarserDbConn, ingest: &State<IngestTask>) -> Result<Te
     }).await
         .map_err(|e| {
             error!("Diesel error: {}", e);
-            ServerError::InternalError(anyhow!(e).context("In debug route").to_string())
+            ApiError::InternalError(anyhow!(e).context("In debug route").to_string())
         })?
         .into_iter()
         .map(|(entity_type, entity_id, entity_json)| DebugEntityParams {
@@ -49,21 +49,21 @@ pub async fn debug(conn: BlarserDbConn, ingest: &State<IngestTask>) -> Result<Te
 }
 
 #[rocket::get("/debug/<entity_type>/<entity_id>")]
-pub async fn entity_debug_json(conn: BlarserDbConn, ingest: &State<IngestTask>, entity_type: String, entity_id: Uuid) -> Result<Value, ServerError> {
+pub async fn entity_debug_json(conn: BlarserDbConn, ingest: &State<IngestTask>, entity_type: String, entity_id: Uuid) -> Result<Value, ApiError> {
     let ingest_id = ingest.latest_ingest()
-        .ok_or(ServerError::InternalError(format!("There is no ingest yet")))?;
+        .ok_or(ApiError::InternalError(format!("There is no ingest yet")))?;
 
     let versions_info = conn.run(move |c| {
         get_entity_debug(c, ingest_id, &entity_type, entity_id)
     }).await
-        .map_err(|e| ServerError::InternalError(anyhow!(e).context("In entity debug json route").to_string()))?;
+        .map_err(|e| ApiError::InternalError(anyhow!(e).context("In entity debug json route").to_string()))?;
 
     let result: Vec<_> = versions_info.into_iter()
         .scan(String::from(""), |prev_entity_str, (version, event, version_parents)| {
             Some(build_json(prev_entity_str, &version, event, version_parents))
         })
         .try_collect()
-        .map_err(|e| ServerError::InternalError(e.context("In entity debug json route").to_string()))?;
+        .map_err(|e| ApiError::InternalError(e.context("In entity debug json route").to_string()))?;
 
     Ok(json!(result))
 }

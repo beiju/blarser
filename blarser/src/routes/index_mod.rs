@@ -3,10 +3,10 @@ use diesel::result::Error as DieselError;
 use serde::Serialize;
 
 use blarser::db::{BlarserDbConn, get_latest_ingest, get_logs_for, IngestLogAndApproval};
-use crate::routes::ServerError;
+use crate::routes::ApiError;
 
 #[rocket::get("/")]
-pub async fn index(conn: BlarserDbConn) -> Result<Template, ServerError> {
+pub async fn index(conn: BlarserDbConn) -> Result<Template, ApiError> {
     let (ingest, logs) = conn.run(|c| {
         let ingest = get_latest_ingest(c)?;
         let logs = match &ingest {
@@ -16,7 +16,7 @@ pub async fn index(conn: BlarserDbConn) -> Result<Template, ServerError> {
 
         Ok((ingest, logs))
     }).await
-        .map_err(|err: DieselError| ServerError::InternalError(err.to_string()))?;
+        .map_err(|err: DieselError| ApiError::InternalError(err.to_string()))?;
 
     #[derive(Serialize)]
     struct IndexTemplateParams {

@@ -10,14 +10,14 @@ use serde::Serialize;
 
 use blarser::ingest::IngestTask;
 use blarser::db::{BlarserDbConn, get_pending_approvals, IngestApproval, set_approval};
-use crate::routes::{ServerError, rocket_uri_macro_index};
+use crate::routes::{ApiError, rocket_uri_macro_index};
 
 #[rocket::get("/approvals")]
-pub async fn approvals(conn: BlarserDbConn) -> Result<Template, ServerError> {
+pub async fn approvals(conn: BlarserDbConn) -> Result<Template, ApiError> {
     let approvals = conn.run(|c| {
         get_pending_approvals(c)
     }).await
-        .map_err(|err: DieselError| ServerError::InternalError(err.to_string()))?;
+        .map_err(|err: DieselError| ApiError::InternalError(err.to_string()))?;
 
     #[derive(Serialize)]
     struct ApprovalTemplateParams {
@@ -38,13 +38,13 @@ pub struct Approval {
 }
 
 #[rocket::post("/approve", data = "<approval>")]
-pub async fn approve(task: &State<IngestTask>, conn: BlarserDbConn, approval: Form<Approval>) -> Result<Redirect, ServerError> {
+pub async fn approve(task: &State<IngestTask>, conn: BlarserDbConn, approval: Form<Approval>) -> Result<Redirect, ApiError> {
     let redirect_to = if approval.from_route == "index" {
         Ok(uri!(index))
     } else if approval.from_route == "approvals" {
         Ok(uri!(approvals))
     } else {
-        Err(ServerError::InternalError(format!("Unexpected value in from_route: {}", approval.from_route)))
+        Err(ApiError::InternalError(format!("Unexpected value in from_route: {}", approval.from_route)))
     }?;
 
     let approval_id = approval.approval_id;
@@ -52,7 +52,7 @@ pub async fn approve(task: &State<IngestTask>, conn: BlarserDbConn, approval: Fo
     conn.run(move |c|
         set_approval(c, approval.approval_id, &approval.message, approval.approved)
     ).await
-        .map_err(|err: DieselError| ServerError::InternalError(err.to_string()))?;
+        .map_err(|err: DieselError| ApiError::InternalError(err.to_string()))?;
 
     task.notify_approval(approval_id, approved);
 
