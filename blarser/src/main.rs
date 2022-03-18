@@ -1,3 +1,5 @@
+#![feature(split_array)]
+
 use rocket::fairing::AdHoc;
 use rocket::fs::{FileServer, relative};
 use rocket_dyn_templates::Template;
