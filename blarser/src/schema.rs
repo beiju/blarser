@@ -149,7 +149,7 @@ table! {
         event_time -> Timestamptz,
         event_source -> Event_source,
         event_data -> Jsonb,
-        end_time -> Timestamptz,
+        end_time -> Nullable<Timestamptz>,
     }
 }
 

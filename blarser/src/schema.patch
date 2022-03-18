@@ -26,7 +26,7 @@ index da2fb5e..ea598b3 100644
 +        event_time -> Timestamptz,
 +        event_source -> Event_source,
 +        event_data -> Jsonb,
-+        end_time -> Timestamptz,
++        end_time -> Nullable<Timestamptz>,
 +    }
 +}
 +

@@ -2,7 +2,7 @@
 #![feature(trivial_bounds)] // Necessary for partial_information
 #![feature(generic_associated_types)]
 #![feature(map_first_last)] // Used in ObservationStream in chron ingest
-
+#![recursion_limit = "256"]
 
 #[macro_use]
 extern crate diesel;
