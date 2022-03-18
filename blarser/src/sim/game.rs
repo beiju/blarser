@@ -353,27 +353,27 @@ impl Game {
             }
 
             // End the game
-            if self.inning >= 8 {
-                let home_score = self.home.score
-                    .expect("Score field must not be null during a game");
-                let away_score = self.away.score
-                    .expect("Score field must not be null during a game");
-                let end_game = if self.top_of_inning && home_score > away_score {
-                    true
-                } else if !self.top_of_inning && home_score != away_score { // 20.3
-                    true
-                } else {
-                    false
-                };
-
-                if end_game {
-                    self.top_inning_score = 0.0;
-                    self.half_inning_score = 0.0;
-                    self.phase = 7;
-                }
+            if self.game_should_end() {
+                self.top_inning_score = 0.0;
+                self.half_inning_score = 0.0;
+                self.phase = 7;
             }
         } else {
             self.half_inning_outs += outs_added;
+        }
+    }
+
+    fn game_should_end(&mut self) -> bool {
+        if self.inning < 8 { return false; }
+
+        let home_score = self.home.score
+            .expect("Score field must not be null during a game");
+        let away_score = self.away.score
+            .expect("Score field must not be null during a game");
+        if self.top_of_inning {
+            home_score > away_score
+        } else {
+            home_score != away_score // i can feel the spectre of 20.3
         }
     }
 
@@ -455,7 +455,7 @@ impl Game {
                 // player (TODO: except circumstances known to cause handholding)
                 if let Some(next_occupied_base) = version.bases_occupied.get(i + 1) {
                     if *next_occupied_base == base + 1 {
-                        continue
+                        continue;
                     }
                 }
 
@@ -500,7 +500,6 @@ impl Game {
         }
 
         self.game_update_pitch(event);
-
     }
 
     pub(crate) fn apply_caught_stealing(&mut self, event: &EventuallyEvent, thief_id: Uuid, base: Base) {
@@ -516,7 +515,7 @@ impl Game {
             *self.team_at_bat_mut().team_batter_count.as_mut()
                 .expect("Team batter count must not be null during a CaughtStealing event") -= 1;
             self.clear_bases();
-            self.phase = 3;
+            self.phase = if self.game_should_end() { 7 } else { 3 };
             self.half_inning_outs = 0;
 
             // Reset both top and bottom inning scored only when the bottom half ends
@@ -526,7 +525,5 @@ impl Game {
                 self.half_inning_score = 0.0;
             }
         }
-
     }
-
 }
