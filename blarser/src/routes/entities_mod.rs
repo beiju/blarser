@@ -149,6 +149,8 @@ impl From<EntityVersions> for EntityVersion {
             entity_id: versions.entity_id,
             valid_from: versions.valid_from,
             valid_to: versions.valid_to,
+            // TODO Also convert from Entity to Entity::Raw. This is going to require a new trait
+            //   method which will need to decide on a placeholder value for unknown data.
             data: versions.data.into_iter().next().unwrap_or_else(|| Value::Object(Map::new())),
         }
     }
