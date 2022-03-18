@@ -6,6 +6,7 @@ use crate::compare::{Conflict, PartialInformationDiff};
 use crate::PartialInformationCompare;
 
 #[derive(Debug, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub enum Ranged<UnderlyingType: PartialOrd> {
     Known(UnderlyingType),
     Range(UnderlyingType, UnderlyingType),

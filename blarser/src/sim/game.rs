@@ -18,8 +18,8 @@ use crate::sim::entity::{EarliestEvent, TimedEvent, TimedEventType};
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
 pub struct GameState {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub snowfall_events: Option<i32>,
-
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize, PartialInformationCompare)]
