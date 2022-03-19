@@ -12,13 +12,10 @@ use diesel::Queryable;
 
 use blarser::db::BlarserDbConn;
 use blarser::ingest::IngestTask;
+use blarser::sim::entity_to_raw_approximation;
 use crate::routes::ApiError;
 
 pub struct ParseableDateTime(DateTime<Utc>);
-
-impl ParseableDateTime {
-    pub fn into_inner(self) -> DateTime<Utc> { self.0 }
-}
 
 #[rocket::async_trait]
 impl<'r> FromFormField<'r> for ParseableDateTime {
@@ -143,15 +140,17 @@ pub struct EntityVersion {
     pub data: Value,
 }
 
-impl From<EntityVersions> for EntityVersion {
-    fn from(versions: EntityVersions) -> Self {
+impl EntityVersion {
+    fn from_versions(entity_type: &str, versions: EntityVersions) -> Self {
         Self {
             entity_id: versions.entity_id,
             valid_from: versions.valid_from,
             valid_to: versions.valid_to,
-            // TODO Also convert from Entity to Entity::Raw. This is going to require a new trait
-            //   method which will need to decide on a placeholder value for unknown data.
-            data: versions.data.into_iter().next().unwrap_or_else(|| Value::Object(Map::new())),
+            data: versions.data.into_iter().next()
+                .map(|value| {
+                    entity_to_raw_approximation(entity_type, value)
+                })
+                .unwrap_or_else(|| Value::Object(Map::new())),
         }
     }
 }
@@ -163,6 +162,7 @@ pub async fn entities(conn: BlarserDbConn, ingest: &State<IngestTask>, params: R
         .ok_or_else(|| ApiError::InternalError("No ingest yet".to_string()))?;
 
     let wants_all = params.all.unwrap_or(false);
+    let entity_type = params.r#type.clone();
     let results = conn.run(move |c| {
         use blarser::schema::versions_with_range::dsl as versions;
         use diesel::dsl::sql;
@@ -223,7 +223,7 @@ pub async fn entities(conn: BlarserDbConn, ingest: &State<IngestTask>, params: R
         }))
     } else {
         let results: Vec<_> = results.into_iter()
-            .map(EntityVersion::from)
+            .map(|v| EntityVersion::from_versions(&entity_type, v))
             .collect();
         Ok(json!({
             "nextPage": next_page,

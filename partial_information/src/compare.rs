@@ -43,6 +43,7 @@ pub trait PartialInformationCompare: Sized + Debug + Serialize {
     fn observe(&mut self, observed: &Self::Raw) -> Vec<Conflict>;
 
     fn from_raw(raw: Self::Raw) -> Self;
+    fn raw_approximation(self) -> Self::Raw;
 }
 
 
@@ -118,6 +119,12 @@ impl<K, V> PartialInformationCompare for HashMap<K, V>
             .map(|(key, raw_value)| (key, V::from_raw(raw_value)))
             .collect()
     }
+
+    fn raw_approximation(self) -> Self::Raw {
+        self.into_iter()
+            .map(|(key, val)| (key, val.raw_approximation()))
+            .collect()
+    }
 }
 
 impl<'d, K, V> PartialInformationDiff<'d> for HashMapDiff<'d, K, V>
@@ -167,6 +174,10 @@ impl<T> PartialInformationCompare for Option<T>
 
     fn from_raw(raw: Self::Raw) -> Self {
         raw.map(|v| T::from_raw(v))
+    }
+
+    fn raw_approximation(self) -> Self::Raw {
+        self.map(|val| val.raw_approximation())
     }
 }
 
@@ -244,6 +255,12 @@ impl<ItemT> PartialInformationCompare for Vec<ItemT>
             .map(|v| ItemT::from_raw(v))
             .collect()
     }
+
+    fn raw_approximation(self) -> Self::Raw {
+        self.into_iter()
+            .map(|val| val.raw_approximation())
+            .collect()
+    }
 }
 
 impl<'d, T> PartialInformationDiff<'d> for VecDiff<'d, T>
@@ -293,6 +310,7 @@ macro_rules! trivial_compare {
             }
 
             fn from_raw(raw: Self::Raw) -> Self { raw }
+            fn raw_approximation(self) -> Self::Raw { self }
         })+
     }
 }

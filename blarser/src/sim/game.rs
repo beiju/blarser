@@ -5,7 +5,7 @@ use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use serde_with::with_prefix;
 use uuid::Uuid;
-use partial_information::{MaybeKnown, PartialInformationCompare, Ranged};
+use partial_information::{PartialInformationCompare, MaybeKnown};
 use partial_information_derive::PartialInformationCompare;
 
 use crate::api::{EventType, EventuallyEvent, Weather};
@@ -58,7 +58,7 @@ pub struct UpdateFull {
 #[serde(rename_all = "PascalCase")] // it will be camelCase after being prefixed with "home"/"away"
 #[allow(dead_code)]
 pub struct GameByTeam {
-    pub odds: Option<Ranged<f32>>,
+    pub odds: Option<MaybeKnown<f32>>,
     pub outs: i32,
     pub team: Uuid,
     pub balls: i32,

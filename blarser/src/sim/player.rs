@@ -3,7 +3,7 @@ use std::fmt::{Display, Formatter};
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use partial_information::{Ranged, PartialInformationCompare, MaybeKnown};
+use partial_information::{Rerollable, PartialInformationCompare, MaybeKnown};
 use partial_information_derive::PartialInformationCompare;
 
 use crate::sim::{Entity, TimedEvent};
@@ -73,32 +73,32 @@ pub struct Player {
     pub item_attr: Option<Vec<String>>,
     pub perm_attr: Option<Vec<String>>,
 
-    pub buoyancy: Ranged<f32>,
-    pub cinnamon: Option<Ranged<f32>>,
-    pub coldness: Ranged<f32>,
-    pub chasiness: Ranged<f32>,
-    pub divinity: Ranged<f32>,
-    pub martyrdom: Ranged<f32>,
-    pub base_thirst: Ranged<f32>,
-    pub indulgence: Ranged<f32>,
-    pub musclitude: Ranged<f32>,
-    pub tragicness: Ranged<f32>,
-    pub omniscience: Ranged<f32>,
-    pub patheticism: Ranged<f32>,
-    pub suppression: Ranged<f32>,
-    pub continuation: Ranged<f32>,
-    pub ruthlessness: Ranged<f32>,
-    pub watchfulness: Ranged<f32>,
-    pub laserlikeness: Ranged<f32>,
-    pub overpowerment: Ranged<f32>,
-    pub tenaciousness: Ranged<f32>,
-    pub thwackability: Ranged<f32>,
-    pub anticapitalism: Ranged<f32>,
-    pub ground_friction: Ranged<f32>,
-    pub pressurization: Ranged<f32>,
-    pub unthwackability: Ranged<f32>,
-    pub shakespearianism: Ranged<f32>,
-    pub moxie: Ranged<f32>,
+    pub buoyancy: Rerollable,
+    pub cinnamon: Option<Rerollable>,
+    pub coldness: Rerollable,
+    pub chasiness: Rerollable,
+    pub divinity: Rerollable,
+    pub martyrdom: Rerollable,
+    pub base_thirst: Rerollable,
+    pub indulgence: Rerollable,
+    pub musclitude: Rerollable,
+    pub tragicness: Rerollable,
+    pub omniscience: Rerollable,
+    pub patheticism: Rerollable,
+    pub suppression: Rerollable,
+    pub continuation: Rerollable,
+    pub ruthlessness: Rerollable,
+    pub watchfulness: Rerollable,
+    pub laserlikeness: Rerollable,
+    pub overpowerment: Rerollable,
+    pub tenaciousness: Rerollable,
+    pub thwackability: Rerollable,
+    pub anticapitalism: Rerollable,
+    pub ground_friction: Rerollable,
+    pub pressurization: Rerollable,
+    pub unthwackability: Rerollable,
+    pub shakespearianism: Rerollable,
+    pub moxie: Rerollable,
     pub total_fingers: i32,
 
     pub defense_rating: Option<MaybeKnown<f32>>,
@@ -235,53 +235,53 @@ impl Player {
     //     }
     // }
 
-    pub fn adjust_attributes(&mut self, range: Ranged<f32>) {
-        self.adjust_batting(range);
-        self.adjust_pitching(range);
-        self.adjust_baserunning(range);
-        self.adjust_defense(range);
+    pub fn adjust_attributes(&mut self, lower: f32, upper: f32) {
+        self.adjust_batting(lower, upper);
+        self.adjust_pitching(lower, upper);
+        self.adjust_baserunning(lower, upper);
+        self.adjust_defense(lower, upper);
     }
 
-    fn adjust_batting(&mut self, range: Ranged<f32>) {
-        self.buoyancy += range;
-        self.divinity += range;
-        self.martyrdom += range;
-        self.moxie += range;
-        self.musclitude += range;
-        self.patheticism += range;
-        self.thwackability += range;
-        self.tragicness += range;
+    fn adjust_batting(&mut self, lower: f32, upper: f32) {
+        self.buoyancy.add_range(lower, upper);
+        self.divinity.add_range(lower, upper);
+        self.martyrdom.add_range(lower, upper);
+        self.moxie.add_range(lower, upper);
+        self.musclitude.add_range(lower, upper);
+        self.patheticism.add_range(lower, upper);
+        self.thwackability.add_range(lower, upper);
+        self.tragicness.add_range(lower, upper);
 
         *self.hitting_rating.as_mut().expect("Everyone but Phantom Sixpack has this") = MaybeKnown::Unknown;
     }
 
-    fn adjust_pitching(&mut self, range: Ranged<f32>) {
-        self.coldness += range;
-        self.overpowerment += range;
-        self.ruthlessness += range;
-        self.shakespearianism += range;
-        self.suppression += range;
-        self.unthwackability += range;
+    fn adjust_pitching(&mut self, lower: f32, upper: f32) {
+        self.coldness.add_range(lower, upper);
+        self.overpowerment.add_range(lower, upper);
+        self.ruthlessness.add_range(lower, upper);
+        self.shakespearianism.add_range(lower, upper);
+        self.suppression.add_range(lower, upper);
+        self.unthwackability.add_range(lower, upper);
 
         *self.pitching_rating.as_mut().expect("Everyone but Phantom Sixpack has this") = MaybeKnown::Unknown;
     }
 
-    fn adjust_baserunning(&mut self, range: Ranged<f32>) {
-        self.base_thirst += range;
-        self.continuation += range;
-        self.ground_friction += range;
-        self.indulgence += range;
-        self.laserlikeness += range;
+    fn adjust_baserunning(&mut self, lower: f32, upper: f32) {
+        self.base_thirst.add_range(lower, upper);
+        self.continuation.add_range(lower, upper);
+        self.ground_friction.add_range(lower, upper);
+        self.indulgence.add_range(lower, upper);
+        self.laserlikeness.add_range(lower, upper);
 
         *self.baserunning_rating.as_mut().expect("Everyone but Phantom Sixpack has this") = MaybeKnown::Unknown;
     }
 
-    fn adjust_defense(&mut self, range: Ranged<f32>) {
-        self.anticapitalism += range;
-        self.chasiness += range;
-        self.omniscience += range;
-        self.tenaciousness += range;
-        self.watchfulness += range;
+    fn adjust_defense(&mut self, lower: f32, upper: f32) {
+        self.anticapitalism.add_range(lower, upper);
+        self.chasiness.add_range(lower, upper);
+        self.omniscience.add_range(lower, upper);
+        self.tenaciousness.add_range(lower, upper);
+        self.watchfulness.add_range(lower, upper);
 
         *self.defense_rating.as_mut().expect("Everyone but Phantom Sixpack has this") = MaybeKnown::Unknown;
     }

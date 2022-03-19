@@ -66,6 +66,9 @@ impl<T> PartialInformationCompare for Spurious<T>
     fn from_raw(raw: Self::Raw) -> Self {
         Self(T::from_raw(raw))
     }
+    fn raw_approximation(self) -> Self::Raw {
+        self.0.raw_approximation()
+    }
 }
 
 impl<'d, T> PartialInformationDiff<'d> for SpuriousDiff<'d, T>

@@ -144,6 +144,15 @@ fn impl_partial_information_compare(ast: DeriveInput) -> Result<TokenStream2> {
                 }
             });
 
+        let raw_approximation_members = fields.named.iter()
+            .map(|field| {
+                let field_name = field.ident.as_ref().expect("Unreachable");
+                let field_type = &field.ty;
+                quote! {
+                    #field_name: <#field_type as PartialInformationCompare>::raw_approximation(self.#field_name)
+                }
+            });
+
         quote! {
             impl ::partial_information::PartialInformationCompare for #name {
                 type Raw = #raw_name;
@@ -166,6 +175,12 @@ fn impl_partial_information_compare(ast: DeriveInput) -> Result<TokenStream2> {
                 fn from_raw(raw: Self::Raw) -> Self {
                     Self {
                         #(#from_raw_members),*
+                    }
+                }
+
+                fn raw_approximation(self) -> Self::Raw {
+                    Self::Raw {
+                        #(#raw_approximation_members),*
                     }
                 }
             }

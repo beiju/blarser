@@ -4,7 +4,7 @@ use anyhow::anyhow;
 use itertools::Itertools;
 use serde::Deserialize;
 use uuid::Uuid;
-use partial_information::{MaybeKnown, Ranged};
+use partial_information::MaybeKnown;
 
 use crate::api::{EventType, EventuallyEvent};
 use crate::state::events::IngestEvent;
@@ -565,10 +565,10 @@ fn player_stat_reroll(state: &impl StateInterface, event: &EventuallyEvent) {
                    "Unexpected top-level PlayerStatReroll event");
 
         // I think this is pretty close to the actual range
-        player.adjust_attributes(Ranged::Range(-0.03, 0.03));
+        player.adjust_attributes(-0.03, 0.03);
 
         Ok(vec![player])
-    })
+    });
 }
 
 fn win_collected_regular(state: &impl StateInterface, event: &EventuallyEvent) {

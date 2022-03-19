@@ -57,6 +57,21 @@ fn entity_description_typed<EntityT: Entity>(entity_json: serde_json::Value) -> 
     entity.to_string()
 }
 
+pub fn entity_to_raw_approximation(entity_type: &str, value: serde_json::Value) -> serde_json::Value {
+    entity_dispatch!(entity_type => entity_to_raw_approximation_typed(value);
+                     other => panic!("Tried to get raw for unknown entity type {}", other))
+}
+
+fn entity_to_raw_approximation_typed<EntityT: Entity>(entity_json: serde_json::Value) -> serde_json::Value {
+    let entity: EntityT = serde_json::from_value(entity_json)
+        .expect("Failed to deserialize entity from stored value");
+
+    let raw_approximation = entity.raw_approximation();
+
+    serde_json::to_value(raw_approximation)
+        .expect("Failed to serialize raw entity")
+}
+
 // Helper used in next_timed_event
 pub struct EarliestEvent {
     limit: DateTime<Utc>,
@@ -76,7 +91,7 @@ impl EarliestEvent {
             None => {
                 self.lowest = Some(new_event)
             }
-            Some(prev_event) if &new_event.time < &prev_event.time => {
+            Some(prev_event) if new_event.time < prev_event.time => {
                 self.lowest = Some(new_event)
             }
             _ => {}

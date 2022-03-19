@@ -36,7 +36,7 @@ pub enum MaybeKnownDiff<'d, T: 'd + PartialInformationCompare> {
 
 impl<T> PartialInformationCompare for MaybeKnown<T>
     where T: 'static + PartialInformationCompare,
-          T::Raw: Clone {
+          T::Raw: Clone + Default {
     type Raw = T::Raw;
     type Diff<'d> = MaybeKnownDiff<'d, T>;
 
@@ -63,6 +63,9 @@ impl<T> PartialInformationCompare for MaybeKnown<T>
 
     fn from_raw(raw: Self::Raw) -> Self {
         MaybeKnown::Known(T::from_raw(raw))
+    }
+    fn raw_approximation(self) -> Self::Raw {
+        Self::Raw::default()
     }
 }
 
