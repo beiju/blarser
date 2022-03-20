@@ -1,1 +1,0 @@
-DROP INDEX feed_event_changes_entity_query;

@@ -1,64 +1,63 @@
-CREATE TYPE event_source AS ENUM ('start', 'feed', 'timed', 'chron');
+CREATE TYPE event_source AS ENUM ('start', 'feed', 'timed', 'manual');
 
-CREATE TABLE events (
-    id                SERIAL PRIMARY KEY,
-    ingest_id         INT NOT NULL,
+CREATE TABLE events
+(
+    id        SERIAL PRIMARY KEY,
+    ingest_id INT          NOT NULL,
 
-    event_time        TIMESTAMP WITH TIME ZONE NOT NULL,
-    event_source      event_source NOT NULL,
-    event_data        JSONB NOT NULL,
+    source    event_source NOT NULL,
+    data      JSONB        NOT NULL,
 
-    CONSTRAINT ingest_fk FOREIGN KEY(ingest_id) REFERENCES ingests(id) ON DELETE RESTRICT
+    CONSTRAINT ingest_fk FOREIGN KEY (ingest_id) REFERENCES ingests (id) ON DELETE RESTRICT
 );
 
-CREATE INDEX events_time ON events (event_time);
+CREATE TABLE versions
+(
+    id             SERIAL PRIMARY KEY,
+    ingest_id      INT                        NOT NULL,
 
-CREATE TABLE versions (
-    id                 SERIAL PRIMARY KEY,
-    ingest_id          INT NOT NULL,
+    entity_type    TEXT                       NOT NULL,
+    entity_id      UUID                       NOT NULL,
+    start_time     TIMESTAMP WITH TIME ZONE   NOT NULL,
 
-    entity_type        TEXT NOT NULL,
-    entity_id          UUID NOT NULL,
-    terminated         TEXT DEFAULT NULL,
+    entity         JSONB                      NOT NULL,
+    from_event     INT                        NOT NULL,
+    event_aux_data JSONB                      NOT NULL,
 
-    data               JSONB NOT NULL,
-    from_event         INT NOT NULL,
+    observations   TIMESTAMP WITH TIME ZONE[] NOT NULL,
+    terminated     TEXT DEFAULT NULL,
 
-    observations       TIMESTAMP WITH TIME ZONE[] NOT NULL,
-
-    next_timed_event   TIMESTAMP WITH TIME ZONE,
-
-    CONSTRAINT ingest_fk FOREIGN KEY(ingest_id) REFERENCES ingests(id) ON DELETE RESTRICT,
-    CONSTRAINT from_event_fk FOREIGN KEY(from_event) REFERENCES events(id) ON DELETE RESTRICT
+    CONSTRAINT ingest_fk FOREIGN KEY (ingest_id) REFERENCES ingests (id) ON DELETE RESTRICT,
+    CONSTRAINT from_event_fk FOREIGN KEY (from_event) REFERENCES events (id) ON DELETE RESTRICT
 );
 
-CREATE INDEX versions_index ON versions (ingest_id, entity_type, entity_id);
+CREATE INDEX versions_index ON versions (ingest_id, entity_type, entity_id, start_time);
 
-CREATE TABLE versions_parents (
-    id                  SERIAL PRIMARY KEY,
-    parent              INT NOT NULL,
-    child               INT NOT NULL,
-    UNIQUE (parent, child),
-    CONSTRAINT parent_fk FOREIGN KEY(parent) REFERENCES versions(id) ON DELETE CASCADE,
-    CONSTRAINT child_fk FOREIGN KEY(child) REFERENCES versions(id) ON DELETE CASCADE
+CREATE TABLE version_links
+(
+    id        SERIAL PRIMARY KEY,
+    parent_id INT NOT NULL,
+    child_id  INT NOT NULL,
+    UNIQUE (parent_id, child_id),
+    CONSTRAINT parent_fk FOREIGN KEY (parent_id) REFERENCES versions (id) ON DELETE CASCADE,
+    CONSTRAINT child_fk FOREIGN KEY (child_id) REFERENCES versions (id) ON DELETE CASCADE
 );
 
-CREATE VIEW versions_with_range AS (
-    SELECT versions.id,
-           versions.ingest_id,
-           versions.entity_type,
-           versions.entity_id,
-           versions.terminated,
-           versions.data,
-           versions.from_event,
-           versions.next_timed_event,
-           start_event.event_time,
-           start_event.event_source,
-           start_event.event_data,
-           end_event.event_time AS end_time
-    FROM versions
-    INNER JOIN events start_event ON versions.from_event = start_event.id
-    LEFT JOIN versions_parents vp ON versions.id = vp.parent
-    LEFT JOIN versions child_version ON vp.child = child_version.id
-    LEFT JOIN events end_event ON child_version.from_event = end_event.id
-);
+CREATE VIEW versions_with_end AS
+(
+SELECT start_version.id,
+       start_version.ingest_id,
+       start_version.entity_type,
+       start_version.entity_id,
+       start_version.start_time,
+       (SELECT min(end_version.start_time)
+        FROM versions end_version
+                 INNER JOIN version_links link ON end_version.id = link.child_id
+        WHERE start_version.id = link.parent_id) AS end_time,
+       start_version.entity,
+       start_version.from_event,
+       start_version.event_aux_data,
+       start_version.observations,
+       start_version.terminated
+FROM versions start_version
+    );

@@ -1,1 +1,0 @@
-DROP INDEX chron_updates_latest_time;
