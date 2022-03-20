@@ -2,17 +2,14 @@ use rocket_dyn_templates::Template;
 use diesel::result::Error as DieselError;
 use serde::Serialize;
 
-use blarser::db::{BlarserDbConn, get_latest_ingest, get_logs_for, IngestLogAndApproval};
+use blarser::db::{BlarserDbConn, get_latest_ingest, IngestLogAndApproval};
 use crate::routes::ApiError;
 
 #[rocket::get("/")]
 pub async fn index(conn: BlarserDbConn) -> Result<Template, ApiError> {
     let (ingest, logs) = conn.run(|c| {
         let ingest = get_latest_ingest(c)?;
-        let logs = match &ingest {
-            Some(ingest) => get_logs_for(ingest, c)?,
-            None => vec![]
-        };
+        let logs = vec![]; // TODO
 
         Ok((ingest, logs))
     }).await

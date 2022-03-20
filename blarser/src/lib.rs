@@ -14,9 +14,8 @@ pub mod db;
 #[allow(unused_imports)]
 pub mod schema;
 pub mod db_types;
-pub mod sim;
+pub mod entity;
+pub mod events;
 pub mod state;
 #[allow(dead_code)]
 mod parse;
-
-pub use state::{StateInterface, FeedStateInterface, EntityStateInterface};

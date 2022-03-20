@@ -12,7 +12,7 @@ use diesel::Queryable;
 
 use blarser::db::BlarserDbConn;
 use blarser::ingest::IngestTaskHolder;
-use blarser::sim::entity_to_raw_approximation;
+use blarser::entity::entity_to_raw_approximation;
 use crate::routes::ApiError;
 
 pub struct ParseableDateTime(DateTime<Utc>);

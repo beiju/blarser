@@ -6,7 +6,7 @@ use uuid::Uuid;
 use partial_information::{Rerollable, PartialInformationCompare, MaybeKnown};
 use partial_information_derive::PartialInformationCompare;
 
-use crate::sim::{Entity, TimedEvent};
+use crate::entity::{Entity, EntityRawTrait, EntityTrait, TimedEvent};
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, PartialInformationCompare)]
 pub struct Item {
@@ -117,20 +117,30 @@ impl Display for Player {
 }
 
 
-impl Entity for Player {
-    fn name() -> &'static str {
-        "player"
-    }
-    fn id(&self) -> Uuid { self.id }
+impl EntityRawTrait for <Player as PartialInformationCompare>::Raw {
+    fn entity_type(&self) -> &'static str { "player" }
+    fn entity_id(&self) -> Uuid { self.id }
 
-    fn next_timed_event(&self, _: DateTime<Utc>) -> Option<TimedEvent> {
-        None
+    fn init_events(&self, after_time: DateTime<Utc>) -> Vec<TimedEvent> { Vec::new() }
+
+    // Players are timestamped before the fetch, but there seems to be some caching
+    // TODO Try to reduce the cache duration
+    fn earliest_time(&self, valid_from: DateTime<Utc>) -> DateTime<Utc> {
+        valid_from - Duration::minutes(6)
     }
 
-    fn time_range_for_update(valid_from: DateTime<Utc>, _: &Self::Raw) -> (DateTime<Utc>, DateTime<Utc>) {
-        // Players are timestamped before the fetch, but there seems to be some caching
-        (valid_from - Duration::minutes(6), valid_from + Duration::minutes(1))
+    fn latest_time(&self, valid_from: DateTime<Utc>) -> DateTime<Utc> {
+        valid_from + Duration::minutes(1)
     }
+
+    fn as_entity(self) -> Entity {
+        Entity::Player(Player::from_raw(self))
+    }
+}
+
+impl EntityTrait for Player {
+    fn entity_type(&self) -> &'static str { "player" }
+    fn entity_id(&self) -> Uuid { self.id }
 }
 
 impl Player {

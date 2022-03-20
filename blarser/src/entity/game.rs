@@ -10,8 +10,8 @@ use partial_information_derive::PartialInformationCompare;
 
 use crate::api::{EventType, EventuallyEvent, Weather};
 use crate::parse::{Base};
-use crate::sim::{Entity};
-use crate::sim::entity::{EarliestEvent, TimedEvent, TimedEventType};
+use crate::entity::{Entity, EntityRawTrait, EntityTrait};
+use crate::entity::timed_event::{TimedEvent, TimedEventType};
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]
@@ -154,41 +154,45 @@ impl Display for Game {
     }
 }
 
-impl Entity for Game {
-    fn name() -> &'static str { "game" }
-    fn id(&self) -> Uuid { self.id }
+impl EntityTrait for Game {
+    fn entity_type(&self) -> &'static str { "game" }
+    fn entity_id(&self) -> Uuid { self.id }
+}
 
-    fn next_timed_event(&self, after_time: DateTime<Utc>) -> Option<TimedEvent> {
-        let mut earliest = EarliestEvent::new(after_time);
+impl EntityRawTrait for <Game as PartialInformationCompare>::Raw {
+    fn entity_type(&self) -> &'static str { "game" }
+    fn entity_id(&self) -> Uuid { self.id }
 
-        // There's a game update without a corresponding game event. It happens at the end of the
-        // first half of each inning, and from a cursory look at the game event json it appears to
-        // occur every time `phase == 3` and `top_of_inning == true`
-        if self.phase == 3 && self.top_of_inning {
-            let event_time = self.last_update_full.as_ref()
-                .expect("lastUpdateFull must be populated when game phase is 3")
-                .first()
-                .expect("lastUpdateFull must be non-empty when game phase is 3")
-                .created + Duration::seconds(5);
-            earliest.push(TimedEvent {
-                time: event_time,
-                event_type: TimedEventType::EndTopHalf(self.id),
-            })
-        }
-
-        earliest.into_inner()
+    fn init_events(&self, _: DateTime<Utc>) -> Vec<TimedEvent> {
+        Vec::new()
     }
 
-    fn time_range_for_update(valid_from: DateTime<Utc>, raw: &Self::Raw) -> (DateTime<Utc>, DateTime<Utc>) {
+    fn earliest_time(&self, valid_from: DateTime<Utc>) -> DateTime<Utc> {
         // If there's a lastUpdateFull, we know exactly when it was from
-        if let Some(luf) = &raw.last_update_full {
+        if let Some(luf) = &self.last_update_full {
             if let Some(event) = luf.first() {
-                return (event.created, event.created);
+                return event.created;
             }
         }
 
         // Otherwise, games are timestamped from after the fetch
-        (valid_from - Duration::minutes(1), valid_from)
+        valid_from - Duration::minutes(1)
+    }
+
+    fn latest_time(&self, valid_from: DateTime<Utc>) -> DateTime<Utc> {
+        // If there's a lastUpdateFull, we know exactly when it was from
+        if let Some(luf) = &self.last_update_full {
+            if let Some(event) = luf.first() {
+                return event.created;
+            }
+        }
+
+        // Otherwise, games are timestamped from after the fetch
+        valid_from
+    }
+
+    fn as_entity(self) -> Entity {
+        Entity::Game(Game::from_raw(self))
     }
 }
 

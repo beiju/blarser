@@ -1,15 +1,14 @@
-use std::fmt::{Display, Formatter};
 use chrono::{DateTime, Utc};
-use diesel::{insert_into, PgConnection, RunQueryDsl};
+use diesel::{insert_into, PgConnection, QueryResult, RunQueryDsl};
 use diesel_derive_enum::DbEnum;
-use itertools::Itertools;
-use rocket::info;
-use crate::api::EventuallyEvent;
+use diesel::prelude::*;
+use uuid::Uuid;
 
+use crate::api::EventuallyEvent;
 use crate::schema::*;
-use crate::sim::{TimedEvent, TimedEventType};
-use crate::state::{ChronObservationEvent, IngestEvent};
-use crate::StateInterface;
+use crate::entity::TimedEvent;
+use crate::events::Event;
+use crate::ingest::ChronObservationEvent;
 
 // define your enum
 #[derive(PartialEq, Debug, DbEnum)]
@@ -18,108 +17,60 @@ pub enum EventSource {
     Start,
     Feed,
     Timed,
-    Chron,
+    Manual,
 }
 
 #[derive(Insertable)]
 #[table_name = "events"]
 struct NewEvent {
     ingest_id: i32,
-    event_time: DateTime<Utc>,
-    event_source: EventSource,
-    event_data: serde_json::Value,
+    time: DateTime<Utc>,
+    source: EventSource,
+    data: serde_json::Value,
 }
 
 #[derive(Identifiable, Queryable, PartialEq, Debug)]
 #[table_name = "events"]
-pub struct Event {
+pub(crate) struct DbEvent {
     pub id: i32,
     pub ingest_id: i32,
-    pub event_time: DateTime<Utc>,
-    pub event_source: EventSource,
-    pub event_data: serde_json::Value,
+    pub time: DateTime<Utc>,
+    pub source: EventSource,
+    pub data: serde_json::Value,
 }
 
-pub enum EventData {
-    Start,
-    Feed(EventuallyEvent),
-    Timed(TimedEvent),
-    Manual(ChronObservationEvent)
+#[derive(Identifiable, Queryable, Associations, PartialEq, Debug)]
+#[belongs_to(parent = "DbEvent", foreign_key = "event_id")]
+#[table_name = "event_effects"]
+pub(crate) struct EventEffect {
+    pub id: i32,
+    pub event_id: i32,
+
+    pub entity_type: String,
+    pub entity_id: Uuid,
+    pub aux_data: serde_json::Value,
 }
 
-impl EventData {
-    pub fn apply(&self, state: &impl StateInterface) {
-        match self {
-            EventData::Start => {
-                panic!("Can't re-apply a Start event!")
-            }
-            EventData::Feed(feed_event) => {
-                feed_event.apply(state)
-            }
-            EventData::Timed(timed_event) => {
-                info!("In chronicler, re-applying timed event {:?}", timed_event.event_type);
-                timed_event.apply(state)
-            }
-            EventData::Manual(_) => {
-                panic!("Can't re-apply a Manual event!")
-            }
-        }
-    }
-
-    pub fn type_str(&self) -> String {
-        match self {
-            EventData::Start => { "Start".to_string() }
-            EventData::Feed(e) => { format!("{:?}", e.r#type) }
-            EventData::Timed(t) => { format!("{:?}", t.event_type) }
-            EventData::Manual(_) => { "Manual".to_string() }
-        }
-    }
+pub struct StoredEvent {
+    pub id: i32,
+    pub ingest_id: i32,
+    pub time: DateTime<Utc>,
+    pub source: EventSource,
+    pub event: Event,
 }
 
-impl Display for EventData {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            EventData::Start => { write!(f, "Start") }
-            EventData::Feed(event) => {
-                if event.metadata.siblings.is_empty() {
-                    write!(f, "{}", event.description)
-                } else {
-                    write!(f, "{}", event.metadata.siblings.iter()
-                        .map(|event| &event.description)
-                        .join("\n"))
+impl DbEvent {
+    pub fn parse(self) -> Result<StoredEvent, serde_json::error::Error> {
+        serde_json::from_value(self.event_data)
+            .map(|event| {
+                StoredEvent {
+                    id: self.id,
+                    ingest_id: self.ingest_id,
+                    time: self.time,
+                    source: self.source,
+                    event
                 }
-            }
-            EventData::Timed(event) => {
-                write!(f, "{}", event.event_type.description())
-            }
-            EventData::Manual(event) => {
-                write!(f, "{}", event.description())
-            }
-        }
-    }
-}
-
-impl Event {
-    pub fn parse(self) -> Result<EventData, serde_json::error::Error> {
-        match self.event_source {
-            EventSource::Start => { Ok(EventData::Start) }
-            EventSource::Feed => {
-                let event: EventuallyEvent = serde_json::from_value(self.event_data)?;
-                Ok(EventData::Feed(event))
-            }
-            EventSource::Timed => {
-                let event: TimedEventType = serde_json::from_value(self.event_data)?;
-                Ok(EventData::Timed(TimedEvent {
-                    time: self.event_time,
-                    event_type: event
-                }))
-            }
-            EventSource::Chron => {
-                let event: ChronObservationEvent = serde_json::from_value(self.event_data)?;
-                Ok(EventData::Manual(event))
-            }
-        }
-
+            })
     }
 }
 
@@ -132,41 +83,49 @@ fn insert_event(c: &PgConnection, event: NewEvent) -> diesel::result::QueryResul
         .get_result::<i32>(c)
 }
 
-pub fn add_start_event(c: &PgConnection, ingest_id: i32, event_time: DateTime<Utc>) -> i32 {
-    insert_event(c, NewEvent {
-        ingest_id,
-        event_time: event_time,
-        event_source: EventSource::Start,
-        event_data: serde_json::Value::Null,
-    }).expect("Error inserting start event")
+pub fn insert_events(c: &PgConnection, event: Vec<NewEvent>) -> diesel::result::QueryResult<usize> {
+    use crate::schema::events::dsl as events;
+
+    insert_into(events::events)
+        .values(event)
+        .execute(c)
 }
 
-pub fn add_timed_event(c: &PgConnection, ingest_id: i32, event: TimedEvent) -> i32 {
+pub fn add_start_event(c: &PgConnection, ingest_id: i32, event_time: DateTime<Utc>) -> QueryResult<i32> {
     insert_event(c, NewEvent {
         ingest_id,
-        event_time: event.time,
-        event_source: EventSource::Timed,
-        event_data: serde_json::to_value(event.event_type)
+        time: event_time,
+        source: EventSource::Start,
+        data: serde_json::Value::Null,
+    })
+}
+
+pub fn add_timed_event(c: &PgConnection, ingest_id: i32, event: TimedEvent) -> QueryResult<i32> {
+    insert_event(c, NewEvent {
+        ingest_id,
+        time: event.time,
+        source: EventSource::Timed,
+        data: serde_json::to_value(event.event_type)
             .expect("Error serializing TimedEvent"),
-    }).expect("Error inserting timed event")
+    })
 }
 
-pub fn add_feed_event(c: &PgConnection, ingest_id: i32, event: EventuallyEvent) -> i32 {
+pub fn add_feed_event(c: &PgConnection, ingest_id: i32, event: EventuallyEvent) -> QueryResult<i32> {
     insert_event(c, NewEvent {
         ingest_id,
-        event_time: event.created,
-        event_source: EventSource::Feed,
-        event_data: serde_json::to_value(event)
+        time: event.created,
+        source: EventSource::Feed,
+        data: serde_json::to_value(event)
             .expect("Error serializing EventuallyEvent"),
-    }).expect("Error inserting feed event")
+    })
 }
 
-pub fn add_chron_event(c: &PgConnection, ingest_id: i32, event: ChronObservationEvent) -> i32 {
+pub fn add_chron_event(c: &PgConnection, ingest_id: i32, event: ChronObservationEvent) -> QueryResult<i32> {
     insert_event(c, NewEvent {
         ingest_id,
-        event_time: event.applied_at,
-        event_source: EventSource::Chron,
-        event_data: serde_json::to_value(event)
+        time: event.applied_at,
+        source: EventSource::Manual,
+        data: serde_json::to_value(event)
             .expect("Error serializing ChronObservationEvent"),
-    }).expect("Error inserting chron event")
+    })
 }

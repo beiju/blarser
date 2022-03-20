@@ -5,8 +5,8 @@ use uuid::Uuid;
 use partial_information::PartialInformationCompare;
 use partial_information_derive::PartialInformationCompare;
 
-use crate::sim::Entity;
-use crate::sim::entity::{EarliestEvent, TimedEvent, TimedEventType};
+use crate::entity::{Entity, EntityRawTrait, EntityTrait};
+use crate::entity::timed_event::{TimedEvent, TimedEventType};
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]
@@ -31,10 +31,12 @@ pub struct Sim {
     pub sim_end: DateTime<Utc>,
     pub era_color: String,
     pub era_title: String,
-    pub playoffs: Option<i32>, // TODO what's the type when it's not null?
+    pub playoffs: Option<i32>,
+    // TODO what's the type when it's not null?
     pub season_id: Uuid,
     pub sim_start: DateTime<Utc>,
-    pub agitations: i32, // what
+    pub agitations: i32,
+    // what
     pub tournament: i32,
     pub gods_day_date: DateTime<Utc>,
     pub salutations: i32,
@@ -61,36 +63,32 @@ impl Display for Sim {
     }
 }
 
-impl Entity for Sim {
-    fn name() -> &'static str {
-        "sim"
-    }
-    fn id(&self) -> Uuid { Uuid::nil() }
+impl EntityRawTrait for <Sim as PartialInformationCompare>::Raw {
+    fn entity_type(&self) -> &'static str { "sim" }
+    fn entity_id(&self) -> Uuid { Uuid::nil() }
 
-    fn next_timed_event(&self, after_time: DateTime<Utc>) -> Option<TimedEvent> {
-        let mut earliest = EarliestEvent::new(after_time);
-
-        earliest.push(TimedEvent {
-            time: self.earlseason_date,
-            event_type: TimedEventType::EarlseasonStart
-        });
-
-        if self.phase == 2 {
-            let time = after_time
-                .with_minute(0).unwrap()
-                .with_second(0).unwrap() + Duration::hours(1);
-
-            earliest.push(TimedEvent {
-                time,
-                event_type: TimedEventType::DayAdvance
-            });
+    fn init_events(&self, after_time: DateTime<Utc>) -> Vec<TimedEvent> {
+        if self.phase == 2 && self.earlseason_date > after_time {
+            vec![TimedEvent {
+                time: self.earlseason_date,
+                event_type: TimedEventType::EarlseasonStart,
+            }]
+        } else {
+            todo!()
         }
-
-        earliest.into_inner()
     }
 
-    fn time_range_for_update(valid_from: DateTime<Utc>, _: &Self::Raw) -> (DateTime<Utc>, DateTime<Utc>) {
-        // Sim seems to be timestamped before the fetch? not sure
-        (valid_from, valid_from + Duration::minutes(1))
+    // Sim seems to be timestamped before the fetch? not sure
+    fn earliest_time(&self, valid_from: DateTime<Utc>) -> DateTime<Utc> { valid_from }
+
+    fn latest_time(&self, valid_from: DateTime<Utc>) -> DateTime<Utc> { valid_from + Duration::minutes(1) }
+
+    fn as_entity(self) -> Entity {
+        Sim::from_raw(self)
     }
+}
+
+impl EntityTrait for Sim {
+    fn entity_type(&self) -> &'static str { "sim" }
+    fn entity_id(&self) -> Uuid { Uuid::nil() }
 }

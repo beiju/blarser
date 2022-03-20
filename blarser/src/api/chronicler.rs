@@ -10,20 +10,20 @@ use crate::api::chronicler_schema::{ChroniclerItem, ChroniclerResponse, Chronicl
 pub const ENDPOINT_NAMES: [&str; 43] = [
     "player",
     "team",
-    // Completely covered by "league", "temporal", "sim", and games (handled separately). See
+    // Completely covered by "league", "temporal", "entity", and games (handled separately). See
     // https://discord.com/channels/738107179294523402/759177439745671169/918236757189873705
     // "stream",
     // Not offered in chron v2, handled separately
     // "game",
     "idols",
-    // Peanut tributes to hall of flame players, not related to anything that happens in the sim
+    // Peanut tributes to hall of flame players, not related to anything that happens in the entity
     // "tributes",
     // A few things like entities (Gods, etc.) speaking, peanut purchases (in the distant past),
-    // the ascended Crabs' game record, etc. I don't think it's connected to the sim?
+    // the ascended Crabs' game record, etc. I don't think it's connected to the entity?
     // "temporal",
     "tiebreakers",
-    "sim",
-    // This is the ticker, not connected to the sim at all
+    "entity",
+    // This is the ticker, not connected to the entity at all
     // "globalevents",
     "offseasonsetup",
     // It's annoying to deal with and not useful for blarsing blaseball
@@ -72,7 +72,7 @@ pub const ENDPOINT_NAMES: [&str; 43] = [
     "thebook",
     "championcallout",
     "dayssincelastincineration",
-    // Payouts for champion bets. This is probably related to the sim but we don't know how
+    // Payouts for champion bets. This is probably related to the entity but we don't know how
     // "availablechampionbets",
 ];
 

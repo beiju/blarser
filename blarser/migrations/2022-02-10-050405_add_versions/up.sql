@@ -5,11 +5,27 @@ CREATE TABLE events
     id        SERIAL PRIMARY KEY,
     ingest_id INT          NOT NULL,
 
+    time      TIMESTAMP WITH TIME ZONE NOT NULL,
     source    event_source NOT NULL,
     data      JSONB        NOT NULL,
 
     CONSTRAINT ingest_fk FOREIGN KEY (ingest_id) REFERENCES ingests (id) ON DELETE RESTRICT
 );
+
+CREATE TABLE event_effects
+(
+    id                INT PRIMARY KEY,
+    event_id          INT NOT NULL,
+
+    entity_type       TEXT NOT NULL,
+    entity_id         UUID NOT NULL,
+    aux_data          JSONB NOT NULL,
+
+    CONSTRAINT event_fk FOREIGN KEY (event_id) REFERENCES events (id)
+);
+
+-- I looked it up and Postgres doesn't create this index automatically
+CREATE INDEX event_effect_index ON event_effects (event_id);
 
 CREATE TABLE versions
 (

@@ -1,1 +1,1 @@
-DROP TABLE ingest_approvals;
+DROP TABLE approvals;

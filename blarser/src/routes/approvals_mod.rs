@@ -9,7 +9,7 @@ use rocket_dyn_templates::Template;
 use serde::Serialize;
 
 use blarser::ingest::IngestTaskHolder;
-use blarser::db::{BlarserDbConn, get_pending_approvals, IngestApproval, set_approval};
+use blarser::db::{BlarserDbConn, get_pending_approvals, Approval, set_approval};
 use crate::routes::{ApiError, rocket_uri_macro_index};
 
 #[rocket::get("/approvals")]
@@ -21,7 +21,7 @@ pub async fn approvals(conn: BlarserDbConn) -> Result<Template, ApiError> {
 
     #[derive(Serialize)]
     struct ApprovalTemplateParams {
-        approvals: Vec<IngestApproval>,
+        approvals: Vec<Approval>,
     }
 
     Ok(Template::render("approvals", ApprovalTemplateParams {

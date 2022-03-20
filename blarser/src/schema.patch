@@ -1,13 +1,13 @@
 diff --git a/blarser/src/schema.rs b/blarser/src/schema.rs
-index 39e2d8c..a357b06 100644
+index 3a80c7b..750fd25 100644
 --- a/blarser/src/schema.rs
 +++ b/blarser/src/schema.rs
-@@ -68,13 +68,36 @@ table! {
+@@ -81,17 +81,39 @@ table! {
+         event_aux_data -> Jsonb,
+         observations -> Array<Timestamptz>,
          terminated -> Nullable<Text>,
      }
  }
- 
- joinable!(versions -> events (from_event));
  
 +table! {
 +    use diesel::sql_types::*;
@@ -20,7 +20,7 @@ index 39e2d8c..a357b06 100644
 +        entity_type -> Text,
 +        entity_id -> Uuid,
 +        start_time -> Timestamptz,
-+        end_time -> Timestamptz,
++        end_time -> Nullable<Timestamptz>,
 +        entity -> Jsonb,
 +        from_event -> Int4,
 +        event_aux_data -> Jsonb,
@@ -29,11 +29,14 @@ index 39e2d8c..a357b06 100644
 +    }
 +}
 +
+ joinable!(event_effects -> events (event_id));
+ joinable!(versions -> events (from_event));
 +joinable!(versions_with_end -> events (from_event));
-+
+ 
  allow_tables_to_appear_in_same_query!(
+     approvals,
+     event_effects,
      events,
-     ingest_approvals,
      ingests,
      version_links,
      versions,

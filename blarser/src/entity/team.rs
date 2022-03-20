@@ -6,8 +6,8 @@ use uuid::Uuid;
 use partial_information::{PartialInformationCompare, Spurious};
 use partial_information_derive::PartialInformationCompare;
 
-use crate::sim::Entity;
-use crate::sim::entity::TimedEvent;
+use crate::entity::{Entity, EntityRawTrait, EntityTrait};
+use crate::entity::timed_event::TimedEvent;
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]
@@ -97,18 +97,27 @@ impl Display for Team {
     }
 }
 
-impl Entity for Team {
-    fn name() -> &'static str { "team" }
-    fn id(&self) -> Uuid { self.id }
+impl EntityRawTrait for <Team as PartialInformationCompare>::Raw {
+    fn entity_type(&self) -> &'static str  { "team" }
+    fn entity_id(&self) -> Uuid { self.id }
 
-    fn next_timed_event(&self, _: DateTime<Utc>) -> Option<TimedEvent> {
-        None
+    // Teams are timestamped before the fetch
+    fn earliest_time(&self, valid_from: DateTime<Utc>) -> DateTime<Utc> {
+        valid_from
     }
 
-    fn time_range_for_update(valid_from: DateTime<Utc>, _: &Self::Raw) -> (DateTime<Utc>, DateTime<Utc>) {
-        // Teams are timestamped before the fetch
-        (valid_from, valid_from + Duration::minutes(1))
+    fn latest_time(&self, valid_from: DateTime<Utc>) -> DateTime<Utc> {
+        valid_from + Duration::minutes(1)
     }
+
+    fn as_entity(self) -> Entity {
+        Entity::Team(Team::from_raw(self))
+    }
+}
+
+impl EntityTrait for Team {
+    fn entity_type(&self) -> &'static str  { "team" }
+    fn entity_id(&self) -> Uuid { self.id }
 }
 
 impl Team {

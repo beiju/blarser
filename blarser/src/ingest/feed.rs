@@ -1,86 +1,76 @@
 use chrono::{DateTime, Duration, Utc};
-use diesel::{Connection, PgConnection};
 use rocket::info;
 use futures::{pin_mut, StreamExt};
 
 use crate::api::{eventually, EventuallyEvent};
+use crate::events::{Event, EventAux, EventTrait};
+use crate::ingest::parse::parse_feed_event;
 use crate::ingest::task::FeedIngest;
 
-use crate::{sim, FeedStateInterface};
-use crate::state::{add_feed_event, add_timed_event, get_version_with_next_timed_event, IngestEvent};
+use crate::state::{add_feed_event, MergedSuccessors, NewVersion};
 
-pub async fn ingest_feed(mut ingest: FeedIngest, start_at_time: &'static str) {
+pub async fn ingest_feed(mut ingest: FeedIngest, start_at_time: &'static str, start_time_parsed: DateTime<Utc>) {
     info!("Started Feed ingest task");
 
     let feed_events = eventually::events(start_at_time);
 
     pin_mut!(feed_events);
 
+    let mut current_time = start_time_parsed;
+
     while let Some(feed_event) = feed_events.next().await {
         let feed_event_time = feed_event.created;
         // Doing a "manual borrow" of ingest because I can't figure out how to please the borrow
         // checker with a proper borrow
-        ingest = apply_timed_events_until(ingest, feed_event_time).await;
+        ingest = run_time_until(ingest, current_time, feed_event_time).await;
         ingest = apply_feed_event(ingest, feed_event).await;
+        current_time = feed_event_time;
 
         wait_for_chron_ingest(&mut ingest, feed_event_time).await
     }
 }
 
-async fn apply_timed_events_until(ingest: FeedIngest, feed_event_time: DateTime<Utc>) -> FeedIngest {
-    ingest.db.run(move |c| {
-        c.build_transaction()
-            .serializable()
-            .run(|| {
-                while let Some((entity_type, value, entity_time)) = get_version_with_next_timed_event(c, ingest.ingest_id, feed_event_time) {
-                    match entity_type.as_str() {
-                        "sim" => apply_timed_event::<sim::Sim>(c, ingest.ingest_id, value, entity_time, feed_event_time),
-                        "game" => apply_timed_event::<sim::Game>(c, ingest.ingest_id, value, entity_time, feed_event_time),
-                        "team" => apply_timed_event::<sim::Team>(c, ingest.ingest_id, value, entity_time, feed_event_time),
-                        "player" => apply_timed_event::<sim::Player>(c, ingest.ingest_id, value, entity_time, feed_event_time),
-                        &_ => { panic!("Tried to deserialize entity of unknown type {}", entity_type) }
-                    }
-                }
+async fn run_time_until(ingest: FeedIngest, start_time: DateTime<Utc>, end_time: DateTime<Utc>) -> FeedIngest {
+    ingest.run_transaction(move |state| {
+        // TODO: Properly handle when a timed event generates another timed event
+        for (event, effects) in state.get_events_between(start_time, end_time)? {
+            let mut successors = MergedSuccessors::new();
 
-                Ok::<_, diesel::result::Error>(())
-            })
+            for effect in effects {
+                let aux_data = event.event.deserialize_aux(effect.aux_data);
+                for version in state.get_latest_versions(&effect.entity_type, effect.entity_id)? {
+                    let new_entity = event.event.forward(version.entity, &aux_data);
+                    successors.add_successor(version.id, (new_entity, aux_data.clone()));
+                }
+            }
+
+            state.save_successors(successors.into_inner(), &event)?;
+        }
+
+        Ok::<_, diesel::result::Error>(())
     }).await
-        .expect("Database error applying timed events");
+        .expect("Database error running time forward in feed ingest");
 
     ingest
 }
 
-fn apply_timed_event<EntityT: sim::Entity>(c: &PgConnection, ingest_id: i32, value: serde_json::Value, entity_time: DateTime<Utc>, feed_event_time: DateTime<Utc>) {
-    let entity: EntityT = serde_json::from_value(value)
-        .expect("Error deserializing entity for timed event");
+async fn apply_feed_event(ingest: FeedIngest, feed_event: EventuallyEvent) -> FeedIngest {
+    ingest.run_transaction(move |state| {
+        let (event, effects) = parse_feed_event(feed_event, state)?;
 
-    let event = entity.next_timed_event(entity_time)
-        .expect("get_version_with_next_timed_event returned a version without a timed event");
-    assert!(event.time > entity_time);
-    assert!(event.time <= feed_event_time);
+        state.save_feed_event(event, effects)?;
 
-    let from_event = add_timed_event(c, ingest_id, event.clone());
+        let mut successors = MergedSuccessors::new();
+        for (entity_type, entity_id, aux_info) in effects {
+            for version in state.get_versions(entity_type, entity_id, event.time())? {
+                let new_entity = event.forward(version.entity, aux_info);
+                successors.add_successors(version.id, (new_entity, aux_info));
+            }
+        }
 
-    let state = FeedStateInterface::new(c, ingest_id, from_event, event.time);
+        state.save_versions(successors.into_inner())?;
 
-    info!("Applying timed event {:?}", event);
-    event.apply(&state);
-}
-
-async fn apply_feed_event(ingest: FeedIngest, event: EventuallyEvent) -> FeedIngest {
-    ingest.db.run(move |c| {
-        c.build_transaction()
-            .serializable()
-            .run(|| {
-                let from_event = add_feed_event(c, ingest.ingest_id, event.clone());
-
-                let state = FeedStateInterface::new(c, ingest.ingest_id, from_event, event.created);
-
-                info!("Applying feed event {:?}", event);
-                event.apply(&state);
-
-                Ok::<_, diesel::result::Error>(())
-            })
+        Ok(())
     }).await
         .expect("Ingest failed");
 

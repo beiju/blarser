@@ -1,4 +1,4 @@
-CREATE TABLE ingest_approvals
+CREATE TABLE approvals
 (
     id                      SERIAL PRIMARY KEY,
 

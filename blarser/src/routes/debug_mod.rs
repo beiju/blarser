@@ -3,14 +3,14 @@ use uuid::Uuid;
 use serde_json::{Value, json};
 use text_diff::Difference;
 use rocket_dyn_templates::Template;
-use blarser::sim;
+use blarser::entity;
 use itertools::Itertools;
 use serde::Serialize;
 use anyhow::anyhow;
 
 use blarser::db::BlarserDbConn;
 use blarser::ingest::IngestTaskHolder;
-use blarser::state::{Event, get_entity_debug, get_recently_updated_entities, Parent, Version};
+use blarser::state::{DbEvent, get_entity_debug, get_recently_updated_entities, VersionLink, Version};
 use crate::routes::ApiError;
 
 #[rocket::get("/debug")]
@@ -39,7 +39,7 @@ pub async fn debug(conn: BlarserDbConn, ingest_holder: &State<IngestTaskHolder>)
         })?
         .into_iter()
         .map(|(entity_type, entity_id, entity_json)| DebugEntityParams {
-            name: sim::entity_description(&entity_type, entity_json),
+            name: entity::entity_description(&entity_type, entity_json),
             r#type: entity_type,
             id: entity_id,
         })
@@ -74,7 +74,7 @@ fn span_wrap(string: &str, class_name: &str) -> String {
     }).join("")
 }
 
-fn build_json(prev_entity_str: &mut String, version: &Version, event: Event, version_parents: Vec<Parent>) -> Result<serde_json::Value, anyhow::Error> {
+fn build_json(prev_entity_str: &mut String, version: &Version, event: DbEvent, version_parents: Vec<VersionLink>) -> Result<serde_json::Value, anyhow::Error> {
     let parents: Vec<_> = version_parents.into_iter()
         .map(|parent| parent.parent.to_string())
         .collect();

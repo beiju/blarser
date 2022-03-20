@@ -5,8 +5,8 @@ use uuid::Uuid;
 use partial_information::{PartialInformationCompare};
 use partial_information_derive::PartialInformationCompare;
 
-use crate::sim::Entity;
-use crate::sim::entity::TimedEvent;
+use crate::entity::{Entity, EntityRawTrait, EntityTrait, Standings};
+use crate::entity::timed_event::TimedEvent;
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]
@@ -35,17 +35,24 @@ impl Display for Season {
     }
 }
 
-impl Entity for Season {
-    fn name() -> &'static str { "season" }
-    fn id(&self) -> Uuid { self.id }
+impl EntityRawTrait for <Season as PartialInformationCompare>::Raw {
+    fn entity_type(&self) -> &'static str { "season" }
+    fn entity_id(&self) -> Uuid { self.id }
 
-    fn next_timed_event(&self, _: DateTime<Utc>) -> Option<TimedEvent> {
-        None
+    fn earliest_time(&self, valid_from: DateTime<Utc>) -> DateTime<Utc> {
+        valid_from - Duration::minutes(1)
     }
 
-    fn time_range_for_update(valid_from: DateTime<Utc>, _: &Self::Raw) -> (DateTime<Utc>, DateTime<Utc>) {
-        // It's definitely timestamped after when it's extracted from streamData, but it may also be
-        // polled and timestamped before in that case
-        (valid_from - Duration::minutes(1), valid_from + Duration::minutes(1))
+    fn latest_time(&self, valid_from: DateTime<Utc>) -> DateTime<Utc> {
+        valid_from + Duration::minutes(1)
     }
+
+    fn as_entity(self) -> Entity {
+        Entity::Season(Season::from_raw(self))
+    }
+}
+
+impl EntityTrait for Season {
+    fn entity_type(&self) -> &'static str { "season" }
+    fn entity_id(&self) -> Uuid { self.id }
 }

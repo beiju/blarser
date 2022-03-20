@@ -1,7 +1,8 @@
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::{Arc, Mutex as StdMutex};
 use chrono::{DateTime, Utc};
-use diesel::{insert_into, RunQueryDsl};
+use diesel::{ExpressionMethods, insert_into, PgConnection, QueryDsl, QueryResult, RunQueryDsl};
 use rocket::info;
 use tokio::sync::{watch, oneshot};
 
@@ -9,11 +10,12 @@ use crate::db::BlarserDbConn;
 use crate::ingest::chron::{init_chron, ingest_chron};
 use crate::ingest::feed::ingest_feed;
 use crate::schema;
+use crate::state::StateInterface;
 
 const BLARSER_START: &str = "2021-12-06T15:00:00Z";
 
 pub struct IngestTaskHolder {
-    pub latest_ingest: Arc<StdMutex<Option<IngestTask>>>
+    pub latest_ingest: Arc<StdMutex<Option<IngestTask>>>,
 }
 
 impl IngestTaskHolder {
@@ -56,18 +58,54 @@ pub struct ChronIngest {
 }
 
 pub struct FeedIngest {
-    pub ingest_id: i32,
-    pub db: BlarserDbConn,
-    pub send_feed_progress: watch::Sender<DateTime<Utc>>,
-    pub receive_chron_progress: watch::Receiver<DateTime<Utc>>,
+    ingest_id: i32,
+    db: BlarserDbConn,
+    send_feed_progress: watch::Sender<DateTime<Utc>>,
+    receive_chron_progress: watch::Receiver<DateTime<Utc>>,
 }
+
+impl FeedIngest {
+    pub async fn run<F, R>(&self, f: F) -> R
+        where F: FnOnce(StateInterface) -> R + Send + 'static,
+              R: Send + 'static {
+        let ingest_id = self.ingest_id;
+        self.db.run(move |c| {
+            f(StateInterface::new(c, ingest_id))
+        }).await
+    }
+
+    pub async fn run_transaction<F, T, E>(&self, f: F) -> Result<T, E>
+        where F: FnOnce(StateInterface) -> Result<T, E> + Send + 'static,
+              T: Send + 'static,
+              E: From<diesel::result::Error> + Send + 'static {
+        let ingest_id = self.ingest_id;
+        self.db.run(move |c| {
+            c.build_transaction()
+                .serializable()
+                .run(|| {
+                    f(StateInterface::new(c, ingest_id))
+                })
+        }).await
+    }
+}
+
 
 impl IngestTask {
     pub async fn new(feed_db: BlarserDbConn, chron_db: BlarserDbConn) -> IngestTask {
         info!("Starting ingest");
 
         let ingest_id: i32 = feed_db.run(|c| {
+            use diesel::dsl::*;
             use schema::ingests::dsl::*;
+
+            // Delete all except latest ingest
+            let latest_ingest = ingests
+                .select(id)
+                .order(started_at.desc())
+                .limit(1)
+                .get_result::<i32>(c)?;
+
+            delete(ingests.filter(id.ne(latest_ingest))).execute(c)?;
             insert_into(ingests).default_values().returning(id).get_result(c)
         }).await
             .expect("Failed to create new ingest record");
@@ -102,7 +140,7 @@ impl IngestTask {
         init_chron(&mut chron_ingest, BLARSER_START, start_time_parsed).await;
 
         tokio::spawn(ingest_chron(chron_ingest, BLARSER_START));
-        tokio::spawn(ingest_feed(feed_ingest, BLARSER_START));
+        tokio::spawn(ingest_feed(feed_ingest, BLARSER_START, start_time_parsed));
 
         IngestTask {
             ingest_id,
