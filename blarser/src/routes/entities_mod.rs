@@ -11,7 +11,7 @@ use diesel::prelude::*;
 use diesel::Queryable;
 
 use blarser::db::BlarserDbConn;
-use blarser::ingest::IngestTask;
+use blarser::ingest::IngestTaskHolder;
 use blarser::sim::entity_to_raw_approximation;
 use crate::routes::ApiError;
 
@@ -156,9 +156,9 @@ impl EntityVersion {
 }
 
 #[rocket::get("/entities?<params..>")]
-pub async fn entities(conn: BlarserDbConn, ingest: &State<IngestTask>, params: Result<EntitiesParams, form::Errors<'_>>) -> Result<Value, ApiError> {
+pub async fn entities(conn: BlarserDbConn, ingest: &State<IngestTaskHolder>, params: Result<EntitiesParams, form::Errors<'_>>) -> Result<Value, ApiError> {
     let params = params.map_err(|e| ApiError::ParseError(e.to_string()))?;
-    let ingest_id = ingest.latest_ingest()
+    let ingest_id = ingest.latest_ingest_id()
         .ok_or_else(|| ApiError::InternalError("No ingest yet".to_string()))?;
 
     let wants_all = params.all.unwrap_or(false);

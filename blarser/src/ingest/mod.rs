@@ -3,4 +3,4 @@ mod feed;
 mod chron;
 mod approvals_db;
 
-pub use task::IngestTask;
+pub use task::{IngestTaskHolder, IngestTask};

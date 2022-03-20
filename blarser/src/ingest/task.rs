@@ -1,12 +1,9 @@
 use std::collections::HashMap;
-use std::ops::Deref;
 use std::sync::{Arc, Mutex as StdMutex};
 use chrono::{DateTime, Utc};
 use diesel::{insert_into, RunQueryDsl};
 use rocket::info;
-use tokio::sync::{OnceCell, watch, Mutex as TokioMutex, oneshot};
-
-use tokio::task::JoinHandle;
+use tokio::sync::{watch, oneshot};
 
 use crate::db::BlarserDbConn;
 use crate::ingest::chron::{init_chron, ingest_chron};
@@ -15,71 +12,86 @@ use crate::schema;
 
 const BLARSER_START: &str = "2021-12-06T15:00:00Z";
 
-pub struct IngestTask {
-    latest_ingest_id: OnceCell<i32>,
-    feed_task: StdMutex<Option<JoinHandle<()>>>,
-    chron_task: StdMutex<Option<JoinHandle<()>>>,
-    pending_approvals: StdMutex<Option<Arc<StdMutex<HashMap<i32, oneshot::Sender<bool>>>>>>,
+pub struct IngestTaskHolder {
+    pub latest_ingest: Arc<StdMutex<Option<IngestTask>>>
 }
 
-pub struct IngestState {
-    pub ingest_id: i32,
-    pub db: BlarserDbConn,
-    pub notify_progress: watch::Sender<DateTime<Utc>>,
-    pub receive_progress: watch::Receiver<DateTime<Utc>>,
-    pub damn_mutex: Arc<TokioMutex<()>>,
-    pub pending_approvals: Arc<StdMutex<HashMap<i32, oneshot::Sender<bool>>>>
-}
-
-impl IngestTask {
-    pub fn new() -> IngestTask {
-        IngestTask {
-            latest_ingest_id: OnceCell::new(),
-            feed_task: StdMutex::new(None),
-            chron_task: StdMutex::new(None),
-            pending_approvals: StdMutex::new(None),
+impl IngestTaskHolder {
+    pub fn new() -> Self {
+        Self {
+            latest_ingest: Arc::new(StdMutex::new(None))
         }
     }
 
-    pub fn latest_ingest(&self) -> Option<i32> {
-        self.latest_ingest_id.get().cloned()
+    pub fn latest_ingest_id(&self) -> Option<i32> {
+        let lock = self.latest_ingest.lock().unwrap();
+        lock.as_ref().map(|ingest| ingest.ingest_id)
     }
 
-    pub async fn start(&self, feed_db: BlarserDbConn, chron_db: BlarserDbConn) {
+    pub fn notify_approval(&self, id: i32, result: bool) {
+        let lock = self.latest_ingest.lock().unwrap();
+        if let Some(task) = &*lock {
+            task.notify_approval(id, result)
+        }
+    }
+}
+
+impl Default for IngestTaskHolder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+pub struct IngestTask {
+    ingest_id: i32,
+    pending_approvals: Arc<StdMutex<HashMap<i32, oneshot::Sender<bool>>>>,
+}
+
+pub struct ChronIngest {
+    pub ingest_id: i32,
+    pub db: BlarserDbConn,
+    pub send_chron_progress: watch::Sender<DateTime<Utc>>,
+    pub receive_feed_progress: watch::Receiver<DateTime<Utc>>,
+    pub pending_approvals: Arc<StdMutex<HashMap<i32, oneshot::Sender<bool>>>>,
+}
+
+pub struct FeedIngest {
+    pub ingest_id: i32,
+    pub db: BlarserDbConn,
+    pub send_feed_progress: watch::Sender<DateTime<Utc>>,
+    pub receive_chron_progress: watch::Receiver<DateTime<Utc>>,
+}
+
+impl IngestTask {
+    pub async fn new(feed_db: BlarserDbConn, chron_db: BlarserDbConn) -> IngestTask {
         info!("Starting ingest");
 
         let ingest_id: i32 = feed_db.run(|c| {
             use schema::ingests::dsl::*;
             insert_into(ingests).default_values().returning(id).get_result(c)
-        }).await.expect("Failed to create new ingest record");
-
-        self.latest_ingest_id.set(ingest_id)
-            .expect("Error saving latest ingest id");
+        }).await
+            .expect("Failed to create new ingest record");
 
         let blarser_start = DateTime::parse_from_rfc3339(BLARSER_START)
             .expect("Couldn't parse Blarser start time")
             .with_timezone(&Utc);
 
-        let (send_feed_progress, recv_feed_progress) = watch::channel(blarser_start);
-        let (send_chron_progress, recv_chron_progress) = watch::channel(blarser_start);
+        let (send_feed_progress, receive_feed_progress) = watch::channel(blarser_start);
+        let (send_chron_progress, receive_chron_progress) = watch::channel(blarser_start);
 
-        let mutex = Arc::new(TokioMutex::new(()));
         let approvals = Arc::new(StdMutex::new(HashMap::new()));
-        let feed_ingest = IngestState {
+        let feed_ingest = FeedIngest {
             ingest_id,
             db: feed_db,
-            notify_progress: send_feed_progress,
-            receive_progress: recv_chron_progress,
-            damn_mutex: mutex.clone(),
-            pending_approvals: approvals.clone(),
+            send_feed_progress,
+            receive_chron_progress,
         };
 
-        let mut chron_ingest = IngestState {
+        let mut chron_ingest = ChronIngest {
             ingest_id,
             db: chron_db,
-            notify_progress: send_chron_progress,
-            receive_progress: recv_feed_progress,
-            damn_mutex: mutex,
+            send_chron_progress,
+            receive_feed_progress,
             pending_approvals: approvals.clone(),
         };
 
@@ -89,25 +101,20 @@ impl IngestTask {
 
         init_chron(&mut chron_ingest, BLARSER_START, start_time_parsed).await;
 
-        *self.chron_task.lock().unwrap() = Some(tokio::spawn(ingest_chron(chron_ingest, BLARSER_START)));
-        *self.feed_task.lock().unwrap() = Some(tokio::spawn(ingest_feed(feed_ingest, BLARSER_START)));
-        *self.pending_approvals.lock().unwrap() = Some(approvals);
+        tokio::spawn(ingest_chron(chron_ingest, BLARSER_START));
+        tokio::spawn(ingest_feed(feed_ingest, BLARSER_START));
+
+        IngestTask {
+            ingest_id,
+            pending_approvals: approvals,
+        }
     }
 
     pub fn notify_approval(&self, id: i32, result: bool) {
-        let pending_approvals = self.pending_approvals.lock().unwrap();
-        if let Some(map) = pending_approvals.deref() {
-            let mut map = map.lock().unwrap();
-            if let Some(sender) = map.remove(&id) {
-                sender.send(result)
-                    .expect("Approval channel closed");
-            }
+        let mut pending_approvals = self.pending_approvals.lock().unwrap();
+        if let Some(sender) = pending_approvals.remove(&id) {
+            sender.send(result)
+                .expect("Approval channel was unexpectedly closed");
         }
-    }
-}
-
-impl Default for IngestTask {
-    fn default() -> Self {
-        IngestTask::new()
     }
 }

@@ -3,7 +3,7 @@
 use rocket::fairing::AdHoc;
 use rocket::fs::{FileServer, relative};
 use rocket_dyn_templates::Template;
-use blarser::ingest::IngestTask;
+use blarser::ingest::{IngestTaskHolder, IngestTask};
 use blarser::db::{BlarserDbConn};
 use routes::{index, approvals, approve, debug, entity_debug_json, entities};
 
@@ -17,12 +17,15 @@ async fn main() -> Result<(), rocket::Error> {
         .mount("/", rocket::routes![index, approvals, approve, debug, entity_debug_json, entities])
         .attach(BlarserDbConn::fairing())
         .attach(Template::fairing())
-        .manage(IngestTask::new())
+        .manage(IngestTaskHolder::new())
         .attach(AdHoc::on_liftoff("Blarser Ingest", |rocket| Box::pin(async {
             let feed_conn = BlarserDbConn::get_one(rocket).await.unwrap();
             let chron_conn = BlarserDbConn::get_one(rocket).await.unwrap();
-            let ingest_task: &IngestTask = rocket.state().unwrap();
-            ingest_task.start(feed_conn, chron_conn).await;
+            let task_holder: &IngestTaskHolder = rocket.state().unwrap();
+
+            let ingest_task = IngestTask::new(feed_conn, chron_conn).await;
+            let mut task_mut = task_holder.latest_ingest.lock().unwrap();
+            *task_mut = Some(ingest_task);
         })))
         .launch().await
 }

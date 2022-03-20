@@ -123,7 +123,7 @@ pub async fn add_initial_versions(conn: &BlarserDbConn, ingest_id: i32, start_ti
         .expect("Failed to save initial versions")
 }
 
-pub fn get_version_with_next_timed_event(c: &mut PgConnection, ingest_id: i32, before: DateTime<Utc>) -> Option<(String, serde_json::Value, DateTime<Utc>)> {
+pub fn get_version_with_next_timed_event(c: &PgConnection, ingest_id: i32, before: DateTime<Utc>) -> Option<(String, serde_json::Value, DateTime<Utc>)> {
     use crate::schema::versions::dsl as versions;
     use crate::schema::versions_parents::dsl as parents;
     use crate::schema::events::dsl as events;

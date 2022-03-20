@@ -8,7 +8,7 @@ use diesel::result::Error as DieselError;
 use rocket_dyn_templates::Template;
 use serde::Serialize;
 
-use blarser::ingest::IngestTask;
+use blarser::ingest::IngestTaskHolder;
 use blarser::db::{BlarserDbConn, get_pending_approvals, IngestApproval, set_approval};
 use crate::routes::{ApiError, rocket_uri_macro_index};
 
@@ -38,7 +38,7 @@ pub struct Approval {
 }
 
 #[rocket::post("/approve", data = "<approval>")]
-pub async fn approve(task: &State<IngestTask>, conn: BlarserDbConn, approval: Form<Approval>) -> Result<Redirect, ApiError> {
+pub async fn approve(task: &State<IngestTaskHolder>, conn: BlarserDbConn, approval: Form<Approval>) -> Result<Redirect, ApiError> {
     let redirect_to = if approval.from_route == "index" {
         Ok(uri!(index))
     } else if approval.from_route == "approvals" {

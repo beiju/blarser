@@ -14,7 +14,7 @@ use partial_information::{Conflict};
 use async_trait::async_trait;
 
 use crate::api::{chronicler, ChroniclerItem};
-use crate::ingest::task::IngestState;
+use crate::ingest::task::ChronIngest;
 use crate::{sim, EntityStateInterface};
 use crate::ingest::approvals_db::{ApprovalState, get_approval};
 use crate::state::{Event, MergedSuccessors, add_initial_versions, terminate_versions, get_entity_update_tree, Version, Parent, NewVersion, save_versions};
@@ -43,7 +43,7 @@ fn initial_state(start_at_time: &'static str) -> impl Stream<Item=(&'static str,
 trait Observation {
     fn sort_time(&self) -> DateTime<Utc>;
 
-    async fn do_ingest(self: Box<Self>, ingest: &mut IngestState);
+    async fn do_ingest(self: Box<Self>, ingest: &mut ChronIngest);
 }
 
 impl Eq for dyn Observation + Send {}
@@ -82,21 +82,22 @@ impl<EntityT: 'static + sim::Entity> Observation for EntityObservation<EntityT> 
         self.latest_time
     }
 
-    async fn do_ingest(self: Box<Self>, ingest: &mut IngestState) {
+    async fn do_ingest(self: Box<Self>, ingest: &mut ChronIngest) {
         wait_for_feed_ingest(ingest, self.latest_time).await;
 
         let ingest_id = ingest.ingest_id;
-        let _lock = ingest.damn_mutex.lock().await;
         let (approval, this) = ingest.db.run(move |c| {
-            let approval_result = c.transaction(|| {
-                let conflicts = self.do_ingest_internal(c, ingest_id, false);
+            let approval_result = c.build_transaction()
+                .serializable()
+                .run(|| {
+                    let conflicts = self.do_ingest_internal(c, ingest_id, false);
 
-                // Round-trip through the Result machinery to get diesel to cancel the transaction
-                match conflicts {
-                    None => { Ok(()) }
-                    Some(c) => { Err(IngestError::NeedsApproval(c)) }
-                }
-            });
+                    // Round-trip through the Result machinery to get diesel to cancel the transaction
+                    match conflicts {
+                        None => { Ok(()) }
+                        Some(c) => { Err(IngestError::NeedsApproval(c)) }
+                    }
+                });
 
             if let Err(IngestError::NeedsApproval(approval)) = approval_result {
                 (Some(approval), self)
@@ -160,6 +161,10 @@ impl<EntityT: sim::Entity> EntityObservation<EntityT> {
 
         let (events, generations) = get_entity_update_tree(c, ingest_id, EntityT::name(), self.entity_id, self.earliest_time)
             .expect("Error getting events for Chronicler ingest");
+
+        if self.entity_id.to_string() == "781feeac-f948-43af-beee-14fa1328db76" && self.earliest_time.to_string() == "2021-12-06 16:00:10.303 UTC" {
+            info!("BREAK");
+        }
 
         let mut to_terminate = None;
 
@@ -254,7 +259,7 @@ fn kmerge_stream(streams: impl Iterator<Item=PinnedObservationStream>) -> impl S
                 if let Some(next) = stream.next().await {
                     cache.push(Reverse(next));
                 } else {
-                    break // Avoids infinite loop
+                    break; // Avoids infinite loop
                 }
             }
         }
@@ -278,14 +283,14 @@ fn kmerge_stream(streams: impl Iterator<Item=PinnedObservationStream>) -> impl S
     })
 }
 
-pub async fn init_chron(ingest: &mut IngestState, start_at_time: &'static str, start_time_parsed: DateTime<Utc>) {
+pub async fn init_chron(ingest: &mut ChronIngest, start_at_time: &'static str, start_time_parsed: DateTime<Utc>) {
     let initial_versions: Vec<_> = initial_state(start_at_time).collect().await;
     add_initial_versions(&ingest.db, ingest.ingest_id, start_time_parsed, initial_versions).await;
 
     info!("Finished populating initial Chron values");
 }
 
-pub async fn ingest_chron(mut ingest: IngestState, start_at_time: &'static str) {
+pub async fn ingest_chron(mut ingest: ChronIngest, start_at_time: &'static str) {
     info!("Started Chron ingest task");
 
     let updates = chron_updates(start_at_time);
@@ -391,19 +396,19 @@ fn observe_entity<EntityT: sim::Entity>(version: Version, entity_raw: &EntityT::
     })
 }
 
-async fn wait_for_feed_ingest(ingest: &mut IngestState, wait_until_time: DateTime<Utc>) {
-    ingest.notify_progress.send(wait_until_time)
+async fn wait_for_feed_ingest(ingest: &mut ChronIngest, wait_until_time: DateTime<Utc>) {
+    ingest.send_chron_progress.send(wait_until_time)
         .expect("Error communicating with Chronicler ingest");
-    // info!("Chron ingest sent {} as requested time", wait_until_time);
+    info!("Chron ingest sent {} as requested time", wait_until_time);
 
     loop {
-        let feed_time = *ingest.receive_progress.borrow();
+        let feed_time = *ingest.receive_feed_progress.borrow();
         if wait_until_time < feed_time {
             break;
         }
-        // info!("Chronicler ingest waiting for Eventually ingest to catch up (at {} and we need {}, difference of {}s)",
-        //     feed_time, wait_until_time, (wait_until_time - feed_time).num_seconds());
-        ingest.receive_progress.changed().await
+        info!("Chronicler ingest waiting for Eventually ingest to catch up (at {} and we need {}, difference of {}s)",
+            feed_time, wait_until_time, (wait_until_time - feed_time).num_seconds());
+        ingest.receive_feed_progress.changed().await
             .expect("Error communicating with Eventually ingest");
     }
 }

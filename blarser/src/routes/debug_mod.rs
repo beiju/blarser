@@ -9,14 +9,14 @@ use serde::Serialize;
 use anyhow::anyhow;
 
 use blarser::db::BlarserDbConn;
-use blarser::ingest::IngestTask;
+use blarser::ingest::IngestTaskHolder;
 use blarser::state::{Event, get_entity_debug, get_recently_updated_entities, Parent, Version};
 use crate::routes::ApiError;
 
 #[rocket::get("/debug")]
-pub async fn debug(conn: BlarserDbConn, ingest: &State<IngestTask>) -> Result<Template, ApiError> {
-    let ingest_id = ingest.latest_ingest()
-        .ok_or(ApiError::InternalError(format!("There is no ingest yet")))?;
+pub async fn debug(conn: BlarserDbConn, ingest_holder: &State<IngestTaskHolder>) -> Result<Template, ApiError> {
+    let ingest_id = ingest_holder.latest_ingest_id()
+        .ok_or_else(|| ApiError::InternalError("There is no ingest yet".to_string()))?;
 
     #[derive(Serialize)]
     struct DebugEntityParams {
@@ -49,9 +49,9 @@ pub async fn debug(conn: BlarserDbConn, ingest: &State<IngestTask>) -> Result<Te
 }
 
 #[rocket::get("/debug/<entity_type>/<entity_id>")]
-pub async fn entity_debug_json(conn: BlarserDbConn, ingest: &State<IngestTask>, entity_type: String, entity_id: Uuid) -> Result<Value, ApiError> {
-    let ingest_id = ingest.latest_ingest()
-        .ok_or(ApiError::InternalError(format!("There is no ingest yet")))?;
+pub async fn entity_debug_json(conn: BlarserDbConn, ingest: &State<IngestTaskHolder>, entity_type: String, entity_id: Uuid) -> Result<Value, ApiError> {
+    let ingest_id = ingest.latest_ingest_id()
+        .ok_or_else(|| ApiError::InternalError("There is no ingest yet".to_string()))?;
 
     let versions_info = conn.run(move |c| {
         get_entity_debug(c, ingest_id, &entity_type, entity_id)
