@@ -3,11 +3,14 @@ table! {
     use crate::db_types::*;
     use crate::state::Event_source;
 
-    events (id) {
+    approvals (id) {
         id -> Int4,
-        ingest_id -> Int4,
-        source -> Event_source,
-        data -> Jsonb,
+        entity_type -> Text,
+        entity_id -> Uuid,
+        perceived_at -> Timestamptz,
+        message -> Text,
+        approved -> Nullable<Bool>,
+        explanation -> Nullable<Text>,
     }
 }
 
@@ -16,14 +19,26 @@ table! {
     use crate::db_types::*;
     use crate::state::Event_source;
 
-    ingest_approvals (id) {
+    event_effects (id) {
         id -> Int4,
+        event_id -> Int4,
         entity_type -> Text,
         entity_id -> Uuid,
-        perceived_at -> Timestamptz,
-        message -> Text,
-        approved -> Nullable<Bool>,
-        explanation -> Nullable<Text>,
+        aux_data -> Jsonb,
+    }
+}
+
+table! {
+    use diesel::sql_types::*;
+    use crate::db_types::*;
+    use crate::state::Event_source;
+
+    events (id) {
+        id -> Int4,
+        ingest_id -> Int4,
+        time -> Timestamptz,
+        source -> Event_source,
+        data -> Jsonb,
     }
 }
 
@@ -69,35 +84,14 @@ table! {
     }
 }
 
+joinable!(event_effects -> events (event_id));
 joinable!(versions -> events (from_event));
 
-table! {
-    use diesel::sql_types::*;
-    use crate::db_types::*;
-    use crate::state::Event_source;
-
-    versions_with_end (id) {
-        id -> Int4,
-        ingest_id -> Int4,
-        entity_type -> Text,
-        entity_id -> Uuid,
-        start_time -> Timestamptz,
-        end_time -> Timestamptz,
-        entity -> Jsonb,
-        from_event -> Int4,
-        event_aux_data -> Jsonb,
-        observations -> Array<Timestamptz>,
-        terminated -> Nullable<Text>,
-    }
-}
-
-joinable!(versions_with_end -> events (from_event));
-
 allow_tables_to_appear_in_same_query!(
+    approvals,
+    event_effects,
     events,
-    ingest_approvals,
     ingests,
     version_links,
     versions,
-    versions_with_end,
 );
