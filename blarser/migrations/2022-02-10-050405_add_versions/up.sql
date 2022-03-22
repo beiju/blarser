@@ -14,7 +14,7 @@ CREATE TABLE events
 
 CREATE TABLE event_effects
 (
-    id                INT PRIMARY KEY,
+    id                SERIAL PRIMARY KEY,
     event_id          INT NOT NULL,
 
     entity_type       TEXT NOT NULL,
