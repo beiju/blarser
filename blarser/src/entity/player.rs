@@ -3,10 +3,10 @@ use std::fmt::{Display, Formatter};
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use partial_information::{Rerollable, PartialInformationCompare, MaybeKnown};
+use partial_information::{Rerollable, PartialInformationCompare, MaybeKnown, Conflict};
 use partial_information_derive::PartialInformationCompare;
 
-use crate::entity::{Entity, EntityRawTrait, EntityTrait, TimedEvent};
+use crate::entity::{Entity, EntityRaw, EntityRawTrait, EntityTrait, TimedEvent};
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, PartialInformationCompare)]
 pub struct Item {
@@ -121,7 +121,7 @@ impl EntityRawTrait for <Player as PartialInformationCompare>::Raw {
     fn entity_type(&self) -> &'static str { "player" }
     fn entity_id(&self) -> Uuid { self.id }
 
-    fn init_events(&self, after_time: DateTime<Utc>) -> Vec<TimedEvent> { Vec::new() }
+    fn init_events(&self, _after_time: DateTime<Utc>) -> Vec<TimedEvent> { Vec::new() }
 
     // Players are timestamped before the fetch, but there seems to be some caching
     // TODO Try to reduce the cache duration
@@ -136,11 +136,24 @@ impl EntityRawTrait for <Player as PartialInformationCompare>::Raw {
     fn as_entity(self) -> Entity {
         Entity::Player(Player::from_raw(self))
     }
+    fn to_json(self) -> serde_json::Value {
+        serde_json::to_value(self)
+            .expect("Error serializing PlayerRaw object")
+    }
 }
 
 impl EntityTrait for Player {
     fn entity_type(&self) -> &'static str { "player" }
     fn entity_id(&self) -> Uuid { self.id }
+
+    fn observe(&mut self, raw: &EntityRaw) -> Vec<Conflict> {
+        if let EntityRaw::Player(raw) = raw {
+            PartialInformationCompare::observe(self, raw)
+        } else {
+            panic!("Tried to observe {} with an observation from {}",
+                   self.entity_type(), raw.entity_type());
+        }
+    }
 }
 
 impl Player {

@@ -1,13 +1,13 @@
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Utc};
 use rocket::info;
 use futures::{pin_mut, StreamExt};
 
 use crate::api::{eventually, EventuallyEvent};
-use crate::events::{Event, EventAux, EventTrait};
+use crate::events::{EventAux, EventTrait};
 use crate::ingest::parse::parse_feed_event;
 use crate::ingest::task::FeedIngest;
 
-use crate::state::{add_feed_event, MergedSuccessors, NewVersion};
+use crate::state::MergedSuccessors;
 
 pub async fn ingest_feed(mut ingest: FeedIngest, start_at_time: &'static str, start_time_parsed: DateTime<Utc>) {
     info!("Started Feed ingest task");
@@ -26,7 +26,7 @@ pub async fn ingest_feed(mut ingest: FeedIngest, start_at_time: &'static str, st
         ingest = apply_feed_event(ingest, feed_event).await;
         current_time = feed_event_time;
 
-        wait_for_chron_ingest(&mut ingest, feed_event_time).await
+        ingest.wait_for_chron_ingest(feed_event_time).await
     }
 }
 
@@ -37,7 +37,8 @@ async fn run_time_until(ingest: FeedIngest, start_time: DateTime<Utc>, end_time:
             let mut successors = MergedSuccessors::new();
 
             for effect in effects {
-                let aux_data = event.event.deserialize_aux(effect.aux_data);
+                let aux_data: EventAux = serde_json::from_value(effect.aux_data.clone())
+                    .expect("Error deserializing event aux");
                 for version in state.get_latest_versions(&effect.entity_type, effect.entity_id)? {
                     let new_entity = event.event.forward(version.entity, &aux_data);
                     successors.add_successor(version.id, (new_entity, aux_data.clone()));
@@ -56,41 +57,23 @@ async fn run_time_until(ingest: FeedIngest, start_time: DateTime<Utc>, end_time:
 
 async fn apply_feed_event(ingest: FeedIngest, feed_event: EventuallyEvent) -> FeedIngest {
     ingest.run_transaction(move |state| {
-        let (event, effects) = parse_feed_event(feed_event, state)?;
+        let (event, effects) = parse_feed_event(feed_event, &state)?;
 
-        state.save_feed_event(event, effects)?;
 
         let mut successors = MergedSuccessors::new();
-        for (entity_type, entity_id, aux_info) in effects {
-            for version in state.get_versions(entity_type, entity_id, event.time())? {
-                let new_entity = event.forward(version.entity, aux_info);
-                successors.add_successors(version.id, (new_entity, aux_info));
+        for (entity_type, entity_id, aux_info) in &effects {
+            for version in state.get_versions_at(entity_type, *entity_id, event.time())? {
+                let new_entity = EventTrait::forward(&event, version.entity, &aux_info);
+                successors.add_successor(version.id, (new_entity, aux_info.clone()));
             }
         }
 
-        state.save_versions(successors.into_inner())?;
+        let stored_event = state.save_feed_event(event, effects)?;
+        state.save_successors(successors.into_inner(), &stored_event)?;
 
-        Ok(())
+        Ok::<_, diesel::result::Error>(())
     }).await
         .expect("Ingest failed");
 
     ingest
-}
-
-async fn wait_for_chron_ingest(ingest: &mut FeedIngest, feed_event_time: DateTime<Utc>) {
-    ingest.send_feed_progress.send(feed_event_time)
-        .expect("Error communicating with Chronicler ingest");
-    info!("Feed ingest sent progress {}", feed_event_time);
-
-    loop {
-        let chron_requests_time = *ingest.receive_chron_progress.borrow();
-        let stop_at = chron_requests_time + Duration::seconds(1);
-        if feed_event_time < stop_at {
-            break;
-        }
-        info!("Eventually ingest waiting for Chronicler ingest to catch up (at {} and we are at {}, {}s ahead)",
-                    chron_requests_time, feed_event_time, (feed_event_time - chron_requests_time).num_seconds());
-        ingest.receive_chron_progress.changed().await
-            .expect("Error communicating with Chronicler ingest");
-    }
 }

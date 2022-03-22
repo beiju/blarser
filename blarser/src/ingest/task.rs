@@ -1,8 +1,7 @@
 use std::collections::HashMap;
-use std::future::Future;
-use std::sync::{Arc, Mutex as StdMutex};
-use chrono::{DateTime, Utc};
-use diesel::{ExpressionMethods, insert_into, PgConnection, QueryDsl, QueryResult, RunQueryDsl};
+use std::sync::{Arc, Mutex as StdMutex, Mutex};
+use chrono::{DateTime, Duration, Utc};
+use diesel::{ExpressionMethods, QueryDsl, RunQueryDsl};
 use rocket::info;
 use tokio::sync::{watch, oneshot};
 
@@ -49,22 +48,12 @@ pub struct IngestTask {
     pending_approvals: Arc<StdMutex<HashMap<i32, oneshot::Sender<bool>>>>,
 }
 
-pub struct ChronIngest {
+struct IngestImpl {
     pub ingest_id: i32,
     pub db: BlarserDbConn,
-    pub send_chron_progress: watch::Sender<DateTime<Utc>>,
-    pub receive_feed_progress: watch::Receiver<DateTime<Utc>>,
-    pub pending_approvals: Arc<StdMutex<HashMap<i32, oneshot::Sender<bool>>>>,
 }
 
-pub struct FeedIngest {
-    ingest_id: i32,
-    db: BlarserDbConn,
-    send_feed_progress: watch::Sender<DateTime<Utc>>,
-    receive_chron_progress: watch::Receiver<DateTime<Utc>>,
-}
-
-impl FeedIngest {
+impl IngestImpl {
     pub async fn run<F, R>(&self, f: F) -> R
         where F: FnOnce(StateInterface) -> R + Send + 'static,
               R: Send + 'static {
@@ -86,6 +75,122 @@ impl FeedIngest {
                     f(StateInterface::new(c, ingest_id))
                 })
         }).await
+    }
+}
+
+pub struct ChronIngest {
+    ingest_impl: IngestImpl,
+    pub send_chron_progress: watch::Sender<DateTime<Utc>>,
+    pub receive_feed_progress: watch::Receiver<DateTime<Utc>>,
+    pub pending_approvals: Arc<StdMutex<HashMap<i32, oneshot::Sender<bool>>>>,
+}
+
+impl ChronIngest {
+    pub fn new(
+        db: BlarserDbConn,
+        ingest_id: i32,
+        send_chron_progress: watch::Sender<DateTime<Utc>>,
+        receive_feed_progress: watch::Receiver<DateTime<Utc>>
+    ) -> Self {
+        Self {
+            ingest_impl: IngestImpl {
+                ingest_id,
+                db
+            },
+            send_chron_progress,
+            receive_feed_progress,
+            pending_approvals: Arc::new(Mutex::new(Default::default()))
+        }
+    }
+
+    //noinspection DuplicatedCode
+    pub async fn run<F, R>(&self, f: F) -> R
+        where F: FnOnce(StateInterface) -> R + Send + 'static,
+              R: Send + 'static {
+        self.ingest_impl.run(f).await
+    }
+
+    //noinspection DuplicatedCode
+    pub async fn run_transaction<F, T, E>(&self, f: F) -> Result<T, E>
+        where F: FnOnce(StateInterface) -> Result<T, E> + Send + 'static,
+              T: Send + 'static,
+              E: From<diesel::result::Error> + Send + 'static {
+        self.ingest_impl.run_transaction(f).await
+    }
+
+    pub async fn wait_for_feed_ingest(&mut self, wait_until_time: DateTime<Utc>) {
+        self.send_chron_progress.send(wait_until_time)
+            .expect("Error communicating with Chronicler ingest");
+        info!("Chron ingest sent {} as requested time", wait_until_time);
+
+        loop {
+            let feed_time = *self.receive_feed_progress.borrow();
+            if wait_until_time < feed_time {
+                break;
+            }
+            info!("Chronicler ingest waiting for Eventually ingest to catch up (at {} and we need {}, difference of {}s)",
+            feed_time, wait_until_time, (wait_until_time - feed_time).num_seconds());
+            self.receive_feed_progress.changed().await
+                .expect("Error communicating with Eventually ingest");
+        }
+    }
+
+}
+
+pub struct FeedIngest {
+    ingest_impl: IngestImpl,
+    send_feed_progress: watch::Sender<DateTime<Utc>>,
+    receive_chron_progress: watch::Receiver<DateTime<Utc>>,
+}
+
+impl FeedIngest {
+    pub fn new(
+        db: BlarserDbConn,
+        ingest_id: i32,
+        send_feed_progress: watch::Sender<DateTime<Utc>>,
+        receive_chron_progress: watch::Receiver<DateTime<Utc>>
+    ) -> Self {
+        Self {
+            ingest_impl: IngestImpl {
+                ingest_id,
+                db
+            },
+            send_feed_progress,
+            receive_chron_progress
+        }
+    }
+
+    //noinspection DuplicatedCode
+    pub async fn run<F, R>(&self, f: F) -> R
+        where F: FnOnce(StateInterface) -> R + Send + 'static,
+              R: Send + 'static {
+        self.ingest_impl.run(f).await
+    }
+
+    //noinspection DuplicatedCode
+    pub async fn run_transaction<F, T, E>(&self, f: F) -> Result<T, E>
+        where F: FnOnce(StateInterface) -> Result<T, E> + Send + 'static,
+              T: Send + 'static,
+              E: From<diesel::result::Error> + Send + 'static {
+        self.ingest_impl.run_transaction(f).await
+    }
+
+    pub async fn wait_for_chron_ingest(&mut self, feed_event_time: DateTime<Utc>) {
+        self.send_feed_progress.send(feed_event_time)
+            .expect("Error communicating with Chronicler ingest");
+        info!("Feed ingest sent progress {}", feed_event_time);
+
+        loop {
+            let chron_requests_time = *self.receive_chron_progress.borrow();
+            let stop_at = chron_requests_time + Duration::seconds(1);
+            if feed_event_time < stop_at {
+                break;
+            }
+            info!("Eventually ingest waiting for Chronicler ingest to catch up (at {} and we are at {}, {}s ahead)",
+                    chron_requests_time, feed_event_time, (feed_event_time - chron_requests_time).num_seconds());
+            self.receive_chron_progress.changed().await
+                .expect("Error communicating with Chronicler ingest");
+        }
     }
 }
 
@@ -118,26 +223,14 @@ impl IngestTask {
         let (send_chron_progress, receive_chron_progress) = watch::channel(blarser_start);
 
         let approvals = Arc::new(StdMutex::new(HashMap::new()));
-        let feed_ingest = FeedIngest {
-            ingest_id,
-            db: feed_db,
-            send_feed_progress,
-            receive_chron_progress,
-        };
-
-        let mut chron_ingest = ChronIngest {
-            ingest_id,
-            db: chron_db,
-            send_chron_progress,
-            receive_feed_progress,
-            pending_approvals: approvals.clone(),
-        };
+        let feed_ingest = FeedIngest::new(feed_db, ingest_id, send_feed_progress, receive_chron_progress);
+        let chron_ingest = ChronIngest::new(chron_db, ingest_id, send_chron_progress, receive_feed_progress);
 
         let start_time_parsed = DateTime::parse_from_rfc3339(BLARSER_START)
             .expect("Couldn't parse hard-coded Blarser start time")
             .with_timezone(&Utc);
 
-        init_chron(&mut chron_ingest, BLARSER_START, start_time_parsed).await;
+        init_chron(&chron_ingest, BLARSER_START, start_time_parsed).await;
 
         tokio::spawn(ingest_chron(chron_ingest, BLARSER_START));
         tokio::spawn(ingest_feed(feed_ingest, BLARSER_START, start_time_parsed));

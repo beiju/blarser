@@ -6,12 +6,10 @@ use chrono::{DateTime, Utc};
 use futures::{pin_mut, stream, Stream, StreamExt};
 use rocket::info;
 
-use crate::api::{chronicler, ChroniclerItem};
+use crate::api::chronicler;
 use crate::ingest::task::ChronIngest;
-use crate::{entity};
 use crate::entity::EntityParseError;
 use crate::ingest::observation::Observation;
-use crate::state::add_initial_versions;
 
 fn initial_state(start_at_time: &'static str) -> impl Stream<Item=Observation> {
     type ObservationStream = Pin<Box<dyn Stream<Item=Observation> + Send>>;
@@ -107,9 +105,13 @@ fn kmerge_stream(streams: impl Iterator<Item=PinnedObservationStream>) -> impl S
     })
 }
 
-pub async fn init_chron(ingest: &mut ChronIngest, start_at_time: &'static str, start_time_parsed: DateTime<Utc>) {
+pub async fn init_chron(ingest: &ChronIngest, start_at_time: &'static str, start_time_parsed: DateTime<Utc>) {
     let initial_versions: Vec<_> = initial_state(start_at_time).collect().await;
-    add_initial_versions(&ingest.db, ingest.ingest_id, start_time_parsed, initial_versions).await;
+
+    ingest.run_transaction(move |state| {
+        state.add_initial_versions(start_time_parsed, initial_versions.into_iter())
+    }).await
+        .expect("Failed to save initial versions");
 
     info!("Finished populating initial Chron values");
 }
@@ -122,6 +124,12 @@ pub async fn ingest_chron(mut ingest: ChronIngest, start_at_time: &'static str) 
     pin_mut!(updates);
 
     while let Some(observation) = updates.next().await {
-        observation.do_ingest(&mut ingest).await;
+        ingest.wait_for_feed_ingest(observation.latest_time()).await;
+
+        todo!()
+
+        // ingest.run_transaction(|state| {
+        //     observation.do_ingest(&mut ingest)
+        // })
     }
 }

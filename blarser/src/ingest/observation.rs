@@ -1,24 +1,17 @@
-use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use std::cmp::Ordering;
-use tokio::sync::oneshot;
-use diesel::{Connection, PgConnection};
 use itertools::Itertools;
-use rocket::info;
 use thiserror::Error;
-use uuid::Uuid;
 use partial_information::Conflict;
 
 use crate::api::ChroniclerItem;
-use crate::ingest::approvals_db::{ApprovalState, get_approval};
-use crate::ingest::task::ChronIngest;
-use crate::entity::{EntityParseError, EntityRaw, EntityRawTrait};
-use crate::events::Event;
-use crate::state::{MergedSuccessors, NewVersion, terminate_versions, Version, VersionLink};
+use crate::entity::{EntityParseError, EntityTrait, EntityRaw, EntityRawTrait};
+use crate::state::{MergedSuccessors, NewVersion, Version, VersionLink};
 
 
 pub struct Observation {
-    entity_raw: EntityRaw,
+    // TODO Reorganize so this isn't pub
+    pub entity_raw: EntityRaw,
     perceived_at: DateTime<Utc>,
 }
 
@@ -33,88 +26,86 @@ impl Observation {
     }
 
     pub fn earliest_time(&self) -> DateTime<Utc> {
-        self.entity_raw.earliest_time(self.perceived_at).1
+        self.entity_raw.earliest_time(self.perceived_at)
     }
 
     pub fn latest_time(&self) -> DateTime<Utc> {
-        self.entity_raw.latest_time(self.perceived_at).1
+        self.entity_raw.latest_time(self.perceived_at)
     }
 
-    pub async fn do_ingest(self, ingest: &mut ChronIngest) {
-        wait_for_feed_ingest(ingest, self.latest_time()).await;
+    // pub fn do_ingest(self, ingest: &mut ChronIngest) {
+    //     let ingest_id = ingest.ingest_id;
+    //     let (approval, this) = ingest.db.run(move |c| {
+    //         let approval_result = c.build_transaction()
+    //             .serializable()
+    //             .run(|| {
+    //                 let conflicts = self.do_ingest_internal(c, ingest_id, false);
+    //
+    //                 // Round-trip through the Result machinery to get diesel to cancel the transaction
+    //                 match conflicts {
+    //                     None => { Ok(()) }
+    //                     Some(c) => { Err(IngestError::NeedsApproval(c)) }
+    //                 }
+    //             });
+    //
+    //         if let Err(IngestError::NeedsApproval(approval)) = approval_result {
+    //             (Some(approval), self)
+    //         } else {
+    //             approval_result.expect("Unexpected database error in chronicler ingest");
+    //             (None, self)
+    //         }
+    //     }).await;
+    //
+    //     if let Some(conflicts) = approval {
+    //         let entity_type = this.entity_raw.entity_type();
+    //         let entity_id = this.entity_raw.entity_id();
+    //         let entity_time = this.perceived_at;
+    //
+    //         // TODO Make a fun html debug view from conflicts info
+    //         let message = conflicts.into_iter()
+    //             .map(|(_, reason)| {
+    //                 // TODO Print the info about which version the conflict is from, not about which
+    //                 //   observation we tried to apply
+    //                 format!("Can't apply observation to {} {} at {}:\n{}",
+    //                         entity_type, entity_id, entity_time, reason)
+    //             })
+    //             .join("\n");
+    //         let approval = ingest.db.run(move |c| {
+    //             get_approval(c, entity_type, entity_id, entity_time, &message)
+    //         }).await
+    //             .expect("Error saving approval to db");
+    //
+    //         let approved = match approval {
+    //             ApprovalState::Pending(approval_id) => {
+    //                 let (send, recv) = oneshot::channel();
+    //                 {
+    //                     let mut pending_approvals = ingest.pending_approvals.lock().unwrap();
+    //                     pending_approvals.insert(approval_id, send);
+    //                 }
+    //                 recv.await
+    //                     .expect("Channel closed while awaiting approval")
+    //             }
+    //             ApprovalState::Approved(_) => { true }
+    //             ApprovalState::Rejected => { false }
+    //         };
+    //
+    //         if approved {
+    //             ingest.db.run(move |c| {
+    //                 c.transaction(|| {
+    //                     let conflicts = this.do_ingest_internal(c, ingest_id, true);
+    //
+    //                     assert!(conflicts.is_none(), "Generated conflicts even with force=true");
+    //                     Ok::<_, diesel::result::Error>(())
+    //                 })
+    //             }).await.unwrap();
+    //         } else {
+    //             panic!("Approval rejected")
+    //         }
+    //     }
+    // }
 
-        let ingest_id = ingest.ingest_id;
-        let (approval, this) = ingest.db.run(move |c| {
-            let approval_result = c.build_transaction()
-                .serializable()
-                .run(|| {
-                    let conflicts = self.do_ingest_internal(c, ingest_id, false);
-
-                    // Round-trip through the Result machinery to get diesel to cancel the transaction
-                    match conflicts {
-                        None => { Ok(()) }
-                        Some(c) => { Err(IngestError::NeedsApproval(c)) }
-                    }
-                });
-
-            if let Err(IngestError::NeedsApproval(approval)) = approval_result {
-                (Some(approval), self)
-            } else {
-                approval_result.expect("Unexpected database error in chronicler ingest");
-                (None, self)
-            }
-        }).await;
-
-        if let Some(conflicts) = approval {
-            let entity_type = this.entity_raw.entity_type();
-            let entity_id = this.entity_raw.entity_id();
-            let entity_time = this.perceived_at;
-
-            // TODO Make a fun html debug view from conflicts info
-            let message = conflicts.into_iter()
-                .map(|(_, reason)| {
-                    // TODO Print the info about which version the conflict is from, not about which
-                    //   observation we tried to apply
-                    format!("Can't apply observation to {} {} at {}:\n{}",
-                            entity_type, entity_id, entity_time, reason)
-                })
-                .join("\n");
-            let approval = ingest.db.run(move |c| {
-                get_approval(c, entity_type, entity_id, entity_time, &message)
-            }).await
-                .expect("Error saving approval to db");
-
-            let approved = match approval {
-                ApprovalState::Pending(approval_id) => {
-                    let (send, recv) = oneshot::channel();
-                    {
-                        let mut pending_approvals = ingest.pending_approvals.lock().unwrap();
-                        pending_approvals.insert(approval_id, send);
-                    }
-                    recv.await
-                        .expect("Channel closed while awaiting approval")
-                }
-                ApprovalState::Approved(_) => { true }
-                ApprovalState::Rejected => { false }
-            };
-
-            if approved {
-                ingest.db.run(move |c| {
-                    c.transaction(|| {
-                        let conflicts = this.do_ingest_internal(c, ingest_id, true);
-
-                        assert!(conflicts.is_none(), "Generated conflicts even with force=true");
-                        Ok::<_, diesel::result::Error>(())
-                    })
-                }).await.unwrap();
-            } else {
-                panic!("Approval rejected")
-            }
-        }
-    }
-
-    fn do_ingest_internal(&self, c: &PgConnection, ingest_id: i32, force: bool) -> Option<Vec<(i32, String)>> {
-        info!("Placing {} {} between {} and {}", self.entity_raw.entity_type(), self.entity_raw.entity_id(), self.earliest_time(), self.latest_time());
+    // fn do_ingest_internal(&self, c: &PgConnection, ingest_id: i32, force: bool) -> Option<Vec<(i32, String)>> {
+    //     info!("Placing {} {} between {} and {}", self.entity_raw.entity_type(), self.entity_raw.entity_id(), self.earliest_time(), self.latest_time());
 
         // let (events, generations) = get_entity_update_tree(c, ingest_id, self.entity_raw.entity_type(), self.entity_raw.entity_id(), self.earliest_time())
         //     .expect("Error getting events for Chronicler ingest");
@@ -152,27 +143,27 @@ impl Observation {
         //
         // version_conflicts
 
-        todo!()
-    }
+    //     todo!()
+    // }
 }
 
 impl Eq for Observation {}
 
 impl PartialEq<Self> for Observation {
     fn eq(&self, other: &Self) -> bool {
-        self.sort_time().eq(&other.sort_time())
+        self.latest_time().eq(&other.latest_time())
     }
 }
 
 impl PartialOrd<Self> for Observation {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.sort_time().partial_cmp(&other.sort_time())
+        self.latest_time().partial_cmp(&other.latest_time())
     }
 }
 
 impl Ord for Observation {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.sort_time().cmp(&other.sort_time())
+        self.latest_time().cmp(&other.latest_time())
     }
 }
 
@@ -183,23 +174,6 @@ enum IngestError {
 
     #[error(transparent)]
     DieselError(#[from] diesel::result::Error),
-}
-
-async fn wait_for_feed_ingest(ingest: &mut ChronIngest, wait_until_time: DateTime<Utc>) {
-    ingest.send_chron_progress.send(wait_until_time)
-        .expect("Error communicating with Chronicler ingest");
-    info!("Chron ingest sent {} as requested time", wait_until_time);
-
-    loop {
-        let feed_time = *ingest.receive_feed_progress.borrow();
-        if wait_until_time < feed_time {
-            break;
-        }
-        info!("Chronicler ingest waiting for Eventually ingest to catch up (at {} and we need {}, difference of {}s)",
-            feed_time, wait_until_time, (wait_until_time - feed_time).num_seconds());
-        ingest.receive_feed_progress.changed().await
-            .expect("Error communicating with Eventually ingest");
-    }
 }
 
 fn observe_generation(
@@ -236,6 +210,9 @@ fn observe_entity(
     entity_raw: &EntityRaw,
     perceived_at: DateTime<Utc>
 ) -> Result<NewVersion, Vec<Conflict>> {
+    let entity_type = version.entity.entity_type();
+    let entity_id = version.entity.entity_id();
+
     let mut new_entity = version.entity;
     let conflicts = new_entity.observe(entity_raw);
     if !conflicts.is_empty() {
@@ -244,14 +221,12 @@ fn observe_entity(
 
     let mut observations = version.observations;
     observations.push(perceived_at);
-
     Ok(NewVersion {
         ingest_id: version.ingest_id,
-        entity_type: version.entity.entity_type(),
-        entity_id: version.entity.entity_id(),
+        entity_type,
+        entity_id,
         start_time: version.start_time,
-        entity: serde_json::to_value(new_entity)
-            .expect("Failed to serialize entity"),
+        entity: new_entity.to_json(),
         from_event: version.from_event,
         event_aux_data: todo!(),
         observations,
@@ -259,31 +234,31 @@ fn observe_entity(
 }
 
 
-fn advance_generation(
-    c: &PgConnection,
-    ingest_id: i32,
-    new_generation: &mut MergedSuccessors<NewVersion>,
-    event: Event,
-    prev_generation: Vec<Version>
-) {
-    let event_time = event.event_time;
-    let from_event = event.id;
-
-    for prev_version in prev_generation {
-        let parent = prev_version.id;
-
-        let new_entity = event.forward(prev_version.entity, prev_version.event_aux_data);
-        let new_version = NewVersion {
-            ingest_id,
-            entity_type: new_entity.entity_type(),
-            entity_id: new_entity.entity_id(),
-            start_time: event.time(),
-            entity: new_entity,
-            from_event: 0,
-            event_aux_data: Default::default(),
-            observations: vec![]
-        };
-
-        new_generation.add_successor(parent, new_version);
-    }
-}
+// fn advance_generation(
+//     c: &PgConnection,
+//     ingest_id: i32,
+//     new_generation: &mut MergedSuccessors<NewVersion>,
+//     event: Event,
+//     prev_generation: Vec<Version>
+// ) {
+//     let event_time = event.event_time;
+//     let from_event = event.id;
+//
+//     for prev_version in prev_generation {
+//         let parent = prev_version.id;
+//
+//         let new_entity = event.forward(prev_version.entity, prev_version.event_aux_data);
+//         let new_version = NewVersion {
+//             ingest_id,
+//             entity_type: new_entity.entity_type(),
+//             entity_id: new_entity.entity_id(),
+//             start_time: event.time(),
+//             entity: new_entity,
+//             from_event: 0,
+//             event_aux_data: Default::default(),
+//             observations: vec![]
+//         };
+//
+//         new_generation.add_successor(parent, new_version);
+//     }
+// }

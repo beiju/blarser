@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc, Local};
+use chrono::{DateTime, Utc};
 use diesel::{ExpressionMethods, OptionalExtension, PgConnection, QueryDsl, QueryResult, RunQueryDsl};
 use uuid::Uuid;
 use crate::db::Approval;

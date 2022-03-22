@@ -3,11 +3,10 @@ use std::fmt::{Display, Formatter};
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use partial_information::{PartialInformationCompare, Spurious};
+use partial_information::{Conflict, PartialInformationCompare, Spurious};
 use partial_information_derive::PartialInformationCompare;
 
-use crate::entity::{Entity, EntityRawTrait, EntityTrait};
-use crate::entity::timed_event::TimedEvent;
+use crate::entity::{Entity, EntityRaw, EntityRawTrait, EntityTrait};
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]
@@ -98,7 +97,7 @@ impl Display for Team {
 }
 
 impl EntityRawTrait for <Team as PartialInformationCompare>::Raw {
-    fn entity_type(&self) -> &'static str  { "team" }
+    fn entity_type(&self) -> &'static str { "team" }
     fn entity_id(&self) -> Uuid { self.id }
 
     // Teams are timestamped before the fetch
@@ -113,11 +112,24 @@ impl EntityRawTrait for <Team as PartialInformationCompare>::Raw {
     fn as_entity(self) -> Entity {
         Entity::Team(Team::from_raw(self))
     }
+    fn to_json(self) -> serde_json::Value {
+        serde_json::to_value(self)
+            .expect("Error serializing TeamRaw object")
+    }
 }
 
 impl EntityTrait for Team {
-    fn entity_type(&self) -> &'static str  { "team" }
+    fn entity_type(&self) -> &'static str { "team" }
     fn entity_id(&self) -> Uuid { self.id }
+
+    fn observe(&mut self, raw: &EntityRaw) -> Vec<Conflict> {
+        if let EntityRaw::Team(raw) = raw {
+            PartialInformationCompare::observe(self, raw)
+        } else {
+            panic!("Tried to observe {} with an observation from {}",
+                   self.entity_type(), raw.entity_type());
+        }
+    }
 }
 
 impl Team {

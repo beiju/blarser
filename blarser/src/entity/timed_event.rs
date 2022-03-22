@@ -1,8 +1,7 @@
-use std::fmt::{Debug, Display};
+use std::fmt::Debug;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use partial_information::PartialInformationCompare;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TimedEventType {

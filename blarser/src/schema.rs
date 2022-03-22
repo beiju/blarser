@@ -23,7 +23,7 @@ table! {
         id -> Int4,
         event_id -> Int4,
         entity_type -> Text,
-        entity_id -> Uuid,
+        entity_id -> Nullable<Uuid>,
         aux_data -> Jsonb,
     }
 }

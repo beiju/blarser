@@ -1,18 +1,13 @@
 use diesel::prelude::*;
-use diesel::{Connection, insert_into, Insertable, QueryDsl, RunQueryDsl};
+use diesel::{Insertable, QueryDsl, RunQueryDsl, BelongingToDsl};
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
-use itertools::{Itertools, izip};
-use rocket::info;
-use serde_json::json;
+use itertools::{izip};
 
-use crate::db::BlarserDbConn;
 use crate::schema::*;
-use crate::entity::{Entity, EntityRaw};
-use crate::events::EventAux;
-use crate::ingest::Observation;
-use crate::state::add_timed_event;
-use crate::state::events_db::{DbEvent, add_start_event, insert_events};
+use crate::entity::{Entity};
+use crate::events::{Event, EventAux};
+use crate::state::events_db::DbEvent;
 
 #[derive(Insertable)]
 #[table_name = "versions"]
@@ -42,7 +37,7 @@ impl PartialEq for NewVersion {
 #[derive(Identifiable, Queryable, Associations, PartialEq, Debug)]
 #[belongs_to(parent = "DbEvent", foreign_key = "from_event")]
 #[table_name = "versions"]
-struct DbVersion {
+pub(crate) struct DbVersion {
     pub id: i32,
     pub ingest_id: i32,
 
@@ -58,7 +53,30 @@ struct DbVersion {
     pub terminated: Option<String>,
 }
 
-pub struct Version {
+impl DbVersion {
+    pub fn parse(self) -> Version {
+        let entity = Entity::from_json(&self.entity_type, self.entity)
+            .expect("Failed to parse event from database");
+        Version {
+            id: self.id,
+            ingest_id: self.ingest_id,
+            entity_type: self.entity_type,
+            entity_id: self.entity_id,
+            start_time: self.start_time,
+            entity,
+            from_event: self.from_event,
+            event_aux_data: serde_json::from_value(self.event_aux_data)
+                .expect("Failed to parse event aux info from database"),
+            observations: self.observations,
+            terminated: self.terminated
+        }
+    }
+}
+
+#[derive(Identifiable, Queryable, Associations, PartialEq, Debug)]
+#[belongs_to(parent = "DbEvent", foreign_key = "from_event")]
+#[table_name = "versions"]
+pub(crate) struct DbVersionWithEnd {
     pub id: i32,
     pub ingest_id: i32,
 
@@ -66,6 +84,42 @@ pub struct Version {
     pub entity_id: Uuid,
     pub start_time: DateTime<Utc>,
     pub end_time: Option<DateTime<Utc>>,
+
+    pub entity: serde_json::Value,
+    pub from_event: i32,
+    pub event_aux_data: serde_json::Value,
+
+    pub observations: Vec<DateTime<Utc>>,
+    pub terminated: Option<String>,
+}
+
+impl DbVersionWithEnd {
+    pub fn parse(self) -> Version {
+        let entity = Entity::from_json(&self.entity_type, self.entity)
+            .expect("Failed to parse event from database");
+        Version {
+            id: self.id,
+            ingest_id: self.ingest_id,
+            entity_type: self.entity_type,
+            entity_id: self.entity_id,
+            start_time: self.start_time,
+            entity,
+            from_event: self.from_event,
+            event_aux_data: serde_json::from_value(self.event_aux_data)
+                .expect("Failed to parse event aux info from database"),
+            observations: self.observations,
+            terminated: self.terminated
+        }
+    }
+}
+
+pub struct Version {
+    pub id: i32,
+    pub ingest_id: i32,
+
+    pub entity_type: String,
+    pub entity_id: Uuid,
+    pub start_time: DateTime<Utc>,
 
     pub entity: Entity,
     pub from_event: i32,
@@ -83,59 +137,12 @@ pub(crate) struct NewVersionLink {
 }
 
 #[derive(Identifiable, Queryable, Associations, PartialEq, Debug)]
-#[belongs_to(parent = "Version", foreign_key = "child_id")]
+#[belongs_to(parent = "DbVersion", foreign_key = "child_id")]
 #[table_name = "version_links"]
 pub struct VersionLink {
     pub id: i32,
     pub parent_id: i32,
     pub child_id: i32,
-}
-
-pub async fn add_initial_versions(conn: &BlarserDbConn, ingest_id: i32, start_time: DateTime<Utc>,
-                                  entities: impl Iterator<Item=Observation>) {
-    conn.run(move |c| {
-        c.transaction(|| {
-            let from_event = add_start_event(c, ingest_id, start_time);
-
-            let chunks = entities.into_iter()
-                .flat_map(move |observation| {
-                    for event in observation.entity.init_events(start_time) {
-                        add_timed_event(conn, ingest_id, event)?;
-                    }
-                    version_for_initial_state(ingest_id, from_event, start_time, observation.entity)
-                })
-                .chunks(2000); // Diesel can't handle inserting the whole thing in one go
-
-            let mut inserted = 0;
-            for chunk in &chunks {
-                let (chunk_versions, chunk_events): (Vec<_>, Vec<_>) = chunk.unzip();
-
-                insert_events(c, chunk_events.into_iter().flatten().collect())?;
-                use crate::schema::versions::dsl::*;
-                inserted += insert_into(versions)
-                    .values(chunk_versions)
-                    .execute(c)?;
-                info!("Inserted {} initial versions", inserted);
-            }
-
-            Ok::<_, diesel::result::Error>(())
-        })
-    }).await
-        .expect("Failed to save initial versions")
-}
-
-fn version_for_initial_state(ingest_id: i32, from_event: i32, start_time: DateTime<Utc>, entity: EntityRaw, perceived_at: DateTime<Utc>) -> NewVersion {
-    NewVersion {
-        ingest_id,
-        entity_type: entity.entity_type(),
-        entity_id: entity.entity_id(),
-        start_time,
-        entity: serde_json::to_value(entity)
-            .expect("Failed to serialize PartialInformation entity"),
-        from_event,
-        event_aux_data: json!(null),
-        observations: vec![perceived_at],
-    }
 }
 
 pub fn get_recently_updated_entities(c: &PgConnection, ingest_id: i32, count: usize) -> QueryResult<Vec<(String, Uuid, serde_json::Value)>> {
@@ -160,23 +167,29 @@ pub fn get_recently_updated_entities(c: &PgConnection, ingest_id: i32, count: us
     )
 }
 
-pub fn get_entity_debug(c: &PgConnection, ingest_id: i32, entity_type: &str, entity_id: Uuid) -> QueryResult<Vec<(Version, DbEvent, Vec<VersionLink>)>> {
+pub fn get_entity_debug(c: &PgConnection, ingest_id: i32, entity_type: &str, entity_id: Uuid) -> QueryResult<Vec<(Version, Event, Vec<VersionLink>)>> {
     use crate::schema::versions::dsl as versions;
     use crate::schema::events::dsl as events;
-    let (versions, events): (Vec<Version>, Vec<DbEvent>) = versions::versions
+    let (versions, events): (Vec<DbVersion>, Vec<DbEvent>) = versions::versions
         .inner_join(events::events.on(versions::from_event.eq(events::id)))
         // Is from the right ingest
         .filter(versions::ingest_id.eq(ingest_id))
         // Is the right entity
         .filter(versions::entity_type.eq(entity_type))
         .filter(versions::entity_id.eq(entity_id))
-        .get_results::<(Version, DbEvent)>(c)?
+        .get_results::<(DbVersion, DbEvent)>(c)?
         .into_iter()
         .unzip();
 
     let parents = VersionLink::belonging_to(&versions)
         .load::<VersionLink>(c)?
         .grouped_by(&versions);
+
+    let versions = versions.into_iter()
+        .map(|version| version.parse());
+
+    let events = events.into_iter()
+        .map(|event| event.parse().event);
 
     Ok(izip!(versions, events, parents).collect())
 }

@@ -51,64 +51,18 @@
 // fn lets_go(state: &impl StateInterface, event: &EventuallyEvent) {
 //     let game_id = event.game_id().expect("LetsGo event must have a game id");
 //     state.with_game(game_id, |mut game| {
-//         game.game_start = true;
-//         game.game_start_phase = -1;
-//         game.home.team_batter_count = Some(-1);
-//         game.away.team_batter_count = Some(-1);
-//
-//         game.game_update_common(event);
-//
-//         Ok(vec![game])
 //     });
 // }
 //
 // fn play_ball(state: &impl StateInterface, event: &EventuallyEvent) {
 //     let game_id = event.game_id().expect("PlayBall event must have a game id");
 //     state.with_game(game_id, |mut game| {
-//         game.game_start_phase = 20;
-//         game.inning = -1;
-//         game.phase = 2;
-//         game.top_of_inning = false;
-//
-//         // Yeah, it unsets pitchers. Why, blaseball.
-//         game.home.pitcher = None;
-//         game.home.pitcher_name = Some(MaybeKnown::Known(String::new()));
-//         game.away.pitcher = None;
-//         game.away.pitcher_name = Some(MaybeKnown::Known(String::new()));
-//
-//         game.game_update_common(event);
-//
-//         Ok(vec![game])
 //     });
 // }
 //
 // fn half_inning(state: &impl StateInterface, event: &EventuallyEvent) {
 //     let game_id = event.game_id().expect(concat!("HalfInning event must have a game id"));
 //     state.with_game(game_id, |mut game| {
-//         game.top_of_inning = !game.top_of_inning;
-//         if game.top_of_inning {
-//             game.inning += 1;
-//         }
-//         game.phase = 6;
-//         game.half_inning_score = 0.0;
-//
-//         // The first halfInning event re-sets the data that PlayBall clears
-//         if game.inning == 0 && game.top_of_inning {
-//             for self_by_team in [&mut game.home, &mut game.away] {
-//                 let pitcher_id = *state.read_team(self_by_team.team, |team| {
-//                     team.active_pitcher(event.day)
-//                 }).iter().exactly_one().expect("Can't handle ambiguity in active pitcher");
-//
-//                 let pitcher_name = state.read_player(pitcher_id, |pitcher| {
-//                     pitcher.name
-//                 }).iter().exactly_one().expect("Can't handle ambiguity in active pitcher").clone();
-//
-//                 self_by_team.pitcher = Some(MaybeKnown::Known(pitcher_id));
-//                 self_by_team.pitcher_name = Some(MaybeKnown::Known(pitcher_name));
-//             }
-//         }
-//
-//         game.game_update_common(event);
 //
 //         Ok(vec![game])
 //     })

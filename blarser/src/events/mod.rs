@@ -1,23 +1,25 @@
 mod feed_event;
 mod timed_event;
+mod game_update;
 mod lets_go;
+mod play_ball;
+mod half_inning;
 
 pub use lets_go::LetsGo;
+pub use play_ball::PlayBall;
+pub use half_inning::HalfInning;
 
-use uuid::Uuid;
 use chrono::{DateTime, Utc};
-use std::fmt::{Display};
 use enum_dispatch::enum_dispatch;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
-use crate::entity::{Entity, TimedEvent};
+use crate::entity::{Entity};
 
 
 #[enum_dispatch]
 pub trait EventTrait {
     fn time(&self) -> DateTime<Utc>;
-
-    fn deserialize_aux(&self, json: serde_json::Value) -> EventAux;
 
     fn forward(&self, entity: Entity, aux: &EventAux) -> Entity;
     fn reverse(&self, entity: Entity, aux: &EventAux) -> Entity;
@@ -26,12 +28,18 @@ pub trait EventTrait {
 #[derive(Serialize, Deserialize)]
 #[enum_dispatch(EventTrait)]
 pub enum Event {
-    LetsGo
+    LetsGo(LetsGo),
+    PlayBall(PlayBall),
+    HalfInning(HalfInning),
 }
 
 #[derive(PartialEq, Eq, Clone, Serialize, Deserialize)]
 pub enum EventAux {
-    None
+    None,
+    Pitchers {
+        home: (Uuid, String),
+        away: (Uuid, String)
+    }
 }
 
 // impl Event {

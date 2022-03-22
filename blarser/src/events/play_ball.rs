@@ -2,7 +2,6 @@ use chrono::{DateTime, Utc};
 use diesel::QueryResult;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use partial_information::MaybeKnown;
 
 use crate::api::EventuallyEvent;
 use crate::entity::Entity;
@@ -10,15 +9,16 @@ use crate::events::{Event, EventAux, EventTrait};
 use crate::events::game_update::GameUpdate;
 
 #[derive(Serialize, Deserialize)]
-pub struct LetsGo {
+pub struct PlayBall {
     game_update: GameUpdate,
     time: DateTime<Utc>,
 }
 
-impl LetsGo {
+impl PlayBall {
     pub fn parse(feed_event: EventuallyEvent) -> QueryResult<(Event, Vec<(String, Option<Uuid>, EventAux)>)> {
         let time = feed_event.created;
-        let game_id = feed_event.game_id().expect("LetsGo event must have a game id");
+        let game_id = feed_event.game_id().expect("PlayBall event must have a game id");
+
         let event = Self {
             game_update: GameUpdate::parse(feed_event),
             time
@@ -34,7 +34,7 @@ impl LetsGo {
     }
 }
 
-impl EventTrait for LetsGo {
+impl EventTrait for PlayBall {
     fn time(&self) -> DateTime<Utc> {
         self.time
     }
@@ -44,20 +44,14 @@ impl EventTrait for LetsGo {
             Entity::Game(mut game) => {
                 self.game_update.forward(&mut game);
 
-                game.game_start_phase = 20;
-                game.inning = -1;
-                game.phase = 2;
-                game.top_of_inning = false;
-
-                // Yeah, it unsets pitchers. Why, blaseball.
-                game.home.pitcher = None;
-                game.home.pitcher_name = Some(MaybeKnown::Known(String::new()));
-                game.away.pitcher = None;
-                game.away.pitcher_name = Some(MaybeKnown::Known(String::new()));
+                game.game_start = true;
+                game.game_start_phase = -1;
+                game.home.team_batter_count = Some(-1);
+                game.away.team_batter_count = Some(-1);
 
                 game.into()
             },
-            _ => panic!("LetsGo event does not apply to this entity")
+            _ => panic!("PlayBall event does not apply to this entity")
         }
     }
 

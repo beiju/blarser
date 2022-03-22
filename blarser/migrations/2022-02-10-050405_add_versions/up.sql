@@ -18,7 +18,7 @@ CREATE TABLE event_effects
     event_id          INT NOT NULL,
 
     entity_type       TEXT NOT NULL,
-    entity_id         UUID NOT NULL,
+    entity_id         UUID,
     aux_data          JSONB NOT NULL,
 
     CONSTRAINT event_fk FOREIGN KEY (event_id) REFERENCES events (id)

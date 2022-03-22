@@ -17,17 +17,14 @@ pub struct Ingest {
 #[derive(Identifiable, Queryable, Debug, Serialize)]
 pub struct Approval {
     pub id: i32,
-    pub at: DateTime<Utc>,
+
     pub entity_type: String,
     pub entity_id: uuid::Uuid,
     pub perceived_at: DateTime<Utc>,
+
     pub message: String,
     pub approved: Option<bool>,
     pub explanation: Option<String>,
-}
-
-fn t(c: rocket_sync_db_pools::Connection<BlarserDbConn, PgConnection>) {
-    c.run()
 }
 
 pub fn get_latest_ingest(conn: &diesel::PgConnection) -> Result<Option<Ingest>, diesel::result::Error> {

@@ -3,21 +3,20 @@ use std::fmt::{Debug, Display, Formatter};
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use partial_information::{PartialInformationCompare};
+use partial_information::{Conflict, PartialInformationCompare};
 use partial_information_derive::PartialInformationCompare;
 
-use crate::entity::{Entity, EntityRawTrait, EntityTrait};
-use crate::entity::timed_event::TimedEvent;
+use crate::entity::{Entity, EntityRaw, EntityRawTrait, EntityTrait};
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
 pub struct Standings {
-    #[serde(rename="__v")]
+    #[serde(rename = "__v")]
     pub version: Option<i32>,
 
-    #[serde(alias="_id")]
+    #[serde(alias = "_id")]
     pub id: Uuid,
 
     #[serde(default)]
@@ -36,7 +35,7 @@ impl Display for Standings {
 
 impl EntityRawTrait for <Standings as PartialInformationCompare>::Raw {
     fn entity_type(&self) -> &'static str { "standings" }
-    fn entity_id(&self) -> Uuid  { self.id }
+    fn entity_id(&self) -> Uuid { self.id }
 
     // It's definitely timestamped after when it's extracted from streamData, but it may also be
     // polled and timestamped before in that case
@@ -51,11 +50,24 @@ impl EntityRawTrait for <Standings as PartialInformationCompare>::Raw {
     fn as_entity(self) -> Entity {
         Entity::Standings(Standings::from_raw(self))
     }
+    fn to_json(self) -> serde_json::Value {
+        serde_json::to_value(self)
+            .expect("Error serializing StandingsRaw object")
+    }
 }
 
 impl EntityTrait for Standings {
     fn entity_type(&self) -> &'static str { "standings" }
-    fn entity_id(&self) -> Uuid  { self.id }
+    fn entity_id(&self) -> Uuid { self.id }
+
+    fn observe(&mut self, raw: &EntityRaw) -> Vec<Conflict> {
+        if let EntityRaw::Standings(raw) = raw {
+            PartialInformationCompare::observe(self, raw)
+        } else {
+            panic!("Tried to observe {} with an observation from {}",
+                   self.entity_type(), raw.entity_type());
+        }
+    }
 }
 // impl Standings {
 //     fn apply_feed_event(&mut self, event: &EventuallyEvent, state: &StateInterface) -> FeedEventChangeResult {
