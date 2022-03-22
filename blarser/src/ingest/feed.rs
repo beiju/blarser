@@ -81,7 +81,7 @@ async fn apply_feed_event(ingest: FeedIngest, feed_event: EventuallyEvent) -> Fe
     ingest.run_transaction(move |state| {
         let (event, effects) = parse_feed_event(feed_event, &state)?;
         let successors = with_any_event!(&event, event => apply_event_effects(&state, event, &effects))?;
-        let stored_event = with_any_event!(event, event => StateInterface::save_feed_event(&state, event, effects))?;
+        let stored_event = StateInterface::save_feed_event(&state, event, effects)?;
         state.save_successors(successors, stored_event.time, stored_event.id)
     }).await
         .expect("Ingest failed");

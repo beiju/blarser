@@ -1,14 +1,14 @@
 use chrono::{DateTime, Utc};
 use diesel::{prelude::*, PgConnection, QueryResult, insert_into};
-use log::info;
-use uuid::Uuid;
 use itertools::Itertools;
+use rocket::info;
+use uuid::Uuid;
 use serde_json::json;
 use crate::api::EventuallyEvent;
 
 use crate::{entity, with_any_entity, with_any_entity_raw};
 use crate::entity::{TimedEvent, Entity, AnyEntity, EntityRaw};
-use crate::events::Event;
+use crate::events::{AnyEvent, Event, Start as StartEvent};
 use crate::ingest::{ChronObservationEvent, Observation};
 use crate::state::{NewVersion, Version};
 use crate::state::events_db::{DbEvent, EventEffect, EventSource, NewEvent, NewEventEffect, StoredEvent};
@@ -130,7 +130,16 @@ impl<'conn> StateInterface<'conn> {
         self.get_versions_at_generic::<EntityT>(entity_id, None)
     }
 
-    pub fn save_feed_event<EventT: Event>(&self, event: EventT, effects: Vec<(String, Option<Uuid>, serde_json::Value)>) -> QueryResult<StoredEvent> {
+    pub fn save_start_event(&self, event: AnyEvent, effects: Vec<(String, Option<Uuid>, serde_json::Value)>) -> QueryResult<StoredEvent> {
+        self.save_event(EventSource::Start, event, effects)
+    }
+
+    pub fn save_feed_event(&self, event: AnyEvent, effects: Vec<(String, Option<Uuid>, serde_json::Value)>) -> QueryResult<StoredEvent> {
+        self.save_event(EventSource::Feed, event, effects)
+    }
+
+    // This must take an AnyEvent, not generic EventT
+    fn save_event(&self, source: EventSource, event: AnyEvent, effects: Vec<(String, Option<Uuid>, serde_json::Value)>) -> QueryResult<StoredEvent> {
         use crate::schema::events::dsl as events;
         use crate::schema::event_effects::dsl as event_effects;
 
@@ -138,7 +147,7 @@ impl<'conn> StateInterface<'conn> {
             .values(NewEvent {
                 ingest_id: self.ingest_id,
                 time: event.time(),
-                source: EventSource::Feed,
+                source,
                 data: serde_json::to_value(event)
                     .expect("Error serializing Event data"),
             })
@@ -182,11 +191,11 @@ impl<'conn> StateInterface<'conn> {
 
 
     pub fn add_initial_versions(&self, start_time: DateTime<Utc>, entities: impl Iterator<Item=Observation>) -> QueryResult<usize> {
-        let from_event = self.add_start_event(start_time)?;
+        let from_event = self.save_event(EventSource::Start, AnyEvent::Start(StartEvent::new(start_time)), Vec::new())?;
 
         let chunks = entities
             .map(move |observation| {
-                with_any_entity_raw!(observation.entity_raw, raw => self.version_from_start(raw, start_time, from_event))
+                with_any_entity_raw!(observation.entity_raw, raw => self.version_from_start(raw, start_time, from_event.id))
             })
             .chunks(2000); // Diesel can't handle inserting the whole thing in one go
 
