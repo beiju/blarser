@@ -76,8 +76,8 @@ impl<'conn> StateInterface<'conn> {
 
         let events = events::events
             .filter(events::ingest_id.eq(self.ingest_id))
-            .filter(events::time.ge(start_time))
-            .filter(events::time.lt(end_time))
+            .filter(events::time.gt(start_time))
+            .filter(events::time.le(end_time))
             .get_results::<DbEvent>(self.conn)?;
 
         let effects = EventEffect::belonging_to(&events)
