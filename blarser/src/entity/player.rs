@@ -6,7 +6,7 @@ use uuid::Uuid;
 use partial_information::{Rerollable, PartialInformationCompare, MaybeKnown};
 use partial_information_derive::PartialInformationCompare;
 
-use crate::entity::{AnyEntity, Entity, EntityRaw, TimedEvent};
+use crate::entity::{AnyEntity, Entity, EntityRaw};
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, PartialInformationCompare)]
 pub struct Item {
@@ -120,8 +120,6 @@ impl Display for Player {
 impl EntityRaw for <Player as PartialInformationCompare>::Raw {
     fn name() -> &'static str { "player" }
     fn id(&self) -> Uuid { self.id }
-
-    fn init_events(&self, _after_time: DateTime<Utc>) -> Vec<TimedEvent> { Vec::new() }
 
     // Players are timestamped before the fetch, but there seems to be some caching
     // TODO Try to reduce the cache duration

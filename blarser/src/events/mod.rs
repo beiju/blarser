@@ -1,12 +1,16 @@
 mod feed_event;
 mod timed_event;
 mod game_update;
+
+// Events
 mod start;
+mod earlseason_start;
 mod lets_go;
 mod play_ball;
 mod half_inning;
 
 pub use start::Start;
+pub use earlseason_start::EarlseasonStart;
 pub use lets_go::LetsGo;
 pub use play_ball::PlayBall;
 pub use half_inning::HalfInning;
@@ -26,6 +30,7 @@ pub trait Event: Serialize + for<'de> Deserialize<'de> {
 #[derive(Serialize, Deserialize)]
 pub enum AnyEvent {
     Start(Start),
+    EarlseasonStart(EarlseasonStart),
     LetsGo(LetsGo),
     PlayBall(PlayBall),
     HalfInning(HalfInning),
@@ -36,6 +41,7 @@ macro_rules! with_any_event {
     ($any_event:expr, $bound_name:ident => $arm:expr) => {
         match $any_event {
             crate::events::AnyEvent::Start($bound_name) => { $arm }
+            crate::events::AnyEvent::EarlseasonStart($bound_name) => { $arm }
             crate::events::AnyEvent::LetsGo($bound_name) => { $arm }
             crate::events::AnyEvent::PlayBall($bound_name) => { $arm }
             crate::events::AnyEvent::HalfInning($bound_name) => { $arm }

@@ -9,7 +9,6 @@ use partial_information_derive::PartialInformationCompare;
 
 use crate::parse::{Base};
 use crate::entity::{AnyEntity, Entity, EntityRaw};
-use crate::entity::timed_event::TimedEvent;
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]
@@ -166,10 +165,6 @@ impl Entity for Game {
 impl EntityRaw for <Game as PartialInformationCompare>::Raw {
     fn name() -> &'static str { "game" }
     fn id(&self) -> Uuid { self.id }
-
-    fn init_events(&self, _: DateTime<Utc>) -> Vec<TimedEvent> {
-        Vec::new()
-    }
 
     fn earliest_time(&self, valid_from: DateTime<Utc>) -> DateTime<Utc> {
         // If there's a lastUpdateFull, we know exactly when it was from

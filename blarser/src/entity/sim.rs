@@ -6,7 +6,7 @@ use partial_information::PartialInformationCompare;
 use partial_information_derive::PartialInformationCompare;
 
 use crate::entity::{AnyEntity, Entity, EntityRaw};
-use crate::entity::timed_event::{TimedEvent, TimedEventType};
+use crate::events::{AnyEvent, EarlseasonStart};
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]
@@ -67,12 +67,15 @@ impl EntityRaw for <Sim as PartialInformationCompare>::Raw {
     fn name() -> &'static str { "sim" }
     fn id(&self) -> Uuid { Uuid::nil() }
 
-    fn init_events(&self, after_time: DateTime<Utc>) -> Vec<TimedEvent> {
-        if self.phase == 2 && self.earlseason_date > after_time {
-            vec![TimedEvent {
-                time: self.earlseason_date,
-                event_type: TimedEventType::EarlseasonStart,
-            }]
+    fn init_events(&self, after_time: DateTime<Utc>) -> Vec<(AnyEvent, Vec<(String, Option<Uuid>, serde_json::Value)>)> {
+        if self.phase == 1 && self.earlseason_date > after_time {
+            vec![(
+                AnyEvent::EarlseasonStart(EarlseasonStart::new(self.earlseason_date)),
+                vec![
+                    ("sim".to_string(), None, serde_json::Value::Null),
+                    ("game".to_string(), None, serde_json::Value::Null)
+                ]
+            )]
         } else {
             todo!()
         }

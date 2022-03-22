@@ -4,12 +4,11 @@ use itertools::Itertools;
 use rocket::info;
 use uuid::Uuid;
 use serde_json::json;
-use crate::api::EventuallyEvent;
 
 use crate::{entity, with_any_entity, with_any_entity_raw};
-use crate::entity::{TimedEvent, Entity, AnyEntity, EntityRaw};
-use crate::events::{AnyEvent, Event, Start as StartEvent};
-use crate::ingest::{ChronObservationEvent, Observation};
+use crate::entity::{Entity, AnyEntity, EntityRaw};
+use crate::events::{AnyEvent, Start as StartEvent};
+use crate::ingest::{Observation};
 use crate::state::{NewVersion, Version};
 use crate::state::events_db::{DbEvent, EventEffect, EventSource, NewEvent, NewEventEffect, StoredEvent};
 use crate::state::versions_db::{DbVersionWithEnd, NewVersionLink};
@@ -138,6 +137,10 @@ impl<'conn> StateInterface<'conn> {
         self.save_event(EventSource::Feed, event, effects)
     }
 
+    pub fn save_timed_event(&self, event: AnyEvent, effects: Vec<(String, Option<Uuid>, serde_json::Value)>) -> QueryResult<StoredEvent> {
+        self.save_event(EventSource::Timed, event, effects)
+    }
+
     // This must take an AnyEvent, not generic EventT
     fn save_event(&self, source: EventSource, event: AnyEvent, effects: Vec<(String, Option<Uuid>, serde_json::Value)>) -> QueryResult<StoredEvent> {
         use crate::schema::events::dsl as events;
@@ -172,7 +175,7 @@ impl<'conn> StateInterface<'conn> {
         Ok(stored_event.parse())
     }
 
-    fn version_from_start<EntityRawT: EntityRaw>(&self, entity_raw: EntityRawT, start_time: DateTime<Utc>, from_event: i32) -> (NewVersion, Vec<TimedEvent>) {
+    fn version_from_start<EntityRawT: EntityRaw>(&self, entity_raw: EntityRawT, start_time: DateTime<Utc>, from_event: i32) -> (NewVersion, Vec<(AnyEvent, Vec<(String, Option<Uuid>, serde_json::Value)>)>) {
         let events = entity_raw.init_events(start_time);
         let version = NewVersion {
             ingest_id: self.ingest_id,
@@ -189,7 +192,6 @@ impl<'conn> StateInterface<'conn> {
         (version, events)
     }
 
-
     pub fn add_initial_versions(&self, start_time: DateTime<Utc>, entities: impl Iterator<Item=Observation>) -> QueryResult<usize> {
         let from_event = self.save_event(EventSource::Start, AnyEvent::Start(StartEvent::new(start_time)), Vec::new())?;
 
@@ -203,7 +205,11 @@ impl<'conn> StateInterface<'conn> {
         for chunk in &chunks {
             let (chunk_versions, chunk_events): (Vec<_>, Vec<_>) = chunk.unzip();
 
-            self.insert_timed_events(chunk_events.into_iter().flatten())?;
+            // It's not worth the optimization to save multiple at once (it will literally never be
+            // used unless I need to add more init events)
+            for (event, effects) in chunk_events.into_iter().flatten() {
+                self.save_feed_event(event, effects)?;
+            }
             use crate::schema::versions::dsl as versions;
             inserted += insert_into(versions::versions)
                 .values(chunk_versions)
@@ -255,78 +261,6 @@ impl<'conn> StateInterface<'conn> {
                 .execute(self.conn)?;
 
             Ok(inserted_versions)
-        })
-    }
-
-    fn insert_event(&self, event: NewEvent) -> QueryResult<i32> {
-        use crate::schema::events::dsl as events;
-
-        insert_into(events::events)
-            .values(event)
-            .returning(events::id)
-            .get_result::<i32>(self.conn)
-    }
-
-    fn insert_events(&self, event: Vec<NewEvent>) -> QueryResult<usize> {
-        use crate::schema::events::dsl as events;
-
-        insert_into(events::events)
-            .values(event)
-            .execute(self.conn)
-    }
-
-    pub fn add_start_event(&self, event_time: DateTime<Utc>) -> QueryResult<i32> {
-        self.insert_event(NewEvent {
-            ingest_id: self.ingest_id,
-            time: event_time,
-            source: EventSource::Start,
-            data: serde_json::Value::Null,
-        })
-    }
-
-    pub fn add_timed_event(&self, event: TimedEvent) -> QueryResult<i32> {
-        self.insert_event(NewEvent {
-            ingest_id: self.ingest_id,
-            time: event.time,
-            source: EventSource::Timed,
-            data: serde_json::to_value(event.event_type)
-                .expect("Error serializing TimedEvent"),
-        })
-    }
-
-    pub fn insert_timed_events(&self, events: impl IntoIterator<Item=TimedEvent>) -> QueryResult<usize> {
-        let events = events.into_iter()
-            .map(|event| {
-                NewEvent {
-                    ingest_id: self.ingest_id,
-                    time: event.time,
-                    source: EventSource::Timed,
-                    data: serde_json::to_value(event)
-                        .expect("Failed to serialize Event"),
-                }
-            })
-            .collect();
-
-        self.insert_events(events)
-    }
-
-    pub fn add_feed_event(&self, event: EventuallyEvent) -> QueryResult<i32> {
-        self.insert_event(NewEvent {
-            ingest_id: self.ingest_id,
-            time: event.created,
-            source: EventSource::Feed,
-            data: serde_json::to_value(event)
-                .expect("Error serializing EventuallyEvent"),
-        })
-    }
-
-    pub fn add_chron_event(&self, event: ChronObservationEvent) -> QueryResult<i32> {
-        self.insert_event(NewEvent {
-            ingest_id: self.ingest_id,
-            time: event.applied_at,
-            source: EventSource::Manual,
-            data: serde_json::to_value(event)
-                .expect("Error serializing ChronObservationEvent"),
         })
     }
 }

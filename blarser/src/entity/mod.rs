@@ -1,4 +1,3 @@
-mod timed_event;
 // Entity types
 mod player;
 mod sim;
@@ -13,7 +12,6 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use partial_information::PartialInformationCompare;
 
-pub use timed_event::{TimedEvent, TimedEventType};
 pub use sim::Sim;
 pub use player::Player;
 pub use team::Team;
@@ -54,7 +52,7 @@ pub trait EntityRaw: Serialize + for<'de> Deserialize<'de> {
     fn id(&self) -> Uuid;
 
     // By default an entity doesn't have any init events
-    fn init_events(&self, _after_time: DateTime<Utc>) -> Vec<TimedEvent> {
+    fn init_events(&self, _after_time: DateTime<Utc>) -> Vec<(AnyEvent, Vec<(String, Option<Uuid>, serde_json::Value)>)> {
         Vec::new()
     }
 
@@ -84,7 +82,7 @@ pub enum EntityParseError {
 impl AnyEntityRaw {
     pub fn from_json(entity_type: &str, json: serde_json::Value) -> Result<Self, EntityParseError> {
         Ok(match entity_type {
-            "entity" => Self::Sim(serde_json::from_value(json)?),
+            "sim" => Self::Sim(serde_json::from_value(json)?),
             "player" => Self::Player(serde_json::from_value(json)?),
             "team" => Self::Team(serde_json::from_value(json)?),
             "game" => Self::Game(serde_json::from_value(json)?),
@@ -166,3 +164,4 @@ macro_rules! entity_dispatch {
 }
 
 pub use entity_dispatch;
+use crate::events::AnyEvent;
