@@ -118,7 +118,7 @@ impl Event for HalfInning {
 
                 game.into()
             },
-            _ => panic!("HalfInning event does not apply to this entity")
+            other => panic!("HalfInning event does not apply to {}", other.name())
         }
     }
 

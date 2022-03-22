@@ -51,7 +51,7 @@ impl Event for PlayBall {
 
                 game.into()
             },
-            _ => panic!("PlayBall event does not apply to this entity")
+            other => panic!("PlayBall event does not apply to {}", other.name())
         }
     }
 

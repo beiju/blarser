@@ -57,8 +57,7 @@ impl Event for LetsGo {
 
                 game.into()
             },
-            _ => panic!("LetsGo event does not apply to this entity")
-        }
+            other => panic!("LetsGo event does not apply to {}", other.name())        }
     }
 
     fn reverse(&self, _entity: AnyEntity, _aux: serde_json::Value) -> AnyEntity {

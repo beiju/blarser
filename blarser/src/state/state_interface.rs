@@ -100,7 +100,9 @@ impl<'conn> StateInterface<'conn> {
             // Has not been terminated
             .filter(versions::terminated.is_null())
             // Has the right end date/no end date
-            .filter(versions::end_time.eq(at_time));
+            // This ends up being (is null or is null) in the None case but the second is_null is
+            // needed for the Some case
+            .filter(versions::end_time.eq(at_time).or(versions::end_time.is_null()));
 
         let versions = match entity_id {
             Some(entity_id) => {

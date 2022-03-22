@@ -106,8 +106,8 @@ impl GameUpdate {
 
         game.last_update_full = Some(self.last_update_full.clone());
 
-        game.score_update = self.score.as_ref().map(|s| s.score_update.clone()).unwrap_or(String::new());
-        game.score_ledger = self.score.as_ref().map(|s| s.score_ledger.clone()).unwrap_or(String::new());
+        game.score_update = self.score.as_ref().map(|s| s.score_update.clone()).unwrap_or_default();
+        game.score_ledger = self.score.as_ref().map(|s| s.score_ledger.clone()).unwrap_or_default();
 
         if let Some(score) = &self.score {
             let home_scored = score.home_score - game.home.score
