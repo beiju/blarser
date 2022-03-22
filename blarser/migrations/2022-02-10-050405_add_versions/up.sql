@@ -9,7 +9,7 @@ CREATE TABLE events
     source    event_source NOT NULL,
     data      JSONB        NOT NULL,
 
-    CONSTRAINT ingest_fk FOREIGN KEY (ingest_id) REFERENCES ingests (id) ON DELETE RESTRICT
+    CONSTRAINT ingest_fk FOREIGN KEY (ingest_id) REFERENCES ingests (id) ON DELETE CASCADE
 );
 
 CREATE TABLE event_effects
@@ -21,7 +21,7 @@ CREATE TABLE event_effects
     entity_id         UUID,
     aux_data          JSONB NOT NULL,
 
-    CONSTRAINT event_fk FOREIGN KEY (event_id) REFERENCES events (id)
+    CONSTRAINT event_fk FOREIGN KEY (event_id) REFERENCES events (id) ON DELETE CASCADE
 );
 
 -- I looked it up and Postgres doesn't create this index automatically
@@ -43,7 +43,7 @@ CREATE TABLE versions
     observations   TIMESTAMP WITH TIME ZONE[] NOT NULL,
     terminated     TEXT DEFAULT NULL,
 
-    CONSTRAINT ingest_fk FOREIGN KEY (ingest_id) REFERENCES ingests (id) ON DELETE RESTRICT,
+    CONSTRAINT ingest_fk FOREIGN KEY (ingest_id) REFERENCES ingests (id) ON DELETE CASCADE ,
     CONSTRAINT from_event_fk FOREIGN KEY (from_event) REFERENCES events (id) ON DELETE RESTRICT
 );
 

@@ -47,7 +47,7 @@ fn apply_event_effects<'a, EventT: Event>(state: &StateInterface, event: &EventT
     let mut successors = MergedSuccessors::new();
 
     for (entity_type, entity_id, aux_info) in effects {
-        entity_dispatch!(entity_type.as_str() => apply_event_effect::<EventT>(state, &mut successors, *entity_id, &event, aux_info);
+        entity_dispatch!(entity_type.as_str() => apply_event_effect::<EventT>(state, &mut successors, *entity_id, event, aux_info);
                          other => panic!("Tried to apply event to unknown entity type {}", other))?;
     }
 
