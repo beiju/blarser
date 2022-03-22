@@ -6,8 +6,8 @@ use uuid::Uuid;
 use partial_information::MaybeKnown;
 
 use crate::api::EventuallyEvent;
-use crate::entity::Entity;
-use crate::events::{Event, EventAux, EventTrait};
+use crate::entity::AnyEntity;
+use crate::events::{AnyEvent, Event};
 use crate::events::game_update::GameUpdate;
 use crate::state::StateInterface;
 
@@ -15,6 +15,12 @@ use crate::state::StateInterface;
 pub struct HalfInning {
     game_update: GameUpdate,
     time: DateTime<Utc>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct StartingPitchers {
+    home: (Uuid, String),
+    away: (Uuid, String),
 }
 
 fn read_active_pitcher(state: &StateInterface, team_id: Uuid, day: i32) -> QueryResult<Vec<(Uuid, String)>> {
@@ -36,67 +42,87 @@ fn read_active_pitcher(state: &StateInterface, team_id: Uuid, day: i32) -> Query
 }
 
 impl HalfInning {
-    pub fn parse(feed_event: EventuallyEvent, state: &StateInterface) -> QueryResult<(Event, Vec<(String, Option<Uuid>, EventAux)>)> {
+    pub fn parse(feed_event: EventuallyEvent, state: &StateInterface) -> QueryResult<(AnyEvent, Vec<(String, Option<Uuid>, serde_json::Value)>)> {
         let time = feed_event.created;
 
         let game_id = feed_event.game_id().expect("HalfInning event must have a game id");
         let (away_team, home_team): (&Uuid, &Uuid) = feed_event.team_tags.iter().collect_tuple()
             .expect("HalfInning event must have exactly two teams");
 
-        let home_pitcher = read_active_pitcher(state, *home_team, feed_event.day)?;
-        let away_pitcher = read_active_pitcher(state, *away_team, feed_event.day)?;
+        let is_first_half = state.read_game(game_id, |game| {
+            game.inning == 0 && game.top_of_inning
+        })?;
+
+        // TODO Surely this can be done without collect()ing so much
+        let effects = is_first_half.into_iter()
+            .map(|is_first_half| {
+                let out = if is_first_half {
+                    let home_pitcher = read_active_pitcher(state, *home_team, feed_event.day)?;
+                    let away_pitcher = read_active_pitcher(state, *away_team, feed_event.day)?;
+
+                    iproduct!(home_pitcher, away_pitcher)
+                        .map(|(home, away)| Some(StartingPitchers { home, away }))
+                        .collect_vec()
+                } else {
+                    Vec::new()
+                };
+
+                Ok::<_, diesel::result::Error>(out)
+            })
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .map(|aux| {
+                ("game".to_string(), Some(game_id), serde_json::to_value(aux).unwrap())
+            })
+            .collect();
 
         let event = Self {
             game_update: GameUpdate::parse(feed_event),
             time
         };
 
-        let effects = iproduct!(home_pitcher, away_pitcher)
-            .map(|(home, away)| {
-                ("game".to_string(), Some(game_id), EventAux::Pitchers { home, away })
-            })
-            .collect();
-
-        Ok((event.into(), effects))
+        Ok((AnyEvent::HalfInning(event), effects))
     }
 }
 
-impl EventTrait for HalfInning {
+impl Event for HalfInning {
     fn time(&self) -> DateTime<Utc> {
         self.time
     }
 
-    fn forward(&self, entity: Entity, aux: &EventAux) -> Entity {
-        if let EventAux::Pitchers { home, away} = aux {
-            match entity {
-                Entity::Game(mut game) => {
-                    self.game_update.forward(&mut game);
+    fn forward(&self, entity: AnyEntity, aux: serde_json::Value) -> AnyEntity {
+        let aux: Option<StartingPitchers> = serde_json::from_value(aux)
+            .expect("Failed to parse StartingPitchers from HalfInning event");
 
-                    game.top_of_inning = !game.top_of_inning;
-                    if game.top_of_inning {
-                        game.inning += 1;
-                    }
-                    game.phase = 6;
-                    game.half_inning_score = 0.0;
+        match entity {
+            AnyEntity::Game(mut game) => {
+                self.game_update.forward(&mut game);
 
-                    // The first halfInning event re-sets the data that PlayBall clears
-                    if game.inning == 0 && game.top_of_inning {
-                        game.home.pitcher = Some(MaybeKnown::Known(home.0));
-                        game.home.pitcher_name = Some(MaybeKnown::Known(home.1.clone()));
-                        game.away.pitcher = Some(MaybeKnown::Known(away.0));
-                        game.away.pitcher_name = Some(MaybeKnown::Known(away.1.clone()));
-                    }
+                game.top_of_inning = !game.top_of_inning;
+                if game.top_of_inning {
+                    game.inning += 1;
+                }
+                game.phase = 6;
+                game.half_inning_score = 0.0;
 
-                    game.into()
-                },
-                _ => panic!("HalfInning event does not apply to this entity")
-            }
-        } else {
-            panic!("Wrong type of event aux");
+                // The first halfInning event re-sets the data that PlayBall clears
+                if let Some(starting_pitchers) = aux {
+                    let (home_pitcher, home_pitcher_name) = starting_pitchers.home;
+                    let (away_pitcher, away_pitcher_name) = starting_pitchers.away;
+
+                    game.home.pitcher = Some(MaybeKnown::Known(home_pitcher));
+                    game.home.pitcher_name = Some(MaybeKnown::Known(home_pitcher_name));
+                    game.away.pitcher = Some(MaybeKnown::Known(away_pitcher));
+                    game.away.pitcher_name = Some(MaybeKnown::Known(away_pitcher_name));
+                }
+
+                game.into()
+            },
+            _ => panic!("HalfInning event does not apply to this entity")
         }
     }
 
-    fn reverse(&self, _entity: Entity, _aux: &EventAux) -> Entity {
+    fn reverse(&self, _entity: AnyEntity, _aux: serde_json::Value) -> AnyEntity {
         todo!()
     }
 }

@@ -1,13 +1,17 @@
 use chrono::{DateTime, Utc};
+use diesel::QueryResult;
 use rocket::info;
 use futures::{pin_mut, StreamExt};
+use uuid::Uuid;
 
 use crate::api::{eventually, EventuallyEvent};
-use crate::events::{EventAux, EventTrait};
+use crate::entity::{AnyEntity, Entity};
+use crate::{entity_dispatch, with_any_event};
+use crate::events::Event;
 use crate::ingest::parse::parse_feed_event;
 use crate::ingest::task::FeedIngest;
 
-use crate::state::MergedSuccessors;
+use crate::state::{MergedSuccessors, StateInterface};
 
 pub async fn ingest_feed(mut ingest: FeedIngest, start_at_time: &'static str, start_time_parsed: DateTime<Utc>) {
     info!("Started Feed ingest task");
@@ -30,22 +34,40 @@ pub async fn ingest_feed(mut ingest: FeedIngest, start_at_time: &'static str, st
     }
 }
 
+fn apply_event_effect<EntityT: Entity, EventT: Event>(state: &StateInterface, successors: &mut MergedSuccessors<(AnyEntity, serde_json::Value)>, entity_id: Option<Uuid>, event: &EventT, aux_info: &serde_json::Value) -> QueryResult<()> {
+    for version in state.get_versions_at::<EntityT>(entity_id, event.time())? {
+        let new_entity = event.forward(version.entity.into(), aux_info.clone());
+        successors.add_successor(version.id, (new_entity, aux_info.clone()));
+    }
+
+    Ok(())
+}
+
+fn apply_event_effects<'a, EventT: Event>(state: &StateInterface, event: &EventT, effects: impl IntoIterator<Item=&'a (String, Option<Uuid>, serde_json::Value)>) -> QueryResult<Vec<((AnyEntity, serde_json::Value), Vec<i32>)>> {
+    let mut successors = MergedSuccessors::new();
+
+    for (entity_type, entity_id, aux_info) in effects {
+        entity_dispatch!(entity_type.as_str() => apply_event_effect::<EventT>(state, &mut successors, *entity_id, &event, aux_info);
+                         other => panic!("Tried to apply event to unknown entity type {}", other))?;
+    }
+
+    Ok(successors.into_inner())
+}
+
 async fn run_time_until(ingest: FeedIngest, start_time: DateTime<Utc>, end_time: DateTime<Utc>) -> FeedIngest {
     ingest.run_transaction(move |state| {
         // TODO: Properly handle when a timed event generates another timed event
-        for (event, effects) in state.get_events_between(start_time, end_time)? {
-            let mut successors = MergedSuccessors::new();
+        for (stored_event, effects) in state.get_events_between(start_time, end_time)? {
+            let effects: Vec<_> = effects.into_iter()
+                .map(|effect| {
+                    let aux_data = serde_json::from_value(effect.aux_data)
+                        .expect("Failed to parse aux_data from database");
+                    (effect.entity_type, effect.entity_id, aux_data)
+                })
+                .collect();
 
-            for effect in effects {
-                let aux_data: EventAux = serde_json::from_value(effect.aux_data.clone())
-                    .expect("Error deserializing event aux");
-                for version in state.get_latest_versions(&effect.entity_type, effect.entity_id)? {
-                    let new_entity = event.event.forward(version.entity, &aux_data);
-                    successors.add_successor(version.id, (new_entity, aux_data.clone()));
-                }
-            }
-
-            state.save_successors(successors.into_inner(), &event)?;
+            let successors = with_any_event!(stored_event.event, event => apply_event_effects(&state, &event, &effects))?;
+            state.save_successors(successors, stored_event.time, stored_event.id)?;
         }
 
         Ok::<_, diesel::result::Error>(())
@@ -58,20 +80,9 @@ async fn run_time_until(ingest: FeedIngest, start_time: DateTime<Utc>, end_time:
 async fn apply_feed_event(ingest: FeedIngest, feed_event: EventuallyEvent) -> FeedIngest {
     ingest.run_transaction(move |state| {
         let (event, effects) = parse_feed_event(feed_event, &state)?;
-
-
-        let mut successors = MergedSuccessors::new();
-        for (entity_type, entity_id, aux_info) in &effects {
-            for version in state.get_versions_at(entity_type, *entity_id, event.time())? {
-                let new_entity = EventTrait::forward(&event, version.entity, &aux_info);
-                successors.add_successor(version.id, (new_entity, aux_info.clone()));
-            }
-        }
-
-        let stored_event = state.save_feed_event(event, effects)?;
-        state.save_successors(successors.into_inner(), &stored_event)?;
-
-        Ok::<_, diesel::result::Error>(())
+        let successors = with_any_event!(&event, event => apply_event_effects(&state, event, &effects))?;
+        let stored_event = with_any_event!(event, event => StateInterface::save_feed_event(&state, event, effects))?;
+        state.save_successors(successors, stored_event.time, stored_event.id)
     }).await
         .expect("Ingest failed");
 

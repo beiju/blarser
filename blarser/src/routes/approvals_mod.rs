@@ -30,7 +30,7 @@ pub async fn approvals(conn: BlarserDbConn) -> Result<Template, ApiError> {
 }
 
 #[derive(FromForm)]
-pub struct Approval {
+pub struct ApprovalForm {
     approval_id: i32,
     message: String,
     approved: bool,
@@ -38,7 +38,7 @@ pub struct Approval {
 }
 
 #[rocket::post("/approve", data = "<approval>")]
-pub async fn approve(task: &State<IngestTaskHolder>, conn: BlarserDbConn, approval: Form<Approval>) -> Result<Redirect, ApiError> {
+pub async fn approve(task: &State<IngestTaskHolder>, conn: BlarserDbConn, approval: Form<ApprovalForm>) -> Result<Redirect, ApiError> {
     let redirect_to = if approval.from_route == "index" {
         Ok(uri!(index))
     } else if approval.from_route == "approvals" {

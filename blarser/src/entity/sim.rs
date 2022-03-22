@@ -2,10 +2,10 @@ use std::fmt::{Display, Formatter};
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use partial_information::{Conflict, PartialInformationCompare};
+use partial_information::PartialInformationCompare;
 use partial_information_derive::PartialInformationCompare;
 
-use crate::entity::{Entity, EntityRaw, EntityRawTrait, EntityTrait};
+use crate::entity::{AnyEntity, Entity, EntityRaw};
 use crate::entity::timed_event::{TimedEvent, TimedEventType};
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, PartialInformationCompare)]
@@ -63,9 +63,9 @@ impl Display for Sim {
     }
 }
 
-impl EntityRawTrait for <Sim as PartialInformationCompare>::Raw {
-    fn entity_type(&self) -> &'static str { "sim" }
-    fn entity_id(&self) -> Uuid { Uuid::nil() }
+impl EntityRaw for <Sim as PartialInformationCompare>::Raw {
+    fn name() -> &'static str { "sim" }
+    fn id(&self) -> Uuid { Uuid::nil() }
 
     fn init_events(&self, after_time: DateTime<Utc>) -> Vec<TimedEvent> {
         if self.phase == 2 && self.earlseason_date > after_time {
@@ -82,27 +82,15 @@ impl EntityRawTrait for <Sim as PartialInformationCompare>::Raw {
     fn earliest_time(&self, valid_from: DateTime<Utc>) -> DateTime<Utc> { valid_from }
 
     fn latest_time(&self, valid_from: DateTime<Utc>) -> DateTime<Utc> { valid_from + Duration::minutes(1) }
+}
 
-    fn as_entity(self) -> Entity {
-        Entity::Sim(Sim::from_raw(self))
-    }
-    fn to_json(self) -> serde_json::Value {
-        serde_json::to_value(self)
-            .expect("Error serializing SimRaw object")
+impl Into<AnyEntity> for Sim {
+    fn into(self) -> AnyEntity {
+        AnyEntity::Sim(self)
     }
 }
 
-impl EntityTrait for Sim {
-    fn entity_type(&self) -> &'static str { "sim" }
-    fn entity_id(&self) -> Uuid { Uuid::nil() }
-
-    fn observe(&mut self, raw: &EntityRaw) -> Vec<Conflict> {
-        if let EntityRaw::Sim(raw) = raw {
-            PartialInformationCompare::observe(self, raw)
-        } else {
-            panic!("Tried to observe {} with an observation from {}",
-                   self.entity_type(), raw.entity_type());
-        }
-    }
-
+impl Entity for Sim {
+    fn name() -> &'static str { "sim" }
+    fn id(&self) -> Uuid { Uuid::nil() }
 }

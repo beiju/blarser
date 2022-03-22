@@ -4,11 +4,11 @@ use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use serde_with::with_prefix;
 use uuid::Uuid;
-use partial_information::{PartialInformationCompare, MaybeKnown, Conflict};
+use partial_information::{PartialInformationCompare, MaybeKnown};
 use partial_information_derive::PartialInformationCompare;
 
 use crate::parse::{Base};
-use crate::entity::{Entity, EntityRaw, EntityRawTrait, EntityTrait};
+use crate::entity::{AnyEntity, Entity, EntityRaw};
 use crate::entity::timed_event::TimedEvent;
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, PartialInformationCompare)]
@@ -152,24 +152,20 @@ impl Display for Game {
     }
 }
 
-impl EntityTrait for Game {
-    fn entity_type(&self) -> &'static str { "game" }
-    fn entity_id(&self) -> Uuid { self.id }
-
-    fn observe(&mut self, raw: &EntityRaw) -> Vec<Conflict> {
-        if let EntityRaw::Game(raw) = raw {
-            PartialInformationCompare::observe(self, raw)
-        } else {
-            panic!("Tried to observe {} with an observation from {}",
-                   self.entity_type(), raw.entity_type());
-        }
+impl Into<AnyEntity> for Game {
+    fn into(self) -> AnyEntity {
+        AnyEntity::Game(self)
     }
-
 }
 
-impl EntityRawTrait for <Game as PartialInformationCompare>::Raw {
-    fn entity_type(&self) -> &'static str { "game" }
-    fn entity_id(&self) -> Uuid { self.id }
+impl Entity for Game {
+    fn name() -> &'static str { "game" }
+    fn id(&self) -> Uuid { self.id }
+}
+
+impl EntityRaw for <Game as PartialInformationCompare>::Raw {
+    fn name() -> &'static str { "game" }
+    fn id(&self) -> Uuid { self.id }
 
     fn init_events(&self, _: DateTime<Utc>) -> Vec<TimedEvent> {
         Vec::new()
@@ -197,14 +193,6 @@ impl EntityRawTrait for <Game as PartialInformationCompare>::Raw {
 
         // Otherwise, games are timestamped from after the fetch
         valid_from
-    }
-
-    fn as_entity(self) -> Entity {
-        Entity::Game(Game::from_raw(self))
-    }
-    fn to_json(self) -> serde_json::Value {
-        serde_json::to_value(self)
-            .expect("Error serializing GameRaw object")
     }
 }
 

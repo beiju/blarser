@@ -1,23 +1,22 @@
 use chrono::{DateTime, Utc};
 use std::cmp::Ordering;
-use itertools::Itertools;
 use thiserror::Error;
-use partial_information::Conflict;
 
 use crate::api::ChroniclerItem;
-use crate::entity::{EntityParseError, EntityTrait, EntityRaw, EntityRawTrait};
-use crate::state::{MergedSuccessors, NewVersion, Version, VersionLink};
+use crate::entity::{AnyEntityRaw, EntityParseError, EntityRaw};
+use crate::state::{NewVersion, Version, VersionLink};
+use crate::with_any_entity_raw;
 
 
 pub struct Observation {
     // TODO Reorganize so this isn't pub
-    pub entity_raw: EntityRaw,
+    pub entity_raw: AnyEntityRaw,
     perceived_at: DateTime<Utc>,
 }
 
 impl Observation {
     pub fn from_chron(entity_type: &str, item: ChroniclerItem) -> Result<Self, EntityParseError> {
-        let entity_raw = EntityRaw::from_json(entity_type, item.data)?;
+        let entity_raw = AnyEntityRaw::from_json(entity_type, item.data)?;
 
         Ok(Observation {
             entity_raw,
@@ -26,11 +25,11 @@ impl Observation {
     }
 
     pub fn earliest_time(&self) -> DateTime<Utc> {
-        self.entity_raw.earliest_time(self.perceived_at)
+        with_any_entity_raw!(&self.entity_raw, inner => inner.earliest_time(self.perceived_at))
     }
 
     pub fn latest_time(&self) -> DateTime<Utc> {
-        self.entity_raw.latest_time(self.perceived_at)
+        with_any_entity_raw!(&self.entity_raw, inner => inner.latest_time(self.perceived_at))
     }
 
     // pub fn do_ingest(self, ingest: &mut ChronIngest) {
@@ -176,64 +175,64 @@ enum IngestError {
     DieselError(#[from] diesel::result::Error),
 }
 
-fn observe_generation(
-    new_generation: &mut MergedSuccessors<NewVersion>,
-    version_conflicts: &mut Option<Vec<(i32, String)>>,
-    versions: Vec<(Version, Vec<VersionLink>)>,
-    entity_raw: &EntityRaw,
-    perceived_at: DateTime<Utc>,
-) {
-    for (version, parents) in versions {
-        let version_id = version.id;
-        match observe_entity(version, entity_raw, perceived_at) {
-            Ok(new_version) => {
-                let parent_ids = parents.into_iter()
-                    .map(|parent| parent.parent_id)
-                    .collect();
-                new_generation.add_multi_parent_successor(parent_ids, new_version);
-
-                // Successful application! Don't need to track conflicts any more.
-                *version_conflicts = None;
-            }
-            Err(conflicts) => {
-                if let Some(version_conflicts) = version_conflicts {
-                    let conflicts = format!("- {}", conflicts.into_iter().map(|c| c.to_string()).join("\n- "));
-                    version_conflicts.push((version_id, conflicts));
-                }
-            }
-        }
-    }
-}
-
-fn observe_entity(
-    version: Version,
-    entity_raw: &EntityRaw,
-    perceived_at: DateTime<Utc>
-) -> Result<NewVersion, Vec<Conflict>> {
-    let entity_type = version.entity.entity_type();
-    let entity_id = version.entity.entity_id();
-
-    let mut new_entity = version.entity;
-    let conflicts = new_entity.observe(entity_raw);
-    if !conflicts.is_empty() {
-        return Err(conflicts);
-    }
-
-    let mut observations = version.observations;
-    observations.push(perceived_at);
-    Ok(NewVersion {
-        ingest_id: version.ingest_id,
-        entity_type,
-        entity_id,
-        start_time: version.start_time,
-        entity: new_entity.to_json(),
-        from_event: version.from_event,
-        event_aux_data: todo!(),
-        observations,
-    })
-}
-
-
+// fn observe_generation(
+//     new_generation: &mut MergedSuccessors<NewVersion>,
+//     version_conflicts: &mut Option<Vec<(i32, String)>>,
+//     versions: Vec<(Version, Vec<VersionLink>)>,
+//     entity_raw: &EntityRaw,
+//     perceived_at: DateTime<Utc>,
+// ) {
+//     for (version, parents) in versions {
+//         let version_id = version.id;
+//         match observe_entity(version, entity_raw, perceived_at) {
+//             Ok(new_version) => {
+//                 let parent_ids = parents.into_iter()
+//                     .map(|parent| parent.parent_id)
+//                     .collect();
+//                 new_generation.add_multi_parent_successor(parent_ids, new_version);
+//
+//                 // Successful application! Don't need to track conflicts any more.
+//                 *version_conflicts = None;
+//             }
+//             Err(conflicts) => {
+//                 if let Some(version_conflicts) = version_conflicts {
+//                     let conflicts = format!("- {}", conflicts.into_iter().map(|c| c.to_string()).join("\n- "));
+//                     version_conflicts.push((version_id, conflicts));
+//                 }
+//             }
+//         }
+//     }
+// }
+//
+// fn observe_entity(
+//     version: Version,
+//     entity_raw: &EntityRaw,
+//     perceived_at: DateTime<Utc>
+// ) -> Result<NewVersion, Vec<Conflict>> {
+//     let entity_type = version.entity.entity_type();
+//     let entity_id = version.entity.entity_id();
+//
+//     let mut new_entity = version.entity;
+//     let conflicts = new_entity.observe(entity_raw);
+//     if !conflicts.is_empty() {
+//         return Err(conflicts);
+//     }
+//
+//     let mut observations = version.observations;
+//     observations.push(perceived_at);
+//     Ok(NewVersion {
+//         ingest_id: version.ingest_id,
+//         entity_type,
+//         entity_id,
+//         start_time: version.start_time,
+//         entity: new_entity.to_json(),
+//         from_event: version.from_event,
+//         event_aux_data: todo!(),
+//         observations,
+//     })
+// }
+//
+//
 // fn advance_generation(
 //     c: &PgConnection,
 //     ingest_id: i32,

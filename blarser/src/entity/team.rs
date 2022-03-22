@@ -3,10 +3,10 @@ use std::fmt::{Display, Formatter};
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use partial_information::{Conflict, PartialInformationCompare, Spurious};
+use partial_information::{PartialInformationCompare, Spurious};
 use partial_information_derive::PartialInformationCompare;
 
-use crate::entity::{Entity, EntityRaw, EntityRawTrait, EntityTrait};
+use crate::entity::{AnyEntity, Entity, EntityRaw};
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]
@@ -96,9 +96,9 @@ impl Display for Team {
     }
 }
 
-impl EntityRawTrait for <Team as PartialInformationCompare>::Raw {
-    fn entity_type(&self) -> &'static str { "team" }
-    fn entity_id(&self) -> Uuid { self.id }
+impl EntityRaw for <Team as PartialInformationCompare>::Raw {
+    fn name() -> &'static str { "team" }
+    fn id(&self) -> Uuid { self.id }
 
     // Teams are timestamped before the fetch
     fn earliest_time(&self, valid_from: DateTime<Utc>) -> DateTime<Utc> {
@@ -108,28 +108,17 @@ impl EntityRawTrait for <Team as PartialInformationCompare>::Raw {
     fn latest_time(&self, valid_from: DateTime<Utc>) -> DateTime<Utc> {
         valid_from + Duration::minutes(1)
     }
+}
 
-    fn as_entity(self) -> Entity {
-        Entity::Team(Team::from_raw(self))
-    }
-    fn to_json(self) -> serde_json::Value {
-        serde_json::to_value(self)
-            .expect("Error serializing TeamRaw object")
+impl Into<AnyEntity> for Team {
+    fn into(self) -> AnyEntity {
+        AnyEntity::Team(self)
     }
 }
 
-impl EntityTrait for Team {
-    fn entity_type(&self) -> &'static str { "team" }
-    fn entity_id(&self) -> Uuid { self.id }
-
-    fn observe(&mut self, raw: &EntityRaw) -> Vec<Conflict> {
-        if let EntityRaw::Team(raw) = raw {
-            PartialInformationCompare::observe(self, raw)
-        } else {
-            panic!("Tried to observe {} with an observation from {}",
-                   self.entity_type(), raw.entity_type());
-        }
-    }
+impl Entity for Team {
+    fn name() -> &'static str { "team" }
+    fn id(&self) -> Uuid { self.id }
 }
 
 impl Team {

@@ -3,10 +3,10 @@ use std::fmt::{Display, Formatter};
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use partial_information::{Rerollable, PartialInformationCompare, MaybeKnown, Conflict};
+use partial_information::{Rerollable, PartialInformationCompare, MaybeKnown};
 use partial_information_derive::PartialInformationCompare;
 
-use crate::entity::{Entity, EntityRaw, EntityRawTrait, EntityTrait, TimedEvent};
+use crate::entity::{AnyEntity, Entity, EntityRaw, TimedEvent};
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, PartialInformationCompare)]
 pub struct Item {
@@ -117,9 +117,9 @@ impl Display for Player {
 }
 
 
-impl EntityRawTrait for <Player as PartialInformationCompare>::Raw {
-    fn entity_type(&self) -> &'static str { "player" }
-    fn entity_id(&self) -> Uuid { self.id }
+impl EntityRaw for <Player as PartialInformationCompare>::Raw {
+    fn name() -> &'static str { "player" }
+    fn id(&self) -> Uuid { self.id }
 
     fn init_events(&self, _after_time: DateTime<Utc>) -> Vec<TimedEvent> { Vec::new() }
 
@@ -132,28 +132,17 @@ impl EntityRawTrait for <Player as PartialInformationCompare>::Raw {
     fn latest_time(&self, valid_from: DateTime<Utc>) -> DateTime<Utc> {
         valid_from + Duration::minutes(1)
     }
+}
 
-    fn as_entity(self) -> Entity {
-        Entity::Player(Player::from_raw(self))
-    }
-    fn to_json(self) -> serde_json::Value {
-        serde_json::to_value(self)
-            .expect("Error serializing PlayerRaw object")
+impl Into<AnyEntity> for Player {
+    fn into(self) -> AnyEntity {
+        AnyEntity::Player(self)
     }
 }
 
-impl EntityTrait for Player {
-    fn entity_type(&self) -> &'static str { "player" }
-    fn entity_id(&self) -> Uuid { self.id }
-
-    fn observe(&mut self, raw: &EntityRaw) -> Vec<Conflict> {
-        if let EntityRaw::Player(raw) = raw {
-            PartialInformationCompare::observe(self, raw)
-        } else {
-            panic!("Tried to observe {} with an observation from {}",
-                   self.entity_type(), raw.entity_type());
-        }
-    }
+impl Entity for Player {
+    fn name() -> &'static str { "player" }
+    fn id(&self) -> Uuid { self.id }
 }
 
 impl Player {

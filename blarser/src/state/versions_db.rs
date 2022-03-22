@@ -5,8 +5,8 @@ use chrono::{DateTime, Utc};
 use itertools::{izip};
 
 use crate::schema::*;
-use crate::entity::{Entity};
-use crate::events::{Event, EventAux};
+use crate::entity::Entity;
+use crate::events::AnyEvent;
 use crate::state::events_db::DbEvent;
 
 #[derive(Insertable)]
@@ -54,16 +54,15 @@ pub(crate) struct DbVersion {
 }
 
 impl DbVersion {
-    pub fn parse(self) -> Version {
-        let entity = Entity::from_json(&self.entity_type, self.entity)
-            .expect("Failed to parse event from database");
+    pub fn parse<EntityT: Entity>(self) -> Version<EntityT> {
         Version {
             id: self.id,
             ingest_id: self.ingest_id,
             entity_type: self.entity_type,
             entity_id: self.entity_id,
             start_time: self.start_time,
-            entity,
+            entity: serde_json::from_value(self.entity)
+                .expect("Failed to parse entity from database"),
             from_event: self.from_event,
             event_aux_data: serde_json::from_value(self.event_aux_data)
                 .expect("Failed to parse event aux info from database"),
@@ -94,9 +93,9 @@ pub(crate) struct DbVersionWithEnd {
 }
 
 impl DbVersionWithEnd {
-    pub fn parse(self) -> Version {
-        let entity = Entity::from_json(&self.entity_type, self.entity)
-            .expect("Failed to parse event from database");
+    pub fn parse<EntityT: Entity>(self) -> Version<EntityT> {
+        let entity = serde_json::from_value(self.entity)
+            .expect("Failed to parse version from database");
         Version {
             id: self.id,
             ingest_id: self.ingest_id,
@@ -113,7 +112,7 @@ impl DbVersionWithEnd {
     }
 }
 
-pub struct Version {
+pub struct Version<EntityT> {
     pub id: i32,
     pub ingest_id: i32,
 
@@ -121,9 +120,9 @@ pub struct Version {
     pub entity_id: Uuid,
     pub start_time: DateTime<Utc>,
 
-    pub entity: Entity,
+    pub entity: EntityT,
     pub from_event: i32,
-    pub event_aux_data: EventAux,
+    pub event_aux_data: serde_json::Value,
 
     pub observations: Vec<DateTime<Utc>>,
     pub terminated: Option<String>,
@@ -167,7 +166,7 @@ pub fn get_recently_updated_entities(c: &PgConnection, ingest_id: i32, count: us
     )
 }
 
-pub fn get_entity_debug(c: &PgConnection, ingest_id: i32, entity_type: &str, entity_id: Uuid) -> QueryResult<Vec<(Version, Event, Vec<VersionLink>)>> {
+pub fn get_entity_debug<EntityT: Entity>(c: &PgConnection, ingest_id: i32, entity_type: &str, entity_id: Uuid) -> QueryResult<Vec<(Version<EntityT>, AnyEvent, Vec<VersionLink>)>> {
     use crate::schema::versions::dsl as versions;
     use crate::schema::events::dsl as events;
     let (versions, events): (Vec<DbVersion>, Vec<DbEvent>) = versions::versions
@@ -186,7 +185,7 @@ pub fn get_entity_debug(c: &PgConnection, ingest_id: i32, entity_type: &str, ent
         .grouped_by(&versions);
 
     let versions = versions.into_iter()
-        .map(|version| version.parse());
+        .map(|version| version.parse::<EntityT>());
 
     let events = events.into_iter()
         .map(|event| event.parse().event);

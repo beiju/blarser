@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex as StdMutex, Mutex};
 use chrono::{DateTime, Duration, Utc};
-use diesel::{ExpressionMethods, QueryDsl, RunQueryDsl};
+use diesel::{ExpressionMethods, OptionalExtension, QueryDsl, RunQueryDsl};
 use rocket::info;
 use tokio::sync::{watch, oneshot};
 
@@ -54,6 +54,7 @@ struct IngestImpl {
 }
 
 impl IngestImpl {
+    #[allow(dead_code)]
     pub async fn run<F, R>(&self, f: F) -> R
         where F: FnOnce(StateInterface) -> R + Send + 'static,
               R: Send + 'static {
@@ -208,9 +209,13 @@ impl IngestTask {
                 .select(id)
                 .order(started_at.desc())
                 .limit(1)
-                .get_result::<i32>(c)?;
+                .get_result::<i32>(c)
+                .optional()?;
 
-            delete(ingests.filter(id.ne(latest_ingest))).execute(c)?;
+            if let Some(latest_ingest) = latest_ingest {
+                delete(ingests.filter(id.ne(latest_ingest))).execute(c)?;
+            }
+
             insert_into(ingests).default_values().returning(id).get_result(c)
         }).await
             .expect("Failed to create new ingest record");

@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::api::EventuallyEvent;
-use crate::entity::Entity;
-use crate::events::{Event, EventAux, EventTrait};
+use crate::entity::AnyEntity;
+use crate::events::{AnyEvent, Event};
 use crate::events::game_update::GameUpdate;
 
 #[derive(Serialize, Deserialize)]
@@ -15,7 +15,7 @@ pub struct PlayBall {
 }
 
 impl PlayBall {
-    pub fn parse(feed_event: EventuallyEvent) -> QueryResult<(Event, Vec<(String, Option<Uuid>, EventAux)>)> {
+    pub fn parse(feed_event: EventuallyEvent) -> QueryResult<(AnyEvent, Vec<(String, Option<Uuid>, serde_json::Value)>)> {
         let time = feed_event.created;
         let game_id = feed_event.game_id().expect("PlayBall event must have a game id");
 
@@ -27,21 +27,21 @@ impl PlayBall {
         let effects = vec![(
             "game".to_string(),
             Some(game_id),
-            EventAux::None
+            serde_json::Value::Null
         )];
 
-        Ok((event.into(), effects))
+        Ok((AnyEvent::PlayBall(event), effects))
     }
 }
 
-impl EventTrait for PlayBall {
+impl Event for PlayBall {
     fn time(&self) -> DateTime<Utc> {
         self.time
     }
 
-    fn forward(&self, entity: Entity, _: &EventAux) -> Entity {
+    fn forward(&self, entity: AnyEntity, _: serde_json::Value) -> AnyEntity {
         match entity {
-            Entity::Game(mut game) => {
+            AnyEntity::Game(mut game) => {
                 self.game_update.forward(&mut game);
 
                 game.game_start = true;
@@ -55,7 +55,7 @@ impl EventTrait for PlayBall {
         }
     }
 
-    fn reverse(&self, _entity: Entity, _aux: &EventAux) -> Entity {
+    fn reverse(&self, _entity: AnyEntity, _aux: serde_json::Value) -> AnyEntity {
         todo!()
     }
 }

@@ -4,7 +4,7 @@ use diesel_derive_enum::DbEnum;
 use uuid::Uuid;
 
 use crate::schema::*;
-use crate::events::Event;
+use crate::events::AnyEvent;
 
 // define your enum
 #[derive(PartialEq, Debug, DbEnum)]
@@ -19,10 +19,10 @@ pub enum EventSource {
 #[derive(Insertable)]
 #[table_name = "events"]
 pub(crate) struct NewEvent {
-    ingest_id: i32,
-    time: DateTime<Utc>,
-    source: EventSource,
-    data: serde_json::Value,
+    pub(crate) ingest_id: i32,
+    pub(crate) time: DateTime<Utc>,
+    pub(crate) source: EventSource,
+    pub(crate) data: serde_json::Value,
 }
 
 #[derive(Identifiable, Queryable, PartialEq, Debug)]
@@ -38,16 +38,16 @@ pub(crate) struct DbEvent {
 #[derive(Insertable)]
 #[table_name = "event_effects"]
 pub(crate) struct NewEventEffect {
-    event_id: i32,
-    entity_type: String,
-    entity_id: Option<Uuid>,
-    aux_data: serde_json::Value,
+    pub(crate) event_id: i32,
+    pub(crate) entity_type: String,
+    pub(crate) entity_id: Option<Uuid>,
+    pub(crate) aux_data: serde_json::Value,
 }
 
 #[derive(Identifiable, Queryable, Associations, PartialEq, Debug)]
 #[belongs_to(parent = "DbEvent", foreign_key = "event_id")]
 #[table_name = "event_effects"]
-pub(crate) struct EventEffect {
+pub struct EventEffect {
     pub id: i32,
     pub event_id: i32,
 
@@ -61,7 +61,7 @@ pub struct StoredEvent {
     pub ingest_id: i32,
     pub time: DateTime<Utc>,
     pub source: EventSource,
-    pub event: Event,
+    pub event: AnyEvent,
 }
 
 impl DbEvent {

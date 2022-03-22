@@ -35,7 +35,7 @@ impl Display for Conflict {
     }
 }
 
-pub trait PartialInformationCompare: Sized + Debug + Serialize {
+pub trait PartialInformationCompare: Sized + Debug {
     type Raw: 'static + for<'de> Deserialize<'de> + Serialize + Debug + Send + Sync + Clone;
     type Diff<'d>: PartialInformationDiff<'d > where Self: 'd;
 

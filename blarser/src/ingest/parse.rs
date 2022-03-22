@@ -1,10 +1,10 @@
 use diesel::QueryResult;
 use uuid::Uuid;
 use crate::api::{EventType, EventuallyEvent};
-use crate::events::{Event, EventAux, HalfInning, LetsGo, PlayBall};
+use crate::events::{AnyEvent, HalfInning, LetsGo, PlayBall};
 use crate::state::StateInterface;
 
-pub fn parse_feed_event(feed_event: EventuallyEvent, state: &StateInterface) -> QueryResult<(Event, Vec<(String, Option<Uuid>, EventAux)>)> {
+pub fn parse_feed_event(feed_event: EventuallyEvent, state: &StateInterface) -> QueryResult<(AnyEvent, Vec<(String, Option<Uuid>, serde_json::Value)>)> {
     match feed_event.r#type {
         EventType::LetsGo => LetsGo::parse(feed_event),
         EventType::PlayBall => PlayBall::parse(feed_event),

@@ -5,8 +5,8 @@ use uuid::Uuid;
 use partial_information::MaybeKnown;
 
 use crate::api::EventuallyEvent;
-use crate::entity::Entity;
-use crate::events::{Event, EventAux, EventTrait};
+use crate::entity::AnyEntity;
+use crate::events::{AnyEvent, Event};
 use crate::events::game_update::GameUpdate;
 
 #[derive(Serialize, Deserialize)]
@@ -16,7 +16,7 @@ pub struct LetsGo {
 }
 
 impl LetsGo {
-    pub fn parse(feed_event: EventuallyEvent) -> QueryResult<(Event, Vec<(String, Option<Uuid>, EventAux)>)> {
+    pub fn parse(feed_event: EventuallyEvent) -> QueryResult<(AnyEvent, Vec<(String, Option<Uuid>, serde_json::Value)>)> {
         let time = feed_event.created;
         let game_id = feed_event.game_id().expect("LetsGo event must have a game id");
         let event = Self {
@@ -27,21 +27,21 @@ impl LetsGo {
         let effects = vec![(
             "game".to_string(),
             Some(game_id),
-            EventAux::None
+            serde_json::Value::Null
         )];
 
-        Ok((event.into(), effects))
+        Ok((AnyEvent::LetsGo(event), effects))
     }
 }
 
-impl EventTrait for LetsGo {
+impl Event for LetsGo {
     fn time(&self) -> DateTime<Utc> {
         self.time
     }
 
-    fn forward(&self, entity: Entity, _: &EventAux) -> Entity {
+    fn forward(&self, entity: AnyEntity, _: serde_json::Value) -> AnyEntity {
         match entity {
-            Entity::Game(mut game) => {
+            AnyEntity::Game(mut game) => {
                 self.game_update.forward(&mut game);
 
                 game.game_start_phase = 20;
@@ -61,7 +61,7 @@ impl EventTrait for LetsGo {
         }
     }
 
-    fn reverse(&self, _entity: Entity, _aux: &EventAux) -> Entity {
+    fn reverse(&self, _entity: AnyEntity, _aux: serde_json::Value) -> AnyEntity {
         todo!()
     }
 }

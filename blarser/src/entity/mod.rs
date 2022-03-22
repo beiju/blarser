@@ -8,10 +8,10 @@ mod standings;
 mod season;
 
 use uuid::Uuid;
-use enum_dispatch::enum_dispatch;
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use partial_information::{Conflict, PartialInformationCompare};
+use partial_information::PartialInformationCompare;
 
 pub use timed_event::{TimedEvent, TimedEventType};
 pub use sim::Sim;
@@ -21,10 +21,37 @@ pub use game::{Game, GameByTeam, UpdateFull, UpdateFullMetadata};
 pub use standings::Standings;
 pub use season::Season;
 
-#[enum_dispatch]
-pub trait EntityRawTrait {
-    fn entity_type(&self) -> &'static str;
-    fn entity_id(&self) -> Uuid;
+pub trait Entity: PartialInformationCompare + Serialize + for<'de> Deserialize<'de> + Into<AnyEntity> {
+    fn name() -> &'static str;
+    fn id(&self) -> Uuid;
+}
+
+#[derive(PartialEq)]
+pub enum AnyEntity {
+    Sim(Sim),
+    Player(Player),
+    Team(Team),
+    Game(Game),
+    Standings(Standings),
+    Season(Season),
+}
+
+impl AnyEntity {
+    pub(crate) fn name(&self) -> &'static str {
+        match self {
+            AnyEntity::Sim(_) => { Sim::name() }
+            AnyEntity::Player(_) => { Player::name() }
+            AnyEntity::Team(_) => { Team::name() }
+            AnyEntity::Game(_) => { Game::name() }
+            AnyEntity::Standings(_) => { Standings::name() }
+            AnyEntity::Season(_) => { Season::name() }
+        }
+    }
+}
+
+pub trait EntityRaw: Serialize + for<'de> Deserialize<'de> {
+    fn name() -> &'static str;
+    fn id(&self) -> Uuid;
 
     // By default an entity doesn't have any init events
     fn init_events(&self, _after_time: DateTime<Utc>) -> Vec<TimedEvent> {
@@ -33,13 +60,9 @@ pub trait EntityRawTrait {
 
     fn earliest_time(&self, valid_from: DateTime<Utc>) -> DateTime<Utc>;
     fn latest_time(&self, valid_from: DateTime<Utc>) -> DateTime<Utc>;
-
-    fn as_entity(self) -> Entity;
-    fn to_json(self) -> serde_json::Value;
 }
 
-#[enum_dispatch(EntityRawTrait)]
-pub enum EntityRaw {
+pub enum AnyEntityRaw {
     Sim(<Sim as PartialInformationCompare>::Raw),
     Player(<Player as PartialInformationCompare>::Raw),
     Team(<Team as PartialInformationCompare>::Raw),
@@ -58,7 +81,7 @@ pub enum EntityParseError {
 }
 
 
-impl EntityRaw {
+impl AnyEntityRaw {
     pub fn from_json(entity_type: &str, json: serde_json::Value) -> Result<Self, EntityParseError> {
         Ok(match entity_type {
             "entity" => Self::Sim(serde_json::from_value(json)?),
@@ -72,47 +95,74 @@ impl EntityRaw {
     }
 }
 
-#[enum_dispatch]
-pub trait EntityTrait {
-    fn entity_type(&self) -> &'static str;
-    fn entity_id(&self) -> Uuid;
-
-    fn observe(&mut self, raw: &EntityRaw) -> Vec<Conflict>;
+#[macro_export]
+macro_rules! with_any_entity {
+    ($any_entity:expr, $bound_name:ident => $arm:expr) => {
+        match $any_entity {
+            crate::entity::AnyEntity::Sim($bound_name) => { $arm }
+            crate::entity::AnyEntity::Player($bound_name) => { $arm }
+            crate::entity::AnyEntity::Team($bound_name) => { $arm }
+            crate::entity::AnyEntity::Game($bound_name) => { $arm }
+            crate::entity::AnyEntity::Standings($bound_name) => { $arm }
+            crate::entity::AnyEntity::Season($bound_name) => { $arm }
+        }
+    };
 }
 
-#[derive(PartialEq)]
-#[enum_dispatch(EntityTrait)]
-pub enum Entity {
-    Sim(Sim),
-    Player(Player),
-    Team(Team),
-    Game(Game),
-    Standings(Standings),
-    Season(Season),
+#[macro_export]
+macro_rules! with_any_entity_raw {
+    ($any_entity:expr, $bound_name:ident => $arm:expr) => {
+        match $any_entity {
+            crate::entity::AnyEntityRaw::Sim($bound_name) => { $arm }
+            crate::entity::AnyEntityRaw::Player($bound_name) => { $arm }
+            crate::entity::AnyEntityRaw::Team($bound_name) => { $arm }
+            crate::entity::AnyEntityRaw::Game($bound_name) => { $arm }
+            crate::entity::AnyEntityRaw::Standings($bound_name) => { $arm }
+            crate::entity::AnyEntityRaw::Season($bound_name) => { $arm }
+        }
+    };
 }
 
-// I would have enum_dispatch do this but I can't figure out the constraints for that
-impl Entity {
-    pub fn from_json(entity_type: &str, json: serde_json::Value) -> Result<Self, EntityParseError> {
-        Ok(match entity_type {
-            "entity" => Self::Sim(serde_json::from_value(json)?),
-            "player" => Self::Player(serde_json::from_value(json)?),
-            "team" => Self::Team(serde_json::from_value(json)?),
-            "game" => Self::Game(serde_json::from_value(json)?),
-            "standings" => Self::Standings(serde_json::from_value(json)?),
-            "season" => Self::Season(serde_json::from_value(json)?),
-            other => return Err(EntityParseError::UnknownEntity(other.to_string())),
-        })
-    }
+pub use with_any_entity_raw;
 
-    pub fn to_json(self) -> serde_json::Value {
-        (match self {
-            Entity::Sim(internal) => { serde_json::to_value(internal) }
-            Entity::Player(internal) => { serde_json::to_value(internal) }
-            Entity::Team(internal) => { serde_json::to_value(internal) }
-            Entity::Game(internal) => { serde_json::to_value(internal) }
-            Entity::Standings(internal) => { serde_json::to_value(internal) }
-            Entity::Season(internal) => { serde_json::to_value(internal) }
-        }).expect("Error serializing entity")
-    }
+#[macro_export]
+macro_rules! entity_dispatch {
+    // The extra-type-parameters form
+    ($type_var:expr => $func:ident::<$($extra_type:ty),*>($($args:expr),*); $fallback_pattern:pat => $fallback_arm:expr) => {
+        match $type_var {
+            "sim" => { $func::<crate::entity::Sim, $($extra_type),*>($($args),*) }
+            "game" => { $func::<crate::entity::Game, $($extra_type),*>($($args),*) }
+            "team" => { $func::<crate::entity::Team, $($extra_type),*>($($args),*) }
+            "player" => { $func::<crate::entity::Player, $($extra_type),*>($($args),*) }
+            "standings" => { $func::<crate::entity::Standings, $($extra_type),*>($($args),*) }
+            "season" => { $func::<crate::entity::Season, $($extra_type),*>($($args),*) }
+            $fallback_pattern => $fallback_arm,
+        }
+    };
+    // The non-.await form
+    ($type_var:expr => $func:ident($($args:expr),*); $fallback_pattern:pat => $fallback_arm:expr) => {
+        match $type_var {
+            "sim" => { $func::<crate::entity::Sim>($($args),*) }
+            "game" => { $func::<crate::entity::Game>($($args),*) }
+            "team" => { $func::<crate::entity::Team>($($args),*) }
+            "player" => { $func::<crate::entity::Player>($($args),*) }
+            "standings" => { $func::<crate::entity::Standings>($($args),*) }
+            "season" => { $func::<crate::entity::Season>($($args),*) }
+            $fallback_pattern => $fallback_arm,
+        }
+    };
+    // The .await form
+    ($type_var:expr => $func:ident($($args:expr),*).await; $fallback_pattern:pat => $fallback_arm:expr) => {
+        match $type_var {
+            "sim" => <$func>::<crate::entity::Sim>($($args),*).await,
+            "game" => <$func>::<crate::entity::Game>($($args),*).await,
+            "team" => <$func>::<crate::entity::Team>($($args),*).await,
+            "player" => <$func>::<crate::entity::Player>($($args),*).await,
+            "standings" => <$func>::<crate::entity::Standings>($($args),*).await,
+            "season" => <$func>::<crate::entity::Season>($($args),*).await,
+            $fallback_pattern => $fallback_arm,
+        }
+    };
 }
+
+pub use entity_dispatch;

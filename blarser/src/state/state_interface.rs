@@ -6,9 +6,9 @@ use itertools::Itertools;
 use serde_json::json;
 use crate::api::EventuallyEvent;
 
-use crate::entity;
-use crate::entity::{TimedEvent, Entity, EntityTrait, EntityRawTrait};
-use crate::events::{Event, EventTrait, EventAux};
+use crate::{entity, with_any_entity, with_any_entity_raw};
+use crate::entity::{TimedEvent, Entity, AnyEntity, EntityRaw};
+use crate::events::Event;
 use crate::ingest::{ChronObservationEvent, Observation};
 use crate::state::{NewVersion, Version};
 use crate::state::events_db::{DbEvent, EventEffect, EventSource, NewEvent, NewEventEffect, StoredEvent};
@@ -20,44 +20,42 @@ pub struct StateInterface<'conn> {
 }
 
 macro_rules! reader_with_id {
-    ($fn_name:ident, $read_type:ty, $entity_type:expr) => {
+    ($fn_name:ident, $read_type:ty) => {
         pub fn $fn_name<ReadT: PartialEq, Reader: Fn($read_type) -> ReadT>(&self, id: Uuid, reader: Reader) -> QueryResult<Vec<ReadT>> {
-            self.read_entity($entity_type, Some(id), reader, |entity| entity.try_into().unwrap())
+            self.read_entity(Some(id), reader)
         }
     };
 }
 
 macro_rules! reader_with_nil_id {
-    ($fn_name:ident, $read_type:ty, $entity_type:expr) => {
+    ($fn_name:ident, $read_type:ty) => {
         pub fn $fn_name<ReadT: PartialEq, Reader: Fn($read_type) -> ReadT>(&self, reader: Reader) -> QueryResult<Vec<ReadT>> {
-            self.read_entity($entity_type, Some(Uuid::nil()), reader, |entity| entity.try_into().unwrap())
+            self.read_entity(Some(Uuid::nil()), reader)
         }
     };
 }
+
 
 impl<'conn> StateInterface<'conn> {
     pub fn new(conn: &'conn PgConnection, ingest_id: i32) -> Self {
         Self { conn, ingest_id }
     }
 
-    fn read_entity<EntityT: EntityTrait, ReadT, Reader, Extractor>(
+    fn read_entity<EntityT: Entity, ReadT, Reader>(
         &self,
-        entity_type: &str,
         entity_id: Option<Uuid>,
         reader: Reader,
-        extractor: Extractor,
     ) -> QueryResult<Vec<ReadT>>
         where ReadT: PartialEq,
-              Reader: Fn(EntityT) -> ReadT,
-              Extractor: Fn(Entity) -> EntityT {
+              Reader: Fn(EntityT) -> ReadT {
         let mut unique_vals = Vec::new();
-        let versions = self.get_versions_at_generic(entity_type, entity_id, None)?;
+        let versions = self.get_versions_at_generic::<EntityT>(entity_id, None)?;
 
         assert!(!versions.is_empty(),
                 "Error: There are no versions for the requested entity");
 
         for version in versions {
-            let val = reader(extractor(version.entity));
+            let val = reader(version.entity);
             if !unique_vals.iter().any(|existing_val| existing_val == &val) {
                 unique_vals.push(val);
             }
@@ -66,12 +64,12 @@ impl<'conn> StateInterface<'conn> {
         Ok(unique_vals)
     }
 
-    reader_with_nil_id! {read_sim, entity::Sim, "sim"}
-    reader_with_id! {read_player, entity::Player, "player"}
-    reader_with_id! {read_team, entity::Team, "team"}
-    reader_with_id! {read_game, entity::Game, "game"}
-    reader_with_id! {read_standings, entity::Standings, "standings"}
-    reader_with_id! {read_season, entity::Season, "season"}
+    reader_with_nil_id! {read_sim, entity::Sim }
+    reader_with_id! {read_player, entity::Player }
+    reader_with_id! {read_team, entity::Team }
+    reader_with_id! {read_game, entity::Game }
+    reader_with_id! {read_standings, entity::Standings }
+    reader_with_id! {read_season, entity::Season }
 
     pub fn get_events_between(&self, start_time: DateTime<Utc>, end_time: DateTime<Utc>) -> QueryResult<Vec<(StoredEvent, Vec<EventEffect>)>> {
         use crate::schema::events::dsl as events;
@@ -93,13 +91,13 @@ impl<'conn> StateInterface<'conn> {
         Ok(events.zip(effects).collect())
     }
 
-    pub fn get_versions_at_generic(&self, entity_type: &str, entity_id: Option<Uuid>, at_time: Option<DateTime<Utc>>) -> QueryResult<Vec<Version>> {
+    pub fn get_versions_at_generic<EntityT: Entity>(&self, entity_id: Option<Uuid>, at_time: Option<DateTime<Utc>>) -> QueryResult<Vec<Version<EntityT>>> {
         use crate::schema::versions_with_end::dsl as versions;
         let base_query = versions::versions_with_end
             // Is from the right ingest
             .filter(versions::ingest_id.eq(self.ingest_id))
             // Has the right entity type (entity id handled below)
-            .filter(versions::entity_type.eq(entity_type))
+            .filter(versions::entity_type.eq(EntityT::name()))
             // Has not been terminated
             .filter(versions::terminated.is_null())
             // Has the right end date/no end date
@@ -118,21 +116,21 @@ impl<'conn> StateInterface<'conn> {
         };
 
         let versions = versions.into_iter()
-            .map(|db_version| db_version.parse())
+            .map(|db_version| db_version.parse::<EntityT>())
             .collect();
 
         Ok(versions)
     }
 
-    pub fn get_versions_at(&self, entity_type: &str, entity_id: Option<Uuid>, at_time: DateTime<Utc>) -> QueryResult<Vec<Version>> {
-        self.get_versions_at_generic(entity_type, entity_id, Some(at_time))
+    pub fn get_versions_at<EntityT: Entity>(&self, entity_id: Option<Uuid>, at_time: DateTime<Utc>) -> QueryResult<Vec<Version<EntityT>>> {
+        self.get_versions_at_generic::<EntityT>(entity_id, Some(at_time))
     }
 
-    pub fn get_latest_versions(&self, entity_type: &str, entity_id: Option<Uuid>) -> QueryResult<Vec<Version>> {
-        self.get_versions_at_generic(entity_type, entity_id, None)
+    pub fn get_latest_versions<EntityT: Entity>(&self, entity_id: Option<Uuid>) -> QueryResult<Vec<Version<EntityT>>> {
+        self.get_versions_at_generic::<EntityT>(entity_id, None)
     }
 
-    pub fn save_feed_event(&self, event: Event, effects: Vec<(String, Option<Uuid>, EventAux)>) -> QueryResult<StoredEvent> {
+    pub fn save_feed_event<EventT: Event>(&self, event: EventT, effects: Vec<(String, Option<Uuid>, serde_json::Value)>) -> QueryResult<StoredEvent> {
         use crate::schema::events::dsl as events;
         use crate::schema::event_effects::dsl as event_effects;
 
@@ -153,8 +151,7 @@ impl<'conn> StateInterface<'conn> {
                     event_id: stored_event.id,
                     entity_type,
                     entity_id,
-                    aux_data: serde_json::to_value(aux_data)
-                        .expect("Error serializing EventAux data")
+                    aux_data,
                 }
             })
             .collect();
@@ -166,24 +163,30 @@ impl<'conn> StateInterface<'conn> {
         Ok(stored_event.parse())
     }
 
+    fn version_from_start<EntityRawT: EntityRaw>(&self, entity_raw: EntityRawT, start_time: DateTime<Utc>, from_event: i32) -> (NewVersion, Vec<TimedEvent>) {
+        let events = entity_raw.init_events(start_time);
+        let version = NewVersion {
+            ingest_id: self.ingest_id,
+            entity_type: EntityRawT::name(),
+            entity_id: entity_raw.id(),
+            start_time,
+            entity: serde_json::to_value(entity_raw)
+                .expect("Error serializing EntityRaw"),
+            from_event,
+            event_aux_data: json!(null),
+            observations: vec![start_time],
+        };
+
+        (version, events)
+    }
+
+
     pub fn add_initial_versions(&self, start_time: DateTime<Utc>, entities: impl Iterator<Item=Observation>) -> QueryResult<usize> {
         let from_event = self.add_start_event(start_time)?;
 
         let chunks = entities
             .map(move |observation| {
-                let events = observation.entity_raw.init_events(start_time);
-                let version = NewVersion {
-                    ingest_id: self.ingest_id,
-                    entity_type: observation.entity_raw.entity_type(),
-                    entity_id: observation.entity_raw.entity_id(),
-                    start_time,
-                    entity: observation.entity_raw.to_json(),
-                    from_event,
-                    event_aux_data: json!(null),
-                    observations: vec![start_time],
-                };
-
-                (version, events)
+                with_any_entity_raw!(observation.entity_raw, raw => self.version_from_start(raw, start_time, from_event))
             })
             .chunks(2000); // Diesel can't handle inserting the whole thing in one go
 
@@ -202,19 +205,20 @@ impl<'conn> StateInterface<'conn> {
         Ok::<_, diesel::result::Error>(inserted)
     }
 
-    pub fn save_successors(&self, successors: Vec<((Entity, EventAux), Vec<i32>)>, from_event: &StoredEvent) -> QueryResult<Vec<i32>> {
+    pub fn save_successors(&self, successors: Vec<((AnyEntity, serde_json::Value), Vec<i32>)>, start_time: DateTime<Utc>, from_event: i32) -> QueryResult<Vec<i32>> {
         let (new_versions, parents): (Vec<_>, Vec<_>) = successors.into_iter()
-            .map(|((entity, aux), parents)| {
-                let new_version = NewVersion {
+            .map(|((entity, event_aux_data), parents)| {
+                let entity_type = entity.name();
+                let new_version = with_any_entity!(entity, e => NewVersion {
                     ingest_id: self.ingest_id,
-                    entity_type: entity.entity_type(),
-                    entity_id: entity.entity_id(),
-                    start_time: from_event.time,
-                    entity: entity.to_json(),
-                    from_event: from_event.id,
-                    event_aux_data: serde_json::to_value(aux).expect("Error serializing event aux data"),
-                    observations: vec![]
-                };
+                    entity_type,
+                    entity_id: e.id(),
+                    start_time,
+                    entity: serde_json::to_value(e).expect("Error serializing successor entity"),
+                    from_event,
+                    event_aux_data,
+                    observations: vec![],
+                });
 
                 (new_version, parents)
             })
@@ -254,7 +258,7 @@ impl<'conn> StateInterface<'conn> {
             .get_result::<i32>(self.conn)
     }
 
-    pub fn insert_events(&self, event: Vec<NewEvent>) -> QueryResult<usize> {
+    fn insert_events(&self, event: Vec<NewEvent>) -> QueryResult<usize> {
         use crate::schema::events::dsl as events;
 
         insert_into(events::events)
@@ -289,7 +293,7 @@ impl<'conn> StateInterface<'conn> {
                     time: event.time,
                     source: EventSource::Timed,
                     data: serde_json::to_value(event)
-                        .expect("Failed to serialize Event")
+                        .expect("Failed to serialize Event"),
                 }
             })
             .collect();

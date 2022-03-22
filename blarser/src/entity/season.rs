@@ -2,10 +2,10 @@ use std::fmt::{Debug, Display, Formatter};
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use partial_information::{Conflict, PartialInformationCompare};
+use partial_information::PartialInformationCompare;
 use partial_information_derive::PartialInformationCompare;
 
-use crate::entity::{Entity, EntityRaw, EntityRawTrait, EntityTrait};
+use crate::entity::{AnyEntity, Entity, EntityRaw};
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]
@@ -34,9 +34,9 @@ impl Display for Season {
     }
 }
 
-impl EntityRawTrait for <Season as PartialInformationCompare>::Raw {
-    fn entity_type(&self) -> &'static str { "season" }
-    fn entity_id(&self) -> Uuid { self.id }
+impl EntityRaw for <Season as PartialInformationCompare>::Raw {
+    fn name() -> &'static str { "season" }
+    fn id(&self) -> Uuid { self.id }
 
     fn earliest_time(&self, valid_from: DateTime<Utc>) -> DateTime<Utc> {
         valid_from - Duration::minutes(1)
@@ -45,26 +45,15 @@ impl EntityRawTrait for <Season as PartialInformationCompare>::Raw {
     fn latest_time(&self, valid_from: DateTime<Utc>) -> DateTime<Utc> {
         valid_from + Duration::minutes(1)
     }
+}
 
-    fn as_entity(self) -> Entity {
-        Entity::Season(Season::from_raw(self))
-    }
-    fn to_json(self) -> serde_json::Value {
-        serde_json::to_value(self)
-            .expect("Error serializing SeasonRaw object")
+impl Into<AnyEntity> for Season {
+    fn into(self) -> AnyEntity {
+        AnyEntity::Season(self)
     }
 }
 
-impl EntityTrait for Season {
-    fn entity_type(&self) -> &'static str { "season" }
-    fn entity_id(&self) -> Uuid { self.id }
-
-    fn observe(&mut self, raw: &EntityRaw) -> Vec<Conflict> {
-        if let EntityRaw::Season(raw) = raw {
-            PartialInformationCompare::observe(self, raw)
-        } else {
-            panic!("Tried to observe {} with an observation from {}",
-                   self.entity_type(), raw.entity_type());
-        }
-    }
+impl Entity for Season {
+    fn name() -> &'static str { "season" }
+    fn id(&self) -> Uuid { self.id }
 }
