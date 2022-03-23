@@ -118,6 +118,8 @@ impl Display for Player {
 
 
 impl EntityRaw for <Player as PartialInformationCompare>::Raw {
+    type Entity=Player;
+
     fn name() -> &'static str { "player" }
     fn id(&self) -> Uuid { self.id }
 

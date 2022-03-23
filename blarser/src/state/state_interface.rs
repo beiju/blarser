@@ -4,6 +4,7 @@ use itertools::Itertools;
 use rocket::info;
 use uuid::Uuid;
 use serde_json::json;
+use partial_information::PartialInformationCompare;
 
 use crate::{entity, with_any_entity, with_any_entity_raw};
 use crate::entity::{Entity, AnyEntity, EntityRaw};
@@ -184,7 +185,7 @@ impl<'conn> StateInterface<'conn> {
             entity_type: EntityRawT::name(),
             entity_id: entity_raw.id(),
             start_time,
-            entity: serde_json::to_value(entity_raw)
+            entity: serde_json::to_value(<EntityRawT::Entity as PartialInformationCompare>::from_raw(entity_raw))
                 .expect("Error serializing EntityRaw"),
             from_event,
             event_aux_data: json!(null),

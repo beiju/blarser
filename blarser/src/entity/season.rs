@@ -35,6 +35,8 @@ impl Display for Season {
 }
 
 impl EntityRaw for <Season as PartialInformationCompare>::Raw {
+    type Entity = Season;
+
     fn name() -> &'static str { "season" }
     fn id(&self) -> Uuid { self.id }
 

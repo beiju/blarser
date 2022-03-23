@@ -97,6 +97,8 @@ impl Display for Team {
 }
 
 impl EntityRaw for <Team as PartialInformationCompare>::Raw {
+    type Entity = Team;
+
     fn name() -> &'static str { "team" }
     fn id(&self) -> Uuid { self.id }
 

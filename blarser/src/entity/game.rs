@@ -8,7 +8,7 @@ use partial_information::{PartialInformationCompare, MaybeKnown};
 use partial_information_derive::PartialInformationCompare;
 
 use crate::parse::{Base};
-use crate::entity::{AnyEntity, Entity, EntityRaw};
+use crate::entity::{AnyEntity, Entity, EntityRaw, Player};
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]
@@ -163,6 +163,8 @@ impl Entity for Game {
 }
 
 impl EntityRaw for <Game as PartialInformationCompare>::Raw {
+    type Entity = Game;
+
     fn name() -> &'static str { "game" }
     fn id(&self) -> Uuid { self.id }
 

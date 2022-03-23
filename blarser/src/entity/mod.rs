@@ -48,6 +48,8 @@ impl AnyEntity {
 }
 
 pub trait EntityRaw: Serialize + for<'de> Deserialize<'de> {
+    type Entity: PartialInformationCompare<Raw=Self> + Serialize + for<'de> Deserialize<'de>;
+
     fn name() -> &'static str;
     fn id(&self) -> Uuid;
 
@@ -126,26 +128,26 @@ pub use with_any_entity_raw;
 #[macro_export]
 macro_rules! entity_dispatch {
     // The extra-type-parameters form
-    ($type_var:expr => $func:ident::<$($extra_type:ty),*>($($args:expr),*); $fallback_pattern:pat => $fallback_arm:expr) => {
+    ($type_var:expr => $($func:ident).+::<$($extra_type:ty),*>($($args:expr),*); $fallback_pattern:pat => $fallback_arm:expr) => {
         match $type_var {
-            "sim" => { $func::<crate::entity::Sim, $($extra_type),*>($($args),*) }
-            "game" => { $func::<crate::entity::Game, $($extra_type),*>($($args),*) }
-            "team" => { $func::<crate::entity::Team, $($extra_type),*>($($args),*) }
-            "player" => { $func::<crate::entity::Player, $($extra_type),*>($($args),*) }
-            "standings" => { $func::<crate::entity::Standings, $($extra_type),*>($($args),*) }
-            "season" => { $func::<crate::entity::Season, $($extra_type),*>($($args),*) }
+            "sim" => { $($func).+::<crate::entity::Sim, $($extra_type),*>($($args),*) }
+            "game" => { $($func).+::<crate::entity::Game, $($extra_type),*>($($args),*) }
+            "team" => { $($func).+::<crate::entity::Team, $($extra_type),*>($($args),*) }
+            "player" => { $($func).+::<crate::entity::Player, $($extra_type),*>($($args),*) }
+            "standings" => { $($func).+::<crate::entity::Standings, $($extra_type),*>($($args),*) }
+            "season" => { $($func).+::<crate::entity::Season, $($extra_type),*>($($args),*) }
             $fallback_pattern => $fallback_arm,
         }
     };
     // The non-.await form
-    ($type_var:expr => $func:ident($($args:expr),*); $fallback_pattern:pat => $fallback_arm:expr) => {
+    ($type_var:expr => $($func:ident).+($($args:expr),*); $fallback_pattern:pat => $fallback_arm:expr) => {
         match $type_var {
-            "sim" => { $func::<crate::entity::Sim>($($args),*) }
-            "game" => { $func::<crate::entity::Game>($($args),*) }
-            "team" => { $func::<crate::entity::Team>($($args),*) }
-            "player" => { $func::<crate::entity::Player>($($args),*) }
-            "standings" => { $func::<crate::entity::Standings>($($args),*) }
-            "season" => { $func::<crate::entity::Season>($($args),*) }
+            "sim" => { $($func).+::<crate::entity::Sim>($($args),*) }
+            "game" => { $($func).+::<crate::entity::Game>($($args),*) }
+            "team" => { $($func).+::<crate::entity::Team>($($args),*) }
+            "player" => { $($func).+::<crate::entity::Player>($($args),*) }
+            "standings" => { $($func).+::<crate::entity::Standings>($($args),*) }
+            "season" => { $($func).+::<crate::entity::Season>($($args),*) }
             $fallback_pattern => $fallback_arm,
         }
     };
