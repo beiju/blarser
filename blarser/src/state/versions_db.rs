@@ -145,28 +145,6 @@ pub struct VersionLink {
     pub child_id: i32,
 }
 
-pub fn get_recently_updated_entities(c: &PgConnection, ingest_id: i32, count: usize) -> QueryResult<Vec<(String, Uuid, serde_json::Value)>> {
-    use crate::schema::versions_with_end::dsl as versions;
-    let mut intermediate = versions::versions_with_end
-        // Is from the right ingest
-        .filter(versions::ingest_id.eq(ingest_id))
-        // Is a latest version
-        .filter(versions::end_time.is_null())
-        // Only once per entity
-        .distinct_on((versions::entity_type, versions::entity_id))
-        .select((versions::entity_type, versions::entity_id, versions::entity, versions::start_time))
-        .get_results::<(String, Uuid, serde_json::Value, DateTime<Utc>)>(c)?;
-
-    intermediate.sort_unstable_by_key(|(_, _, _, time)| std::cmp::Reverse(*time));
-
-    Ok(
-        intermediate.into_iter()
-            .take(count)
-            .map(|(t, id, val, _)| (t, id, val))
-            .collect()
-    )
-}
-
 pub fn get_entity_debug<EntityT: Entity>(c: &PgConnection, ingest_id: i32, entity_type: &str, entity_id: Uuid) -> QueryResult<Vec<(Version<EntityT>, AnyEvent, Vec<VersionLink>)>> {
     use crate::schema::versions::dsl as versions;
     use crate::schema::events::dsl as events;

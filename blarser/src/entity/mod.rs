@@ -13,6 +13,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use partial_information::PartialInformationCompare;
 
+use crate::events::AnyEvent;
+
 pub use sim::Sim;
 pub use player::Player;
 pub use team::Team;
@@ -20,7 +22,7 @@ pub use game::{Game, GameByTeam, UpdateFull, UpdateFullMetadata};
 pub use standings::Standings;
 pub use season::Season;
 
-pub trait Entity: PartialInformationCompare + Serialize + for<'de> Deserialize<'de> + Into<AnyEntity> + TryFrom<AnyEntity, Error=WrongEntityError> + PartialEq + Clone {
+pub trait Entity: PartialInformationCompare + Serialize + for<'de> Deserialize<'de> + Into<AnyEntity> + TryFrom<AnyEntity, Error=WrongEntityError> + PartialEq + Clone + Display {
     fn name() -> &'static str;
     fn id(&self) -> Uuid;
 }
@@ -197,4 +199,15 @@ macro_rules! entity_dispatch {
 }
 
 pub use entity_dispatch;
-use crate::events::AnyEvent;
+
+fn entity_description_typed<EntityT: Entity>(entity_json: serde_json::Value) -> String {
+    let entity: EntityT = serde_json::from_value(entity_json)
+        .expect("Failed to deserialize entity");
+
+    entity.to_string()
+}
+
+pub fn entity_description(entity_type: &str, entity_json: serde_json::Value) -> String {
+    entity_dispatch!(entity_type => entity_description_typed(entity_json);
+                     other => panic!("Tried to get entity description for invalid entity {}", other))
+}

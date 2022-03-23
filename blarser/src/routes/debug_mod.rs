@@ -1,53 +1,40 @@
-// use rocket::{State, error};
-// use uuid::Uuid;
-// use serde_json::{Value, json};
-// use text_diff::Difference;
-// use rocket_dyn_templates::Template;
-// use blarser::{entity, entity_dispatch};
-// use itertools::Itertools;
-// use serde::Serialize;
-// use anyhow::anyhow;
-//
-// use blarser::db::BlarserDbConn;
-// use blarser::ingest::IngestTaskHolder;
-// use blarser::state::{get_entity_debug, get_recently_updated_entities, VersionLink, Version};
-// use crate::routes::ApiError;
-//
-// #[rocket::get("/debug")]
-// pub async fn debug(conn: BlarserDbConn, ingest_holder: &State<IngestTaskHolder>) -> Result<Template, ApiError> {
-//     let ingest_id = ingest_holder.latest_ingest_id()
-//         .ok_or_else(|| ApiError::InternalError("There is no ingest yet".to_string()))?;
-//
-//     #[derive(Serialize)]
-//     struct DebugEntityParams {
-//         name: String,
-//         r#type: String,
-//         id: Uuid,
-//     }
-//
-//     #[derive(Serialize)]
-//     struct DebugTemplateParams {
-//         pub entities: Vec<DebugEntityParams>,
-//     }
-//
-//     let entities = conn.run(move |c| {
-//         get_recently_updated_entities(c, ingest_id, 500)
-//     }).await
-//         .map_err(|e| {
-//             error!("Diesel error: {}", e);
-//             ApiError::InternalError(anyhow!(e).context("In debug route").to_string())
-//         })?
-//         .into_iter()
-//         .map(|(entity_type, entity_id, entity_json)| DebugEntityParams {
-//             name: entity::entity_description(&entity_type, entity_json),
-//             r#type: entity_type,
-//             id: entity_id,
-//         })
-//         .collect();
-//
-//     Ok(Template::render("debug", DebugTemplateParams { entities }))
-// }
-//
+use rocket::{State, error};
+use uuid::Uuid;
+use serde_json::{Value, json};
+use text_diff::Difference;
+use rocket_dyn_templates::Template;
+use blarser::{entity, entity_dispatch};
+use itertools::Itertools;
+use serde::Serialize;
+use anyhow::anyhow;
+
+use blarser::db::BlarserDbConn;
+use blarser::ingest::IngestTaskHolder;
+use blarser::state::{get_entity_debug, VersionLink, Version, StateInterface, EntityDescription};
+use crate::routes::ApiError;
+
+#[rocket::get("/debug")]
+pub async fn debug(conn: BlarserDbConn, ingest_holder: &State<IngestTaskHolder>) -> Result<Template, ApiError> {
+    let ingest_id = ingest_holder.latest_ingest_id()
+        .ok_or_else(|| ApiError::InternalError("There is no ingest yet".to_string()))?;
+
+    #[derive(Serialize)]
+    struct DebugTemplateParams {
+        pub entities: Vec<EntityDescription>,
+    }
+
+    let entities = conn.run(move |c| {
+        let state = StateInterface::new(c, ingest_id);
+        state.get_recently_updated_entity_descriptions(500)
+    }).await
+        .map_err(|e| {
+            error!("Diesel error: {}", e);
+            ApiError::InternalError(anyhow!(e).context("In debug route").to_string())
+        })?;
+
+    Ok(Template::render("debug", DebugTemplateParams { entities }))
+}
+
 // #[rocket::get("/debug/<entity_type>/<entity_id>")]
 // pub async fn entity_debug_json(conn: BlarserDbConn, ingest: &State<IngestTaskHolder>, entity_type: String, entity_id: Uuid) -> Result<Value, ApiError> {
 //     let ingest_id = ingest.latest_ingest_id()

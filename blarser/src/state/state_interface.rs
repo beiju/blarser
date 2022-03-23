@@ -2,12 +2,13 @@ use chrono::{DateTime, Utc};
 use diesel::{prelude::*, PgConnection, QueryResult, insert_into};
 use itertools::Itertools;
 use rocket::info;
+use serde::Serialize;
 use uuid::Uuid;
 use serde_json::json;
 use partial_information::PartialInformationCompare;
 
-use crate::{entity, with_any_entity, with_any_entity_raw};
-use crate::entity::{Entity, AnyEntity, EntityRaw};
+use crate::{entity, entity_dispatch, with_any_entity, with_any_entity_raw};
+use crate::entity::{Entity, AnyEntity, EntityRaw, entity_description};
 use crate::events::{AnyEvent, Start as StartEvent};
 use crate::ingest::Observation;
 use crate::state::{ApprovalState, NewVersion, Version, VersionLink};
@@ -18,6 +19,13 @@ use crate::state::versions_db::{DbVersionWithEnd, NewVersionLink};
 pub struct StateInterface<'conn> {
     conn: &'conn PgConnection,
     ingest_id: i32,
+}
+
+#[derive(Serialize)]
+pub struct EntityDescription {
+    entity_type: String,
+    entity_id: Uuid,
+    description: String,
 }
 
 macro_rules! reader_with_id {
@@ -35,7 +43,6 @@ macro_rules! reader_with_nil_id {
         }
     };
 }
-
 
 impl<'conn> StateInterface<'conn> {
     pub fn new(conn: &'conn PgConnection, ingest_id: i32) -> Self {
@@ -362,5 +369,32 @@ impl<'conn> StateInterface<'conn> {
         } else {
             Ok(ApprovalState::Pending(id))
         }
+    }
+
+    pub fn get_recently_updated_entity_descriptions(&self, limit: i64) -> QueryResult<Vec<EntityDescription>> {
+        use crate::schema::versions_with_end::dsl as versions;
+        let result = versions::versions_with_end
+            .select((versions::entity_type, versions::entity_id, versions::entity))
+            // Is from the right ingest
+            .filter(versions::ingest_id.eq(self.ingest_id))
+            // Is a latest version
+            .filter(versions::end_time.is_null())
+            // Get the most recently updated ones
+            .order(versions::start_time.desc())
+            .limit(limit)
+            .get_results::<(String, Uuid, serde_json::Value)>(self.conn)?
+            .into_iter()
+            .map(|(entity_type, entity_id, entity_json)| {
+                let description = entity_description(&entity_type, entity_json);
+
+                EntityDescription {
+                    entity_type,
+                    entity_id,
+                    description,
+                }
+            })
+            .collect();
+
+        Ok(result)
     }
 }

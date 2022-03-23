@@ -14,10 +14,10 @@
 
                     <ul class="list-unstyled" id="entity-list">
                         {{#each entities}}
-                            <li data-entity-type="{{type}}" data-entity-id="{{id}}">
+                            <li data-entity-type="{{entity_type}}" data-entity-id="{{entity_id}}">
                                 <label>
-                                    <input type="checkbox" name="{{id}}_debug" />
-                                    {{name}}
+                                    <input type="checkbox" name="{{entity_id}}_debug" />
+                                    {{description}}
                                 </label>
                             </li>
                         {{/each}}

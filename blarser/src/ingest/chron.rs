@@ -168,7 +168,8 @@ pub async fn ingest_chron(mut ingest: ChronIngest, start_at_time: &'static str, 
                         with_any_entity_raw!(&observation.entity_raw, raw => {
                             add_manual_event(&state, raw, observation.perceived_at)
                         })
-                    }).await;
+                    }).await
+                        .expect("Error adding approved manual event");
                 }
             }
             other => other.expect("Error in Chron ingest")

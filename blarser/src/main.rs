@@ -5,7 +5,7 @@ use rocket::fs::{FileServer, relative};
 use rocket_dyn_templates::Template;
 use blarser::ingest::{IngestTaskHolder, IngestTask};
 use blarser::db::{BlarserDbConn};
-use routes::{index, approvals, approve, /*debug, entity_debug_json, entities*/};
+use routes::{index, approvals, approve, debug, /*entity_debug_json, entities*/};
 
 mod routes;
 
@@ -14,7 +14,7 @@ mod routes;
 async fn main() -> Result<(), rocket::Error> {
     rocket::build()
         .mount("/public", FileServer::from(relative!("static")))
-        .mount("/", rocket::routes![index, approvals, approve, /*debug, entity_debug_json, entities*/])
+        .mount("/", rocket::routes![index, approvals, approve, debug, /*entity_debug_json, entities*/])
         .attach(BlarserDbConn::fairing())
         .attach(Template::fairing())
         .manage(IngestTaskHolder::new())
