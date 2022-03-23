@@ -4,7 +4,7 @@ use rocket::info;
 use futures::{pin_mut, StreamExt};
 use uuid::Uuid;
 
-use crate::api::{eventually, EventuallyEvent};
+use crate::api::{EventType, eventually, EventuallyEvent};
 use crate::entity::{AnyEntity, Entity};
 use crate::{entity_dispatch, with_any_event};
 use crate::events::Event;
@@ -23,6 +23,7 @@ pub async fn ingest_feed(mut ingest: FeedIngest, start_at_time: &'static str, st
     let mut current_time = start_time_parsed;
 
     while let Some(feed_event) = feed_events.next().await {
+        info!("Feed ingest: Received new {:?} event from {}", feed_event.r#type, feed_event.created);
         let feed_event_time = feed_event.created;
         // Doing a "manual borrow" of ingest because I can't figure out how to please the borrow
         // checker with a proper borrow
@@ -58,6 +59,8 @@ async fn run_time_until(ingest: FeedIngest, start_time: DateTime<Utc>, end_time:
     ingest.run_transaction(move |state| {
         // TODO: Properly handle when a timed event generates another timed event
         for (stored_event, effects) in state.get_events_between(start_time, end_time)? {
+            info!("Feed ingest: Applying stored {} event at {}",
+                stored_event.event.type_name(), stored_event.event.time());
             let effects: Vec<_> = effects.into_iter()
                 .map(|effect| {
                     let aux_data = serde_json::from_value(effect.aux_data)
@@ -78,7 +81,16 @@ async fn run_time_until(ingest: FeedIngest, start_time: DateTime<Utc>, end_time:
 }
 
 async fn apply_feed_event(ingest: FeedIngest, feed_event: EventuallyEvent) -> FeedIngest {
+    // FOR DEBUGGING: Pause at the first event where parsing isn't implemented yet, so I can test
+    //   Chron ingest.
+    if feed_event.r#type == EventType::StormWarning {
+        info!("Feed ingest: pausing (debug)");
+        loop {
+            tokio::time::sleep(tokio::time::Duration::from_secs(100000)).await;
+        }
+    }
     ingest.run_transaction(move |state| {
+        info!("Feed ingest: Applying new {:?} event at {}", feed_event.r#type, feed_event.created);
         let (event, effects) = parse_feed_event(feed_event, &state)?;
         let successors = with_any_event!(&event, event => apply_event_effects(&state, event, &effects))?;
         let stored_event = StateInterface::save_feed_event(&state, event, effects)?;

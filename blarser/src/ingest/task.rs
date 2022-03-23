@@ -122,15 +122,15 @@ impl ChronIngest {
     pub async fn wait_for_feed_ingest(&mut self, wait_until_time: DateTime<Utc>) {
         self.send_chron_progress.send(wait_until_time)
             .expect("Error communicating with Chronicler ingest");
-        info!("Chron ingest sent {} as requested time", wait_until_time);
+        // info!("Chron ingest sent {} as requested time", wait_until_time);
 
         loop {
             let feed_time = *self.receive_feed_progress.borrow();
             if wait_until_time < feed_time {
                 break;
             }
-            info!("Chronicler ingest waiting for Eventually ingest to catch up (at {} and we need {}, difference of {}s)",
-            feed_time, wait_until_time, (wait_until_time - feed_time).num_seconds());
+            // info!("Chronicler ingest waiting for Eventually ingest to catch up (at {} and we need {}, difference of {}s)",
+            // feed_time, wait_until_time, (wait_until_time - feed_time).num_seconds());
             self.receive_feed_progress.changed().await
                 .expect("Error communicating with Eventually ingest");
         }
@@ -179,7 +179,7 @@ impl FeedIngest {
     pub async fn wait_for_chron_ingest(&mut self, feed_event_time: DateTime<Utc>) {
         self.send_feed_progress.send(feed_event_time)
             .expect("Error communicating with Chronicler ingest");
-        info!("Feed ingest sent progress {}", feed_event_time);
+        // info!("Feed ingest sent progress {}", feed_event_time);
 
         loop {
             let chron_requests_time = *self.receive_chron_progress.borrow();
@@ -187,8 +187,8 @@ impl FeedIngest {
             if feed_event_time < stop_at {
                 break;
             }
-            info!("Eventually ingest waiting for Chronicler ingest to catch up (at {} and we are at {}, {}s ahead)",
-                    chron_requests_time, feed_event_time, (feed_event_time - chron_requests_time).num_seconds());
+            // info!("Eventually ingest waiting for Chronicler ingest to catch up (at {} and we are at {}, {}s ahead)",
+            //         chron_requests_time, feed_event_time, (feed_event_time - chron_requests_time).num_seconds());
             self.receive_chron_progress.changed().await
                 .expect("Error communicating with Chronicler ingest");
         }

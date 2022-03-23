@@ -52,7 +52,17 @@ macro_rules! with_any_event {
 pub use with_any_event;
 
 impl AnyEvent {
-    pub(crate) fn time(&self) -> DateTime<Utc> {
+    pub fn time(&self) -> DateTime<Utc> {
         with_any_event!(self, event => event.time())
+    }
+
+    pub fn type_name(&self) -> &'static str {
+        match self {
+            AnyEvent::Start(_) => { "Start" }
+            AnyEvent::EarlseasonStart(_) => { "EarlseasonStart" }
+            AnyEvent::LetsGo(_) => { "LetsGo" }
+            AnyEvent::PlayBall(_) => { "PlayBall" }
+            AnyEvent::HalfInning(_) => { "HalfInning" }
+        }
     }
 }
