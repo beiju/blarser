@@ -67,7 +67,7 @@ impl DbVersion {
             event_aux_data: serde_json::from_value(self.event_aux_data)
                 .expect("Failed to parse event aux info from database"),
             observations: self.observations,
-            terminated: self.terminated
+            terminated: self.terminated,
         }
     }
 }
@@ -107,7 +107,7 @@ impl DbVersionWithEnd {
             event_aux_data: serde_json::from_value(self.event_aux_data)
                 .expect("Failed to parse event aux info from database"),
             observations: self.observations,
-            terminated: self.terminated
+            terminated: self.terminated,
         }
     }
 }
@@ -137,6 +137,7 @@ pub(crate) struct NewVersionLink {
 
 #[derive(Identifiable, Queryable, Associations, PartialEq, Debug)]
 #[belongs_to(parent = "DbVersion", foreign_key = "child_id")]
+#[belongs_to(parent = "DbVersionWithEnd", foreign_key = "child_id")]
 #[table_name = "version_links"]
 pub struct VersionLink {
     pub id: i32,

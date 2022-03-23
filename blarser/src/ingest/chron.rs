@@ -1,15 +1,23 @@
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
+use std::fmt::{Display, Formatter};
 use std::iter;
 use std::pin::Pin;
 use chrono::{DateTime, Utc};
+use diesel::QueryResult;
 use futures::{pin_mut, stream, Stream, StreamExt};
-use rocket::info;
+use itertools::Itertools;
+use rocket::{info, warn};
+use thiserror::Error;
+use partial_information::Conflict;
 
 use crate::api::chronicler;
 use crate::ingest::task::ChronIngest;
-use crate::entity::EntityParseError;
+use crate::entity::{AnyEntity, Entity, EntityParseError, EntityRaw};
 use crate::ingest::observation::Observation;
+use crate::state::{EventEffect, MergedSuccessors, NewVersion, StateInterface, Version, VersionLink};
+use crate::{with_any_entity_raw, with_any_event};
+use crate::events::Event;
 
 fn initial_state(start_at_time: &'static str) -> impl Stream<Item=Observation> {
     type ObservationStream = Pin<Box<dyn Stream<Item=Observation> + Send>>;
@@ -116,20 +124,222 @@ pub async fn init_chron(ingest: &ChronIngest, start_at_time: &'static str, start
     info!("Finished populating initial Chron values");
 }
 
-pub async fn ingest_chron(mut ingest: ChronIngest, start_at_time: &'static str) {
+pub async fn ingest_chron(mut ingest: ChronIngest, start_at_time: &'static str, start_time: DateTime<Utc>) {
     info!("Started Chron ingest task");
 
     let updates = chron_updates(start_at_time);
 
     pin_mut!(updates);
 
+    let mut prev_observation_time = start_time;
+
     while let Some(observation) = updates.next().await {
+        // Just to ensure observations are processed in latest_time order
+        assert!(observation.latest_time() >= prev_observation_time,
+                "Observations were not processed in chronological order");
+        prev_observation_time = observation.latest_time();
+
         ingest.wait_for_feed_ingest(observation.latest_time()).await;
 
-        todo!()
+        let normal_ingest_result = {
+            let observation = observation.clone();
+            ingest.run_transaction(move |state| {
+                with_any_entity_raw!(&observation.entity_raw, raw => {
+                    forward_ingest(&state, raw, observation.perceived_at)?;
 
-        // ingest.run_transaction(|state| {
-        //     observation.do_ingest(&mut ingest)
-        // })
+                    reverse_ingest(&state, raw, observation.perceived_at)?;
+                });
+
+                Ok::<_, ChronIngestError>(())
+            }).await
+        };
+
+        match normal_ingest_result {
+            Err(ChronIngestError::Conflicts(conflicts)) => {
+                let conflicts_str = conflicts.to_string();
+                warn!("Getting approval for conflicts: {}", conflicts_str);
+                let approved = ingest.get_approval(observation.entity_raw.name(), observation.entity_raw.id(),
+                                                   observation.perceived_at, conflicts_str).await
+                    .expect("Error in get_approval");
+                if !approved {
+                    panic!("User rejected conflicts. Nothing to do.");
+                } else {
+                    ingest.run_transaction(move |state| {
+                        with_any_entity_raw!(&observation.entity_raw, raw => {
+                            add_manual_event(&state, raw, observation.perceived_at)
+                        })
+                    }).await;
+                }
+            }
+            other => other.expect("Error in Chron ingest")
+        }
     }
+
+    todo!()
+}
+
+#[derive(Debug)]
+pub struct GenerationConflict {
+    start_time: DateTime<Utc>,
+    event_name: &'static str,
+    version_conflicts: Vec<Vec<Conflict>>,
+}
+
+#[derive(Debug)]
+pub struct GenerationConflicts(Vec<GenerationConflict>);
+
+impl Display for GenerationConflicts {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Couldn't apply observation: ")?;
+        for generation in &self.0 {
+            write!(f, "\n- Couldn't apply to generation at {}, created by {}:",
+                   generation.start_time, generation.event_name)?;
+
+            for version in &generation.version_conflicts {
+                write!(f, "\n  - Couldn't apply to version:")?;
+
+                for conflict in version {
+                    write!(f, "\n    - {}", conflict)?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum ChronIngestError {
+    #[error("Observation could not be applied without conflicts")]
+    Conflicts(GenerationConflicts),
+
+    #[error(transparent)]
+    DbError(#[from] diesel::result::Error),
+}
+
+pub type ChronIngestResult<T> = Result<T, ChronIngestError>;
+
+fn forward_ingest<EntityRawT: EntityRaw>(state: &StateInterface, entity_raw: &EntityRawT, perceived_at: DateTime<Utc>) -> ChronIngestResult<()> {
+    let earliest_time = entity_raw.earliest_time(perceived_at);
+    let latest_time = entity_raw.latest_time(perceived_at);
+    let mut events = state.get_events_for_entity_raw_after(entity_raw, earliest_time)?.into_iter();
+    let generations = state.get_versions_for_entity_raw_between(entity_raw, earliest_time, latest_time)?;
+
+    let mut prev_generation = Vec::new();
+    let mut all_conflicts = Vec::new();
+    info!("Chron ingest: Applying observation to {} {} between {} and {}. {} generations, {} events",
+        EntityRawT::name(), entity_raw.id(), earliest_time, latest_time, generations.len(), events.len());
+    for (event_id, versions) in generations {
+        let (event, effects) = events.next()
+            .expect("There were fewer events than generations");
+        assert_eq!(event_id, event.id, "Generation's event_id did not match expected event");
+
+        let mut new_generation = MergedSuccessors::new();
+
+        let version_time = versions.first().expect("Empty generation").0.start_time;
+        let num_versions = versions.len();
+        let version_conflicts = observe_generation(&mut new_generation, versions, entity_raw, perceived_at);
+        info!("Chron ingest: Generation at {} with {} versions observed, resulting in {} successors and {} conflicts",
+            version_time, num_versions, new_generation.inner().len(), version_conflicts.len());
+
+        all_conflicts.push(GenerationConflict {
+            start_time: version_time,
+            event_name: event.event.type_name(),
+            version_conflicts,
+        });
+
+        let num_prev_versions = prev_generation.len();
+        let num_successors_before = new_generation.inner().len();
+        with_any_event!(event.event, event => advance_generation(&mut new_generation, event, effects, prev_generation));
+        info!("Chron ingest: Advanced {} versions from previous observations, resulting in {} successors",
+            num_prev_versions, new_generation.inner().len() - num_successors_before);
+
+        // This is a bit of a mess... it's trying to extract the entities both as EntityT, for use
+        // in the next iteration of the loop, and as AnyEntity, for use in state.save_successors
+        let successor_entities: Vec<_> = new_generation.inner().iter()
+            .map(|((entity, _), _)| entity)
+            .cloned()
+            .collect();
+        let any_successors = new_generation.into_inner().into_iter()
+            .map(|((entity, aux), parents)| ((entity.into(), aux), parents))
+            .collect();
+        let successor_ids = state.save_successors(any_successors, event.time, event.id)?;
+        prev_generation = successor_entities.into_iter().zip(successor_ids).collect();
+    }
+
+    // Versions only make it into prev_generation after a successful observation, so if that's empty
+    // it means there were zero successful observations
+    if prev_generation.is_empty() {
+        return Err(ChronIngestError::Conflicts(GenerationConflicts(all_conflicts)));
+    }
+
+    // At this point prev_generation needs to continue into the future
+    todo!()
+}
+
+fn reverse_ingest<EntityRawT: EntityRaw>(state: &StateInterface, entity_raw: &EntityRawT, perceived_at: DateTime<Utc>) -> ChronIngestResult<()> {
+    todo!()
+}
+
+fn observe_generation<EntityT: Entity>(
+    new_generation: &mut MergedSuccessors<(EntityT, serde_json::Value)>,
+    versions: Vec<(Version<EntityT>, Vec<VersionLink>)>,
+    entity_raw: &EntityT::Raw,
+    perceived_at: DateTime<Utc>,
+) -> Vec<Vec<Conflict>> {
+    let mut version_conflicts = Vec::new();
+
+    for (version, parents) in versions {
+        match observe_entity(version, entity_raw, perceived_at) {
+            Ok(new_version) => {
+                let parent_ids = parents.into_iter()
+                    .map(|parent| parent.parent_id)
+                    .collect();
+                new_generation.add_multi_parent_successor(parent_ids, new_version);
+            }
+            Err(conflicts) => {
+                version_conflicts.push(conflicts);
+            }
+        }
+    }
+
+    return version_conflicts;
+}
+
+fn observe_entity<EntityT: Entity>(
+    version: Version<EntityT>,
+    entity_raw: &EntityT::Raw,
+    perceived_at: DateTime<Utc>,
+) -> Result<(EntityT, serde_json::Value), Vec<Conflict>> {
+    let mut new_entity = version.entity;
+    let conflicts = new_entity.observe(entity_raw);
+    if !conflicts.is_empty() {
+        return Err(conflicts);
+    }
+
+    let mut observations = version.observations;
+    observations.push(perceived_at);
+    Ok((new_entity, version.event_aux_data))
+}
+
+
+fn advance_generation<EntityT: Entity, EventT: Event>(
+    new_generation: &mut MergedSuccessors<(EntityT, serde_json::Value)>,
+    event: EventT,
+    effects: Vec<EventEffect>,
+    prev_generation: Vec<(EntityT, i32)>,
+) {
+    for (prev_entity, prev_version_id) in prev_generation {
+        let prev_entity_any = prev_entity.into();
+        for effect in &effects {
+            // This is very clone-y but I can't think of a way around that
+            let new_entity = event.forward(prev_entity_any.clone(), effect.aux_data.clone())
+                .try_into().expect("Event::forward returned a different entity type than it was given");
+            new_generation.add_successor(prev_version_id, (new_entity, effect.aux_data.clone()));
+        }
+    }
+}
+
+fn add_manual_event<EntityRawT: EntityRaw>(state: &StateInterface, entity_raw: &EntityRawT, perceived_at: DateTime<Utc>) -> ChronIngestResult<()> {
+    todo!()
 }

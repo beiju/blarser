@@ -11,6 +11,7 @@ pub trait PartialInformationDiff<'d>: Debug {
     fn is_empty(&self) -> bool;
 }
 
+#[derive(Debug)]
 pub struct Conflict {
     property: String,
     message: String,

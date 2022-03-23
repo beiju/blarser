@@ -6,7 +6,7 @@ use uuid::Uuid;
 use partial_information::PartialInformationCompare;
 use partial_information_derive::PartialInformationCompare;
 
-use crate::entity::{AnyEntity, Entity, EntityRaw};
+use crate::entity::{AnyEntity, Entity, EntityRaw, WrongEntityError};
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]
@@ -53,6 +53,17 @@ impl EntityRaw for <Standings as PartialInformationCompare>::Raw {
 impl Into<AnyEntity> for Standings {
     fn into(self) -> AnyEntity {
         AnyEntity::Standings(self)
+    }
+}
+
+impl TryFrom<AnyEntity> for Standings {
+    type Error = WrongEntityError;
+
+    fn try_from(value: AnyEntity) -> Result<Self, Self::Error> {
+        match value {
+            AnyEntity::Standings(value) => { Ok(value) }
+            other => Err(WrongEntityError { expected: "standings", found: other.name() })
+        }
     }
 }
 

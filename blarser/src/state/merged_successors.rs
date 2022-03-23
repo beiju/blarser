@@ -37,6 +37,7 @@ impl<T: PartialEq> MergedSuccessors<T> {
 
     pub fn is_empty(&self) -> bool { self.0.is_empty() }
 
+    pub fn inner(&self) -> &Vec<(T, Vec<i32>)> { &self.0 }
     pub fn into_inner(self) -> Vec<(T, Vec<i32>)> { self.0 }
 
     pub fn iter(&self) -> impl Iterator<Item=&(T, Vec<i32>)> { self.0.iter() }

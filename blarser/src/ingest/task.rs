@@ -1,15 +1,16 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex as StdMutex, Mutex};
 use chrono::{DateTime, Duration, Utc};
-use diesel::{ExpressionMethods, OptionalExtension, QueryDsl, RunQueryDsl};
+use diesel::{ExpressionMethods, OptionalExtension, QueryDsl, QueryResult, RunQueryDsl};
 use rocket::info;
 use tokio::sync::{watch, oneshot};
+use uuid::Uuid;
 
 use crate::db::BlarserDbConn;
 use crate::ingest::chron::{init_chron, ingest_chron};
 use crate::ingest::feed::ingest_feed;
 use crate::schema;
-use crate::state::StateInterface;
+use crate::state::{ApprovalState, StateInterface};
 
 const BLARSER_START: &str = "2021-12-06T15:00:00Z";
 
@@ -91,16 +92,16 @@ impl ChronIngest {
         db: BlarserDbConn,
         ingest_id: i32,
         send_chron_progress: watch::Sender<DateTime<Utc>>,
-        receive_feed_progress: watch::Receiver<DateTime<Utc>>
+        receive_feed_progress: watch::Receiver<DateTime<Utc>>,
     ) -> Self {
         Self {
             ingest_impl: IngestImpl {
                 ingest_id,
-                db
+                db,
             },
             send_chron_progress,
             receive_feed_progress,
-            pending_approvals: Arc::new(Mutex::new(Default::default()))
+            pending_approvals: Arc::new(Mutex::new(Default::default())),
         }
     }
 
@@ -136,6 +137,28 @@ impl ChronIngest {
         }
     }
 
+    pub async fn get_approval(&self, entity_type: &'static str, entity_id: Uuid, perceived_at: DateTime<Utc>, message: String) -> QueryResult<bool> {
+        let result = self.run_transaction(move |state| {
+            state.upsert_approval(entity_type, entity_id, perceived_at, &message)
+        }).await?;
+
+        match result {
+            ApprovalState::Pending(id) => {
+                let (send, recv) = oneshot::channel();
+                // New scope to make sure pending_approvals is unlocked before waiting on the channel
+                {
+                    let mut pending_approvals = self.pending_approvals.lock().unwrap();
+                    pending_approvals.insert(id, send);
+                }
+                let result = recv.await
+                    .expect("Pending approval channel dropped unexpectedly");
+
+                Ok(result)
+            }
+            ApprovalState::Approved => { Ok(true) }
+            ApprovalState::Rejected => { Ok(false) }
+        }
+    }
 }
 
 pub struct FeedIngest {
@@ -149,15 +172,15 @@ impl FeedIngest {
         db: BlarserDbConn,
         ingest_id: i32,
         send_feed_progress: watch::Sender<DateTime<Utc>>,
-        receive_chron_progress: watch::Receiver<DateTime<Utc>>
+        receive_chron_progress: watch::Receiver<DateTime<Utc>>,
     ) -> Self {
         Self {
             ingest_impl: IngestImpl {
                 ingest_id,
-                db
+                db,
             },
             send_feed_progress,
-            receive_chron_progress
+            receive_chron_progress,
         }
     }
 
@@ -237,7 +260,7 @@ impl IngestTask {
 
         init_chron(&chron_ingest, BLARSER_START, start_time_parsed).await;
 
-        tokio::spawn(ingest_chron(chron_ingest, BLARSER_START));
+        tokio::spawn(ingest_chron(chron_ingest, BLARSER_START, start_time_parsed));
         tokio::spawn(ingest_feed(feed_ingest, BLARSER_START, start_time_parsed));
 
         IngestTask {

@@ -6,6 +6,7 @@ mod team;
 mod standings;
 mod season;
 
+use std::fmt::{Display, Formatter};
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -19,12 +20,24 @@ pub use game::{Game, GameByTeam, UpdateFull, UpdateFullMetadata};
 pub use standings::Standings;
 pub use season::Season;
 
-pub trait Entity: PartialInformationCompare + Serialize + for<'de> Deserialize<'de> + Into<AnyEntity> {
+pub trait Entity: PartialInformationCompare + Serialize + for<'de> Deserialize<'de> + Into<AnyEntity> + TryFrom<AnyEntity, Error=WrongEntityError> + PartialEq + Clone {
     fn name() -> &'static str;
     fn id(&self) -> Uuid;
 }
 
-#[derive(PartialEq)]
+#[derive(Debug)]
+pub struct WrongEntityError {
+    expected: &'static str,
+    found: &'static str,
+}
+
+impl Display for WrongEntityError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Expected {} but found {}", self.expected, self.found)
+    }
+}
+
+#[derive(Clone, PartialEq)]
 pub enum AnyEntity {
     Sim(Sim),
     Player(Player),
@@ -34,8 +47,24 @@ pub enum AnyEntity {
     Season(Season),
 }
 
+#[macro_export]
+macro_rules! with_any_entity {
+    ($any_entity:expr, $bound_name:ident => $arm:expr) => {
+        match $any_entity {
+            crate::entity::AnyEntity::Sim($bound_name) => { $arm }
+            crate::entity::AnyEntity::Player($bound_name) => { $arm }
+            crate::entity::AnyEntity::Team($bound_name) => { $arm }
+            crate::entity::AnyEntity::Game($bound_name) => { $arm }
+            crate::entity::AnyEntity::Standings($bound_name) => { $arm }
+            crate::entity::AnyEntity::Season($bound_name) => { $arm }
+        }
+    };
+}
+
+pub use with_any_entity;
+
 impl AnyEntity {
-    pub(crate) fn name(&self) -> &'static str {
+    pub fn name(&self) -> &'static str {
         match self {
             AnyEntity::Sim(_) => { Sim::name() }
             AnyEntity::Player(_) => { Player::name() }
@@ -48,7 +77,7 @@ impl AnyEntity {
 }
 
 pub trait EntityRaw: Serialize + for<'de> Deserialize<'de> {
-    type Entity: PartialInformationCompare<Raw=Self> + Serialize + for<'de> Deserialize<'de>;
+    type Entity: Entity + PartialInformationCompare<Raw=Self> + Serialize + for<'de> Deserialize<'de>;
 
     fn name() -> &'static str;
     fn id(&self) -> Uuid;
@@ -62,6 +91,7 @@ pub trait EntityRaw: Serialize + for<'de> Deserialize<'de> {
     fn latest_time(&self, valid_from: DateTime<Utc>) -> DateTime<Utc>;
 }
 
+#[derive(Clone)]
 pub enum AnyEntityRaw {
     Sim(<Sim as PartialInformationCompare>::Raw),
     Player(<Player as PartialInformationCompare>::Raw),
@@ -70,6 +100,22 @@ pub enum AnyEntityRaw {
     Standings(<Standings as PartialInformationCompare>::Raw),
     Season(<Season as PartialInformationCompare>::Raw),
 }
+
+#[macro_export]
+macro_rules! with_any_entity_raw {
+    ($any_entity:expr, $bound_name:ident => $arm:expr) => {
+        match $any_entity {
+            crate::entity::AnyEntityRaw::Sim($bound_name) => { $arm }
+            crate::entity::AnyEntityRaw::Player($bound_name) => { $arm }
+            crate::entity::AnyEntityRaw::Team($bound_name) => { $arm }
+            crate::entity::AnyEntityRaw::Game($bound_name) => { $arm }
+            crate::entity::AnyEntityRaw::Standings($bound_name) => { $arm }
+            crate::entity::AnyEntityRaw::Season($bound_name) => { $arm }
+        }
+    };
+}
+
+pub use with_any_entity_raw;
 
 #[derive(Debug, Error)]
 pub enum EntityParseError {
@@ -93,37 +139,22 @@ impl AnyEntityRaw {
             other => return Err(EntityParseError::UnknownEntity(other.to_string())),
         })
     }
-}
 
-#[macro_export]
-macro_rules! with_any_entity {
-    ($any_entity:expr, $bound_name:ident => $arm:expr) => {
-        match $any_entity {
-            crate::entity::AnyEntity::Sim($bound_name) => { $arm }
-            crate::entity::AnyEntity::Player($bound_name) => { $arm }
-            crate::entity::AnyEntity::Team($bound_name) => { $arm }
-            crate::entity::AnyEntity::Game($bound_name) => { $arm }
-            crate::entity::AnyEntity::Standings($bound_name) => { $arm }
-            crate::entity::AnyEntity::Season($bound_name) => { $arm }
+    pub fn name(&self) -> &'static str {
+        match self {
+            AnyEntityRaw::Sim(_) => { Sim::name() }
+            AnyEntityRaw::Player(_) => { Player::name() }
+            AnyEntityRaw::Team(_) => { Team::name() }
+            AnyEntityRaw::Game(_) => { Game::name() }
+            AnyEntityRaw::Standings(_) => { Standings::name() }
+            AnyEntityRaw::Season(_) => { Season::name() }
         }
-    };
-}
+    }
 
-#[macro_export]
-macro_rules! with_any_entity_raw {
-    ($any_entity:expr, $bound_name:ident => $arm:expr) => {
-        match $any_entity {
-            crate::entity::AnyEntityRaw::Sim($bound_name) => { $arm }
-            crate::entity::AnyEntityRaw::Player($bound_name) => { $arm }
-            crate::entity::AnyEntityRaw::Team($bound_name) => { $arm }
-            crate::entity::AnyEntityRaw::Game($bound_name) => { $arm }
-            crate::entity::AnyEntityRaw::Standings($bound_name) => { $arm }
-            crate::entity::AnyEntityRaw::Season($bound_name) => { $arm }
-        }
-    };
+    pub fn id(&self) -> Uuid {
+        with_any_entity_raw!(self, raw => raw.id())
+    }
 }
-
-pub use with_any_entity_raw;
 
 #[macro_export]
 macro_rules! entity_dispatch {

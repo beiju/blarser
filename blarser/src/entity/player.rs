@@ -6,7 +6,7 @@ use uuid::Uuid;
 use partial_information::{Rerollable, PartialInformationCompare, MaybeKnown};
 use partial_information_derive::PartialInformationCompare;
 
-use crate::entity::{AnyEntity, Entity, EntityRaw};
+use crate::entity::{AnyEntity, Entity, EntityRaw, WrongEntityError};
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, PartialInformationCompare)]
 pub struct Item {
@@ -118,7 +118,7 @@ impl Display for Player {
 
 
 impl EntityRaw for <Player as PartialInformationCompare>::Raw {
-    type Entity=Player;
+    type Entity = Player;
 
     fn name() -> &'static str { "player" }
     fn id(&self) -> Uuid { self.id }
@@ -137,6 +137,17 @@ impl EntityRaw for <Player as PartialInformationCompare>::Raw {
 impl Into<AnyEntity> for Player {
     fn into(self) -> AnyEntity {
         AnyEntity::Player(self)
+    }
+}
+
+impl TryFrom<AnyEntity> for Player {
+    type Error = WrongEntityError;
+
+    fn try_from(value: AnyEntity) -> Result<Self, Self::Error> {
+        match value {
+            AnyEntity::Player(value) => { Ok(value) }
+            other => Err(WrongEntityError { expected: "player", found: other.name() })
+        }
     }
 }
 

@@ -8,7 +8,9 @@ CREATE TABLE approvals
 
     message                 TEXT NOT NULL,
     approved                BOOLEAN,
-    explanation             TEXT
+    explanation             TEXT,
+
+    UNIQUE (entity_type, entity_id, perceived_at),
 
     CONSTRAINT approvals_explained CHECK ( approved = (explanation IS NOT NULL)  )
 );

@@ -5,7 +5,7 @@ use uuid::Uuid;
 use partial_information::PartialInformationCompare;
 use partial_information_derive::PartialInformationCompare;
 
-use crate::entity::{AnyEntity, Entity, EntityRaw};
+use crate::entity::{AnyEntity, Entity, EntityRaw, WrongEntityError};
 use crate::events::{AnyEvent, EarlseasonStart};
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, PartialInformationCompare)]
@@ -92,6 +92,17 @@ impl EntityRaw for <Sim as PartialInformationCompare>::Raw {
 impl Into<AnyEntity> for Sim {
     fn into(self) -> AnyEntity {
         AnyEntity::Sim(self)
+    }
+}
+
+impl TryFrom<AnyEntity> for Sim {
+    type Error = WrongEntityError;
+
+    fn try_from(value: AnyEntity) -> Result<Self, Self::Error> {
+        match value {
+            AnyEntity::Sim(value) => { Ok(value) }
+            other => Err(WrongEntityError { expected: "sin", found: other.name() })
+        }
     }
 }
 

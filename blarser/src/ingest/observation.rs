@@ -4,14 +4,14 @@ use thiserror::Error;
 
 use crate::api::ChroniclerItem;
 use crate::entity::{AnyEntityRaw, EntityParseError, EntityRaw};
-use crate::state::{NewVersion, Version, VersionLink};
 use crate::with_any_entity_raw;
 
 
+#[derive(Clone)]
 pub struct Observation {
     // TODO Reorganize so this isn't pub
     pub entity_raw: AnyEntityRaw,
-    perceived_at: DateTime<Utc>,
+    pub perceived_at: DateTime<Utc>,
 }
 
 impl Observation {
@@ -175,89 +175,3 @@ enum IngestError {
     DieselError(#[from] diesel::result::Error),
 }
 
-// fn observe_generation(
-//     new_generation: &mut MergedSuccessors<NewVersion>,
-//     version_conflicts: &mut Option<Vec<(i32, String)>>,
-//     versions: Vec<(Version, Vec<VersionLink>)>,
-//     entity_raw: &EntityRaw,
-//     perceived_at: DateTime<Utc>,
-// ) {
-//     for (version, parents) in versions {
-//         let version_id = version.id;
-//         match observe_entity(version, entity_raw, perceived_at) {
-//             Ok(new_version) => {
-//                 let parent_ids = parents.into_iter()
-//                     .map(|parent| parent.parent_id)
-//                     .collect();
-//                 new_generation.add_multi_parent_successor(parent_ids, new_version);
-//
-//                 // Successful application! Don't need to track conflicts any more.
-//                 *version_conflicts = None;
-//             }
-//             Err(conflicts) => {
-//                 if let Some(version_conflicts) = version_conflicts {
-//                     let conflicts = format!("- {}", conflicts.into_iter().map(|c| c.to_string()).join("\n- "));
-//                     version_conflicts.push((version_id, conflicts));
-//                 }
-//             }
-//         }
-//     }
-// }
-//
-// fn observe_entity(
-//     version: Version,
-//     entity_raw: &EntityRaw,
-//     perceived_at: DateTime<Utc>
-// ) -> Result<NewVersion, Vec<Conflict>> {
-//     let entity_type = version.entity.entity_type();
-//     let entity_id = version.entity.entity_id();
-//
-//     let mut new_entity = version.entity;
-//     let conflicts = new_entity.observe(entity_raw);
-//     if !conflicts.is_empty() {
-//         return Err(conflicts);
-//     }
-//
-//     let mut observations = version.observations;
-//     observations.push(perceived_at);
-//     Ok(NewVersion {
-//         ingest_id: version.ingest_id,
-//         entity_type,
-//         entity_id,
-//         start_time: version.start_time,
-//         entity: new_entity.to_json(),
-//         from_event: version.from_event,
-//         event_aux_data: todo!(),
-//         observations,
-//     })
-// }
-//
-//
-// fn advance_generation(
-//     c: &PgConnection,
-//     ingest_id: i32,
-//     new_generation: &mut MergedSuccessors<NewVersion>,
-//     event: Event,
-//     prev_generation: Vec<Version>
-// ) {
-//     let event_time = event.event_time;
-//     let from_event = event.id;
-//
-//     for prev_version in prev_generation {
-//         let parent = prev_version.id;
-//
-//         let new_entity = event.forward(prev_version.entity, prev_version.event_aux_data);
-//         let new_version = NewVersion {
-//             ingest_id,
-//             entity_type: new_entity.entity_type(),
-//             entity_id: new_entity.entity_id(),
-//             start_time: event.time(),
-//             entity: new_entity,
-//             from_event: 0,
-//             event_aux_data: Default::default(),
-//             observations: vec![]
-//         };
-//
-//         new_generation.add_successor(parent, new_version);
-//     }
-// }

@@ -8,7 +8,7 @@ use partial_information::{PartialInformationCompare, MaybeKnown};
 use partial_information_derive::PartialInformationCompare;
 
 use crate::parse::{Base};
-use crate::entity::{AnyEntity, Entity, EntityRaw, Player};
+use crate::entity::{AnyEntity, Entity, EntityRaw, Player, WrongEntityError};
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]
@@ -154,6 +154,17 @@ impl Display for Game {
 impl Into<AnyEntity> for Game {
     fn into(self) -> AnyEntity {
         AnyEntity::Game(self)
+    }
+}
+
+impl TryFrom<AnyEntity> for Game {
+    type Error = WrongEntityError;
+
+    fn try_from(value: AnyEntity) -> Result<Self, Self::Error> {
+        match value {
+            AnyEntity::Game(value) => { Ok(value) }
+            other => Err(WrongEntityError { expected: "game", found: other.name() })
+        }
     }
 }
 

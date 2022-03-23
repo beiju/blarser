@@ -81,14 +81,13 @@ async fn run_time_until(ingest: FeedIngest, start_time: DateTime<Utc>, end_time:
 }
 
 async fn apply_feed_event(ingest: FeedIngest, feed_event: EventuallyEvent) -> FeedIngest {
-    // FOR DEBUGGING: Pause at the first event where parsing isn't implemented yet, so I can test
-    //   Chron ingest.
-    if feed_event.r#type == EventType::StormWarning {
-        info!("Feed ingest: pausing (debug)");
-        loop {
-            tokio::time::sleep(tokio::time::Duration::from_secs(100000)).await;
-        }
-    }
+    // FOR DEBUGGING: Pause as soon as we've ingested enough for the first Chron ingest to kick off
+    // if feed_event.created.to_string().as_str() > "2021-12-06 16:00:05.056 UTC" {
+    //     info!("Feed ingest: pausing forever for debug");
+    //     loop {
+    //         tokio::time::sleep(tokio::time::Duration::from_secs(100000)).await;
+    //     }
+    // }
     ingest.run_transaction(move |state| {
         info!("Feed ingest: Applying new {:?} event at {}", feed_event.r#type, feed_event.created);
         let (event, effects) = parse_feed_event(feed_event, &state)?;

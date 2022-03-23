@@ -8,12 +8,14 @@ mod earlseason_start;
 mod lets_go;
 mod play_ball;
 mod half_inning;
+mod storm_warning;
 
 pub use start::Start;
 pub use earlseason_start::EarlseasonStart;
 pub use lets_go::LetsGo;
 pub use play_ball::PlayBall;
 pub use half_inning::HalfInning;
+pub use storm_warning::StormWarning;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -34,6 +36,7 @@ pub enum AnyEvent {
     LetsGo(LetsGo),
     PlayBall(PlayBall),
     HalfInning(HalfInning),
+    StormWarning(StormWarning),
 }
 
 #[macro_export]
@@ -45,6 +48,7 @@ macro_rules! with_any_event {
             crate::events::AnyEvent::LetsGo($bound_name) => { $arm }
             crate::events::AnyEvent::PlayBall($bound_name) => { $arm }
             crate::events::AnyEvent::HalfInning($bound_name) => { $arm }
+            crate::events::AnyEvent::StormWarning($bound_name) => { $arm }
         }
     };
 }
@@ -63,6 +67,7 @@ impl AnyEvent {
             AnyEvent::LetsGo(_) => { "LetsGo" }
             AnyEvent::PlayBall(_) => { "PlayBall" }
             AnyEvent::HalfInning(_) => { "HalfInning" }
+            AnyEvent::StormWarning(_) => { "StormWarning" }
         }
     }
 }

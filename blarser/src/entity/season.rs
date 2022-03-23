@@ -5,7 +5,7 @@ use uuid::Uuid;
 use partial_information::PartialInformationCompare;
 use partial_information_derive::PartialInformationCompare;
 
-use crate::entity::{AnyEntity, Entity, EntityRaw};
+use crate::entity::{AnyEntity, Entity, EntityRaw, WrongEntityError};
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]
@@ -52,6 +52,17 @@ impl EntityRaw for <Season as PartialInformationCompare>::Raw {
 impl Into<AnyEntity> for Season {
     fn into(self) -> AnyEntity {
         AnyEntity::Season(self)
+    }
+}
+
+impl TryFrom<AnyEntity> for Season {
+    type Error = WrongEntityError;
+
+    fn try_from(value: AnyEntity) -> Result<Self, Self::Error> {
+        match value {
+            AnyEntity::Season(value) => { Ok(value) }
+            other => Err(WrongEntityError { expected: "season", found: other.name() })
+        }
     }
 }
 

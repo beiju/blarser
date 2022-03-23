@@ -1,7 +1,6 @@
 mod task;
 mod feed;
 mod chron;
-mod approvals_db;
 mod observation;
 mod observation_event;
 mod parse;

@@ -7,7 +7,7 @@ use crate::schema::*;
 use crate::events::AnyEvent;
 
 // define your enum
-#[derive(PartialEq, Debug, DbEnum)]
+#[derive(PartialEq, Debug, DbEnum, Clone)]
 #[DieselType = "Event_source"]
 pub enum EventSource {
     Start,
@@ -25,11 +25,12 @@ pub(crate) struct NewEvent {
     pub(crate) data: serde_json::Value,
 }
 
-#[derive(Identifiable, Queryable, PartialEq, Debug)]
+#[derive(Identifiable, Queryable, PartialEq, Debug, Clone)]
 #[table_name = "events"]
 pub(crate) struct DbEvent {
     pub id: i32,
     pub ingest_id: i32,
+
     pub time: DateTime<Utc>,
     pub source: EventSource,
     pub data: serde_json::Value,
@@ -44,7 +45,7 @@ pub(crate) struct NewEventEffect {
     pub(crate) aux_data: serde_json::Value,
 }
 
-#[derive(Identifiable, Queryable, Associations, PartialEq, Debug)]
+#[derive(Identifiable, Queryable, Associations, PartialEq, Debug,)]
 #[belongs_to(parent = "DbEvent", foreign_key = "event_id")]
 #[table_name = "event_effects"]
 pub struct EventEffect {

@@ -9,8 +9,9 @@ use partial_information::PartialInformationCompare;
 use crate::{entity, with_any_entity, with_any_entity_raw};
 use crate::entity::{Entity, AnyEntity, EntityRaw};
 use crate::events::{AnyEvent, Start as StartEvent};
-use crate::ingest::{Observation};
-use crate::state::{NewVersion, Version};
+use crate::ingest::Observation;
+use crate::state::{ApprovalState, NewVersion, Version, VersionLink};
+use crate::state::approvals_db::NewApproval;
 use crate::state::events_db::{DbEvent, EventEffect, EventSource, NewEvent, NewEventEffect, StoredEvent};
 use crate::state::versions_db::{DbVersionWithEnd, NewVersionLink};
 
@@ -91,6 +92,35 @@ impl<'conn> StateInterface<'conn> {
         Ok(events.zip(effects).collect())
     }
 
+    pub fn get_events_for_entity_raw_after<EntityRawT: EntityRaw>(&self, entity_raw: &EntityRawT, after_time: DateTime<Utc>) -> QueryResult<Vec<(StoredEvent, Vec<EventEffect>)>> {
+        use crate::schema::events::dsl as events;
+        use crate::schema::event_effects::dsl as event_effects;
+
+        let (mut events, effects): (Vec<_>, Vec<_>) = events::events
+            .inner_join(event_effects::event_effects.on(event_effects::event_id.eq(events::id)))
+            // Is from the right ingest
+            .filter(events::ingest_id.eq(self.ingest_id))
+            // Is for the right entity type
+            .filter(event_effects::entity_type.eq(EntityRawT::name()))
+            // Is for the right entity id (null entity id = all entities of that type)
+            .filter(event_effects::entity_id.eq(entity_raw.id()).or(event_effects::entity_id.is_null()))
+            // Is after the requested time. Needs to be ge, not gt
+            .filter(events::time.ge(after_time))
+            .order(events::time.asc())
+            .get_results::<(DbEvent, EventEffect)>(self.conn)?
+            .into_iter()
+            .unzip();
+
+        events.dedup();
+
+        let effects = effects.grouped_by(&events);
+
+        let events = events.into_iter()
+            .map(DbEvent::parse);
+
+        Ok(events.zip(effects).collect())
+    }
+
     pub fn get_versions_at_generic<EntityT: Entity>(&self, entity_id: Option<Uuid>, at_time: Option<DateTime<Utc>>) -> QueryResult<Vec<Version<EntityT>>> {
         use crate::schema::versions_with_end::dsl as versions;
         let base_query = versions::versions_with_end
@@ -130,6 +160,51 @@ impl<'conn> StateInterface<'conn> {
 
     pub fn get_latest_versions<EntityT: Entity>(&self, entity_id: Option<Uuid>) -> QueryResult<Vec<Version<EntityT>>> {
         self.get_versions_at_generic::<EntityT>(entity_id, None)
+    }
+
+    pub fn get_versions_for_entity_raw_between<EntityRawT: EntityRaw>(&self, entity_raw: &EntityRawT, time_start: DateTime<Utc>, time_end: DateTime<Utc>) -> QueryResult<Vec<(i32, Vec<(Version<EntityRawT::Entity>, Vec<VersionLink>)>)>> {
+        use crate::schema::versions_with_end::dsl as versions;
+        let versions = versions::versions_with_end
+            // Is from the right ingest
+            .filter(versions::ingest_id.eq(self.ingest_id))
+            // Has the right entity type
+            .filter(versions::entity_type.eq(EntityRawT::name()))
+            // Has the right entity id
+            .filter(versions::entity_id.eq(entity_raw.id()))
+            // Has not been terminated
+            .filter(versions::terminated.is_null())
+            // Version's range ends after the requested range starts
+            .filter(versions::end_time.gt(time_start).or(versions::end_time.is_null()))
+            // Version's range starts at or before the requested range ends
+            .filter(versions::start_time.le(time_end))
+            // Order by time
+            .order(versions::from_event)
+            .get_results::<DbVersionWithEnd>(self.conn)?;
+
+        let version_links = VersionLink::belonging_to(&versions)
+            .get_results::<VersionLink>(self.conn)?
+            .grouped_by(&versions);
+
+        // I couldn't figure out how to do this with simple iterators
+        let mut versions_grouped = Vec::new();
+        let mut iter = versions.into_iter().zip(version_links).peekable();
+        while let Some((first_version, links)) = iter.next() {
+            let group_event = first_version.from_event;
+            let mut group = vec![(first_version.parse(), links)];
+
+            while let Some((version, _)) = iter.peek() {
+                if version.from_event == group_event {
+                    let (version, links) = iter.next().unwrap();
+                    group.push((version.parse(), links));
+                } else {
+                    break;
+                }
+            }
+
+            versions_grouped.push((group_event, group));
+        }
+
+        Ok(versions_grouped)
     }
 
     pub fn save_start_event(&self, event: AnyEvent, effects: Vec<(String, Option<Uuid>, serde_json::Value)>) -> QueryResult<StoredEvent> {
@@ -265,5 +340,27 @@ impl<'conn> StateInterface<'conn> {
 
             Ok(inserted_versions)
         })
+    }
+
+    pub fn upsert_approval(&self, entity_type: &str, entity_id: Uuid, perceived_at: DateTime<Utc>, message: &str) -> QueryResult<ApprovalState> {
+        use crate::schema::approvals::dsl as approvals;
+
+        let (id, approved) = diesel::insert_into(approvals::approvals)
+            .values(NewApproval { entity_type, entity_id, perceived_at, message })
+            .on_conflict((approvals::entity_type, approvals::entity_id, approvals::perceived_at))
+            .do_update()
+            .set(approvals::message.eq(message))
+            .returning((approvals::id, approvals::approved))
+            .get_result::<(i32, Option<bool>)>(self.conn)?;
+
+        if let Some(approved) = approved {
+            if approved {
+                Ok(ApprovalState::Approved)
+            } else {
+                Ok(ApprovalState::Rejected)
+            }
+        } else {
+            Ok(ApprovalState::Pending(id))
+        }
     }
 }

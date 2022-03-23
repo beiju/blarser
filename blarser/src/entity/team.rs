@@ -6,7 +6,7 @@ use uuid::Uuid;
 use partial_information::{PartialInformationCompare, Spurious};
 use partial_information_derive::PartialInformationCompare;
 
-use crate::entity::{AnyEntity, Entity, EntityRaw};
+use crate::entity::{AnyEntity, Entity, EntityRaw, WrongEntityError};
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]
@@ -121,6 +121,17 @@ impl Into<AnyEntity> for Team {
 impl Entity for Team {
     fn name() -> &'static str { "team" }
     fn id(&self) -> Uuid { self.id }
+}
+
+impl TryFrom<AnyEntity> for Team {
+    type Error = WrongEntityError;
+
+    fn try_from(value: AnyEntity) -> Result<Self, Self::Error> {
+        match value {
+            AnyEntity::Team(value) => { Ok(value) }
+            other => Err(WrongEntityError { expected: "team", found: other.name() })
+        }
+    }
 }
 
 impl Team {
