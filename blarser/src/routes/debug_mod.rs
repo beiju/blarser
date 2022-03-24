@@ -7,6 +7,7 @@ use blarser::{entity, entity_dispatch};
 use itertools::Itertools;
 use serde::Serialize;
 use anyhow::anyhow;
+use im::HashMap;
 
 use blarser::db::BlarserDbConn;
 use blarser::ingest::IngestTaskHolder;
@@ -35,28 +36,20 @@ pub async fn debug(conn: BlarserDbConn, ingest_holder: &State<IngestTaskHolder>)
     Ok(Template::render("debug", DebugTemplateParams { entities }))
 }
 
-// #[rocket::get("/debug/<entity_type>/<entity_id>")]
-// pub async fn entity_debug_json(conn: BlarserDbConn, ingest: &State<IngestTaskHolder>, entity_type: String, entity_id: Uuid) -> Result<Value, ApiError> {
-//     let ingest_id = ingest.latest_ingest_id()
-//         .ok_or_else(|| ApiError::InternalError("There is no ingest yet".to_string()))?;
-//
-//     let versions_info = conn.run(move |c| {
-//         entity_dispatch!(entity_type => get_entity_debug(c, ingest_id, &entity_type, entity_id);
-//                          other => return ApiError::InternalError(anyhow!("Incorrect entity type")));
-//
-//     }).await
-//         .map_err(|e| ApiError::InternalError(anyhow!(e).context("In entity debug json route").to_string()))?;
-//
-//     let result: Vec<_> = versions_info.into_iter()
-//         .scan(String::from(""), |prev_entity_str, (version, event, version_parents)| {
-//             Some(build_json(prev_entity_str, &version, event, version_parents))
-//         })
-//         .try_collect()
-//         .map_err(|e| ApiError::InternalError(e.context("In entity debug json route").to_string()))?;
-//
-//     Ok(json!(result))
-// }
-//
+#[rocket::get("/debug/<entity_type>/<entity_id>")]
+pub async fn entity_debug_json(conn: BlarserDbConn, ingest: &State<IngestTaskHolder>, entity_type: String, entity_id: Uuid) -> Result<Value, ApiError> {
+    let ingest_id = ingest.latest_ingest_id()
+        .ok_or_else(|| ApiError::InternalError("There is no ingest yet".to_string()))?;
+
+    let versions_info = conn.run(move |c| {
+        let state = StateInterface::new(c, ingest_id);
+        state.get_entity_debug(&entity_type, entity_id)
+    }).await
+        .map_err(|e| ApiError::InternalError(anyhow!(e).context("In entity debug json route").to_string()))?;
+
+    Ok(json!(versions_info))
+}
+
 // fn span_wrap(string: &str, class_name: &str) -> String {
 //     string.lines().map(|val| {
 //         format!("<span class=\"{}\">{}\n</span>", class_name, val)

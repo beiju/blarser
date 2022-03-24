@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use chrono::{DateTime, Utc};
 use diesel::{prelude::*, PgConnection, QueryResult, insert_into};
 use itertools::Itertools;
@@ -7,7 +8,7 @@ use uuid::Uuid;
 use serde_json::json;
 use partial_information::PartialInformationCompare;
 
-use crate::{entity, entity_dispatch, with_any_entity, with_any_entity_raw};
+use crate::{entity, with_any_entity, with_any_entity_raw};
 use crate::entity::{Entity, AnyEntity, EntityRaw, entity_description};
 use crate::events::{AnyEvent, Start as StartEvent};
 use crate::ingest::Observation;
@@ -28,6 +29,19 @@ pub struct EntityDescription {
     description: String,
 }
 
+#[derive(Serialize, Queryable)]
+#[serde(rename_all = "camelCase")]
+pub struct VersionDebug {
+    pub id: i32,
+    pub parent_ids: Vec<i32>,
+    pub event: serde_json::Value,
+    pub event_aux: serde_json::Value,
+    pub entity: serde_json::Value,
+    pub entity_diff: Option<serde_json::Value>,
+    pub terminated: Option<String>,
+    pub observations: Vec<DateTime<Utc>>,
+}
+
 macro_rules! reader_with_id {
     ($fn_name:ident, $read_type:ty) => {
         pub fn $fn_name<ReadT: PartialEq, Reader: Fn($read_type) -> ReadT>(&self, id: Uuid, reader: Reader) -> QueryResult<Vec<ReadT>> {
@@ -42,6 +56,16 @@ macro_rules! reader_with_nil_id {
             self.read_entity(Some(Uuid::nil()), reader)
         }
     };
+}
+
+use diesel::sql_types;
+sql_function! {
+    #[aggregate]
+    fn array_agg(expr: sql_types::Integer) -> sql_types::Array<sql_types::Integer>;
+}
+
+sql_function! {
+    fn coalesce(x: sql_types::Nullable<sql_types::Array<sql_types::Integer>>, y: sql_types::Array<sql_types::Integer>) -> sql_types::Array<sql_types::Integer>;
 }
 
 impl<'conn> StateInterface<'conn> {
@@ -396,5 +420,49 @@ impl<'conn> StateInterface<'conn> {
             .collect();
 
         Ok(result)
+    }
+
+    pub fn get_entity_debug(&self, entity_type: &str, entity_id: Uuid) -> QueryResult<Vec<VersionDebug>> {
+        use crate::schema::versions_with_end::dsl as versions;
+        use crate::schema::events::dsl as events;
+        use crate::schema::version_links::dsl as version_links;
+
+        let results = versions::versions_with_end
+            // Database constraints should ensure inner join and left join are identical
+            .inner_join(events::events.on(events::id.eq(versions::from_event)))
+            // Is from the right ingest
+            .filter(versions::ingest_id.eq(self.ingest_id))
+            // Is the requested entity type
+            .filter(versions::entity_type.eq(entity_type))
+            // Is the requested entity id
+            .filter(versions::entity_id.eq(entity_id))
+            .select((
+                versions::id,
+                coalesce(
+                    version_links::version_links
+                        .filter(version_links::child_id.eq(versions::id))
+                        .select(array_agg(version_links::parent_id))
+                        .single_value(),
+                    diesel::dsl::sql("'{}'"),
+                ),
+                events::data,
+                versions::event_aux_data,
+                versions::entity,
+                diesel::dsl::sql::<sql_types::Nullable<sql_types::Jsonb>>("null"), // Gets filled in with entity_diff later
+                versions::terminated,
+                versions::observations
+            ))
+            .get_results::<VersionDebug>(self.conn)?;
+        //
+        // let id_map: HashMap<_, _> = results.iter()
+        //     .enumerate()
+        //     .map(|(i, version)| (version.id, i))
+        //     .collect();
+        //
+        // for mut version in results {
+        //
+        // }
+
+        Ok(results)
     }
 }

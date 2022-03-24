@@ -17,7 +17,7 @@ async function addEntityView(entityType, entityId) {
     // --------------------------------
     const svgSelection = d3.select("#main").append("svg");
     svgSelection
-        .attr("id", entityId)
+        .attr("id", `${entityType}:${entityId}`)
         .attr("viewBox", [0, 0, width, height].join(" "))
         .attr("width", width);
 
@@ -51,9 +51,8 @@ async function addEntityView(entityType, entityId) {
         .attr("transform", ({x, y}) => `translate(${x}, ${y})`)
         .attr("title", ({data}) => data.event)
         .attr("data-bs-content", ({data}) => (
-            (data.terminated ? `<p>Terminated: ${data.terminated}</p>\n` : "\n") +
-            (data.observations.map(obs => `<p>Observed by: ${obs}</p>`).join("\n")) +
-            `<pre class="tooltip-diff">${data.diff}</pre>`
+            (data.terminated ? `<p>Terminated: ${data.terminated}</p>\n` : "") +
+            (data.observations.map(obs => `<p>Observed by: ${obs}</p>`).join("\n"))
         ));
 
     // Plot node circles
@@ -74,8 +73,8 @@ async function addEntityView(entityType, entityId) {
         .attr("fill", "white");
 }
 
-async function removeEntityView(entityId) {
-    document.getElementById(entityId).remove()
+async function removeEntityView(entityType, entityId) {
+    document.getElementById(`${entityType}:${entityId}`).remove()
 }
 
 document.addEventListener("DOMContentLoaded", function (event) {

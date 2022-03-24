@@ -145,6 +145,14 @@ pub struct VersionLink {
     pub child_id: i32,
 }
 
+fn test() {
+    use crate::schema::versions::dsl as versions;
+    let x = versions::versions
+        .filter(versions::id.eq(0))
+        .select(versions::id);
+
+}
+
 pub fn get_entity_debug<EntityT: Entity>(c: &PgConnection, ingest_id: i32, entity_type: &str, entity_id: Uuid) -> QueryResult<Vec<(Version<EntityT>, AnyEvent, Vec<VersionLink>)>> {
     use crate::schema::versions::dsl as versions;
     use crate::schema::events::dsl as events;
