@@ -34,6 +34,7 @@ pub struct EntityDescription {
 pub struct VersionDebug {
     pub id: i32,
     pub parent_ids: Vec<i32>,
+    pub start_time: DateTime<Utc>,
     pub event: serde_json::Value,
     pub event_aux: serde_json::Value,
     pub entity: serde_json::Value,
@@ -445,6 +446,7 @@ impl<'conn> StateInterface<'conn> {
                         .single_value(),
                     diesel::dsl::sql("'{}'"),
                 ),
+                versions::start_time,
                 events::data,
                 versions::event_aux_data,
                 versions::entity,

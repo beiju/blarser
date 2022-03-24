@@ -4,7 +4,11 @@ async function addEntityView(entityType, entityId) {
     // fetch data and render
     const resp = await fetch(`/debug/${entityType}/${entityId}`);
     const data = await resp.json();
-    const dag = d3.dagStratify()(data);
+    const dag = d3.dagStratify()
+        // d3-dag can't handle integer ids, so these funcs stringify them
+        .id(datum => datum.id + "")
+        .parentIds(datum => datum.parentIds.map(id => id + ""))
+        (data);
     const nodeRadius = 20;
     const layout = d3
         .sugiyama() // base layout
@@ -49,23 +53,24 @@ async function addEntityView(entityType, entityId) {
         .append("g")
         .attr("class", "version")
         .attr("transform", ({x, y}) => `translate(${x}, ${y})`)
-        .attr("title", ({data}) => data.event)
+        .attr("title", ({data}) => data.startTime)
         .attr("data-bs-content", ({data}) => (
             (data.terminated ? `<p>Terminated: ${data.terminated}</p>\n` : "") +
-            (data.observations.map(obs => `<p>Observed by: ${obs}</p>`).join("\n"))
+            (data.observations.map(obs => `<p>Observed by: ${obs}</p>`).join("\n") +
+            `<pre>${JSON.stringify(data.entity, null, 4)}</pre>`)
         ));
 
     // Plot node circles
     nodes
         .append("ellipse")
-        .attr("rx", nodeRadius*5)
+        .attr("rx", nodeRadius * 5)
         .attr("ry", nodeRadius)
         .attr("fill", (n) => n.data.terminated ? "red" : (n.data.observations.length > 0 ? "green" : "blue"));
 
     // Add text to nodes
     nodes
         .append("text")
-        .text((d) => d.data.type)
+        .text(({ data }) => data.startTime)
         .attr("font-weight", "bold")
         .attr("font-family", "sans-serif")
         .attr("text-anchor", "middle")
