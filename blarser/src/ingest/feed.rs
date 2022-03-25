@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use diesel::QueryResult;
-use rocket::info;
+use rocket::{info, warn};
 use futures::{pin_mut, StreamExt};
 use uuid::Uuid;
 
@@ -40,7 +40,7 @@ fn apply_event_effect<EntityT: Entity, EventT: Event>(
     successors: &mut MergedSuccessors<(AnyEntity, serde_json::Value, Vec<DateTime<Utc>>)>,
     entity_id: Option<Uuid>,
     event: &EventT,
-    aux_info: &serde_json::Value
+    aux_info: &serde_json::Value,
 ) -> QueryResult<()> {
     for version in state.get_versions_at::<EntityT>(entity_id, event.time())? {
         let new_entity = event.forward(version.entity.into(), aux_info.clone());
@@ -53,11 +53,18 @@ fn apply_event_effect<EntityT: Entity, EventT: Event>(
 fn apply_event_effects<'a, EventT: Event>(
     state: &StateInterface,
     event: &EventT,
-    effects: impl IntoIterator<Item=&'a (String, Option<Uuid>, serde_json::Value)>
+    effects: impl IntoIterator<Item=&'a (String, Option<Uuid>, serde_json::Value)>,
 ) -> QueryResult<Vec<((AnyEntity, serde_json::Value, Vec<DateTime<Utc>>), Vec<i32>)>> {
     let mut successors = MergedSuccessors::new();
 
     for (entity_type, entity_id, aux_info) in effects {
+        if let Some(entity_id) = entity_id {
+            info!("Feed ingest: Applying event to {} {} with aux_info {:?}",
+                  entity_type, entity_id, aux_info);
+        } else {
+            info!("Feed ingest: Applying event to all {} entities with aux_info {:?}",
+                  entity_type, aux_info);
+        }
         entity_dispatch!(entity_type.as_str() => apply_event_effect::<EventT>(state, &mut successors, *entity_id, event, aux_info);
                          other => panic!("Tried to apply event to unknown entity type {}", other))?;
     }
@@ -78,6 +85,10 @@ async fn run_time_until(ingest: FeedIngest, start_time: DateTime<Utc>, end_time:
                     (effect.entity_type, effect.entity_id, aux_data)
                 })
                 .collect();
+
+            if effects.len() == 0 {
+                warn!("{} event has no effects", stored_event.event.type_name());
+            }
 
             let successors = with_any_event!(stored_event.event, event => apply_event_effects(&state, &event, &effects))?;
             state.save_successors(successors, stored_event.time, stored_event.id)?;
@@ -101,6 +112,11 @@ async fn apply_feed_event(ingest: FeedIngest, feed_event: EventuallyEvent) -> Fe
     ingest.run_transaction(move |state| {
         info!("Feed ingest: Applying new {:?} event at {}", feed_event.r#type, feed_event.created);
         let (event, effects) = parse_feed_event(&feed_event, &state)?;
+
+        if effects.len() == 0 {
+            warn!("{} event has no effects", event.type_name());
+        }
+
         let successors = with_any_event!(&event, event => apply_event_effects(&state, event, &effects))?;
         let stored_event = StateInterface::save_feed_event(&state, event, effects)?;
         state.save_successors(successors, stored_event.time, stored_event.id)

@@ -225,7 +225,7 @@ impl<'conn> StateInterface<'conn> {
 
     pub fn get_versions_for_entity_raw_between<EntityRawT: EntityRaw>(&self, entity_raw: &EntityRawT, time_start: DateTime<Utc>, time_end: DateTime<Utc>) -> QueryResult<Vec<(i32, Vec<(Version<EntityRawT::Entity>, Vec<VersionLink>)>)>> {
         use crate::schema::versions_with_end::dsl as versions;
-        let versions = self.query_versions_with_end(EntityRawT::name(), entity_raw.id())
+        let versions_query = self.query_versions_with_end(EntityRawT::name(), entity_raw.id())
             // Has not been terminated
             .filter(versions::terminated.is_null())
             // Version's range ends after the requested range starts
@@ -233,7 +233,10 @@ impl<'conn> StateInterface<'conn> {
             // Version's range starts at or before the requested range ends
             .filter(versions::start_time.le(time_end))
             // Order by time
-            .order(versions::from_event)
+            .order(versions::from_event);
+
+        info!("Query: {}", diesel::debug_query(&versions_query));
+        let versions = versions_query
             .get_results::<DbVersionWithEnd>(self.conn)?;
 
         let version_links = VersionLink::belonging_to(&versions)

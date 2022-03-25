@@ -4,6 +4,21 @@ use itertools::{iproduct, Itertools};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use partial_information::MaybeKnown;
+use nom::{
+    IResult,
+    bytes::complete::{tag},
+    character::complete::digit1,
+    branch::alt,
+    bytes::complete::{take_while1},
+    character::complete::{multispace1},
+    error::VerboseError,
+    multi::many_till,
+    sequence::terminated
+};
+use nom_supreme::{
+    final_parser::final_parser,
+    ParserExt
+};
 
 use crate::api::EventuallyEvent;
 use crate::entity::AnyEntity;
@@ -17,11 +32,50 @@ pub struct HalfInning {
     time: DateTime<Utc>,
 }
 
-#[derive(Serialize, Deserialize)]
-struct StartingPitchers {
-    home: (Uuid, String),
-    away: (Uuid, String),
+#[derive(Clone, Serialize, Deserialize)]
+pub struct WhichInning {
+    pub top_of_inning: bool,
+    pub inning: i32,
+    pub batting_team_name: String,
 }
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct StartingPitchers {
+    pub home: (Uuid, String),
+    pub away: (Uuid, String),
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct HalfInningAux {
+    #[serde(flatten)]
+    pub which_inning: WhichInning,
+    pub starting_pitchers: Option<StartingPitchers>,
+}
+
+pub fn parse_which_inning(input: &str) -> IResult<&str, WhichInning, VerboseError<&str>> {
+    let (input, top_or_bottom) = alt((tag("Top"), tag("Bottom")))(input)?;
+    let (input, _) = tag(" of ")(input)?;
+    let (input, inning_str) = digit1(input)?;
+    let (input, _) = tag(", ")(input)?;
+    let (input, (batting_team_name, _)) = many_till(terminated(take_while1(|c: char| !c.is_whitespace()), multispace1),
+                                                    tag("batting.").all_consuming())(input)?;
+
+    let top_of_inning = match top_or_bottom {
+        "Top" => true,
+        "Bottom" => false,
+        other => panic!("Invalid value for top_or_bottom: {}", other),
+    };
+
+    let inning: i32 = inning_str.parse().expect("Failed to parse inning number");
+
+    Ok((input, WhichInning {
+        top_of_inning,
+        // Parsed inning is 1-indexed and stored inning should be 0-indexed
+        inning: inning - 1,
+        batting_team_name: batting_team_name.join(""),
+    }))
+}
+
 
 fn read_active_pitcher(state: &StateInterface, team_id: Uuid, day: i32) -> QueryResult<Vec<(Uuid, String)>> {
     let result = state.read_team(team_id, |team| {
@@ -49,38 +103,30 @@ impl HalfInning {
         let (away_team, home_team): (&Uuid, &Uuid) = feed_event.team_tags.iter().collect_tuple()
             .expect("HalfInning event must have exactly two teams");
 
-        // TODO Better to parse this, then make it available in aux info
-        let is_first_half = state.read_game(game_id, |game| {
-            game.inning == 0 && game.top_of_inning
-        })?;
+        let which_inning = final_parser(parse_which_inning)(&feed_event.description)
+            .expect("Error parsing inning");
 
-        // TODO Surely this can be done without collect()ing so much
-        let effects = is_first_half.into_iter()
-            .map(|is_first_half| {
-                let out = if is_first_half {
-                    let home_pitcher = read_active_pitcher(state, *home_team, feed_event.day)?;
-                    let away_pitcher = read_active_pitcher(state, *away_team, feed_event.day)?;
+        let starting_pitchers = if which_inning.inning == 0 && which_inning.top_of_inning {
+            let home_pitcher = read_active_pitcher(state, *home_team, feed_event.day)?;
+            let away_pitcher = read_active_pitcher(state, *away_team, feed_event.day)?;
 
-                    iproduct!(home_pitcher, away_pitcher)
-                        .map(|(home, away)| Some(StartingPitchers { home, away }))
-                        .collect_vec()
-                } else {
-                    Vec::new()
-                };
+            iproduct!(home_pitcher, away_pitcher)
+                .map(|(home, away)| Some(StartingPitchers { home, away }))
+                .collect_vec()
+        } else {
+            vec![None]
+        };
 
-                Ok::<_, diesel::result::Error>(out)
-            })
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .flatten()
-            .map(|aux| {
+        let effects = starting_pitchers.into_iter()
+            .map(move |starting_pitchers| {
+                let aux = HalfInningAux { which_inning: which_inning.clone(), starting_pitchers };
                 ("game".to_string(), Some(game_id), serde_json::to_value(aux).unwrap())
             })
             .collect();
 
         let event = Self {
             game_update: GameUpdate::parse(feed_event),
-            time
+            time,
         };
 
         Ok((AnyEvent::HalfInning(event), effects))
@@ -93,7 +139,7 @@ impl Event for HalfInning {
     }
 
     fn forward(&self, entity: AnyEntity, aux: serde_json::Value) -> AnyEntity {
-        let aux: Option<StartingPitchers> = serde_json::from_value(aux)
+        let aux: HalfInningAux = serde_json::from_value(aux)
             .expect("Failed to parse StartingPitchers from HalfInning event");
 
         match entity {
@@ -108,7 +154,7 @@ impl Event for HalfInning {
                 game.half_inning_score = 0.0;
 
                 // The first halfInning event re-sets the data that PlayBall clears
-                if let Some(starting_pitchers) = aux {
+                if let Some(starting_pitchers) = aux.starting_pitchers {
                     let (home_pitcher, home_pitcher_name) = starting_pitchers.home;
                     let (away_pitcher, away_pitcher_name) = starting_pitchers.away;
 
@@ -119,7 +165,7 @@ impl Event for HalfInning {
                 }
 
                 game.into()
-            },
+            }
             other => panic!("HalfInning event does not apply to {}", other.name())
         }
     }
