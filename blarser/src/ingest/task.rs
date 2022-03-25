@@ -1,7 +1,9 @@
 use std::collections::HashMap;
+use std::convert::Infallible;
 use std::sync::{Arc, Mutex as StdMutex, Mutex};
 use chrono::{DateTime, Duration, Utc};
-use diesel::{ExpressionMethods, OptionalExtension, QueryDsl, QueryResult, RunQueryDsl};
+use diesel::{ExpressionMethods, OptionalExtension, PgConnection, QueryDsl, QueryResult, RunQueryDsl};
+use diesel::result::Error;
 use rocket::info;
 use tokio::sync::{watch, oneshot};
 use uuid::Uuid;
@@ -54,6 +56,20 @@ struct IngestImpl {
     pub db: BlarserDbConn,
 }
 
+pub trait IsSerializationFailure {
+    fn is_serialization_failure(&self) -> bool;
+}
+
+impl IsSerializationFailure for diesel::result::Error {
+    fn is_serialization_failure(&self) -> bool {
+        if let diesel::result::Error::DatabaseError(diesel::result::DatabaseErrorKind::SerializationFailure, _) = self {
+            true
+        } else {
+            false
+        }
+    }
+}
+
 impl IngestImpl {
     #[allow(dead_code)]
     pub async fn run<F, R>(&self, f: F) -> R
@@ -66,17 +82,30 @@ impl IngestImpl {
     }
 
     pub async fn run_transaction<F, T, E>(&self, f: F) -> Result<T, E>
-        where F: FnOnce(StateInterface) -> Result<T, E> + Send + 'static,
+        where F: Fn(StateInterface) -> Result<T, E> + Send + Clone + 'static,
               T: Send + 'static,
-              E: From<diesel::result::Error> + Send + 'static {
+              E: From<diesel::result::Error> + IsSerializationFailure + Send + 'static {
         let ingest_id = self.ingest_id;
-        self.db.run(move |c| {
+        let closure = move |c: &mut PgConnection| {
             c.build_transaction()
                 .serializable()
                 .run(|| {
                     f(StateInterface::new(c, ingest_id))
                 })
-        }).await
+        };
+
+        loop {
+            let result = self.db.run(closure.clone()).await;
+
+            if let Err(user_err) = &result {
+                if user_err.is_serialization_failure() {
+                    info!("Retrying operation after serialization failure");
+                    continue;
+                }
+            }
+
+            return result;
+        }
     }
 }
 
@@ -114,9 +143,9 @@ impl ChronIngest {
 
     //noinspection DuplicatedCode
     pub async fn run_transaction<F, T, E>(&self, f: F) -> Result<T, E>
-        where F: FnOnce(StateInterface) -> Result<T, E> + Send + 'static,
+        where F: Fn(StateInterface) -> Result<T, E> + Send + Clone + 'static,
               T: Send + 'static,
-              E: From<diesel::result::Error> + Send + 'static {
+              E: From<diesel::result::Error> + IsSerializationFailure + Send + 'static {
         self.ingest_impl.run_transaction(f).await
     }
 
@@ -193,9 +222,9 @@ impl FeedIngest {
 
     //noinspection DuplicatedCode
     pub async fn run_transaction<F, T, E>(&self, f: F) -> Result<T, E>
-        where F: FnOnce(StateInterface) -> Result<T, E> + Send + 'static,
+        where F: Fn(StateInterface) -> Result<T, E> + Send + Clone + 'static,
               T: Send + 'static,
-              E: From<diesel::result::Error> + Send + 'static {
+              E: From<diesel::result::Error> + IsSerializationFailure + Send + 'static {
         self.ingest_impl.run_transaction(f).await
     }
 

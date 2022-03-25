@@ -4,7 +4,7 @@ use crate::api::{EventType, EventuallyEvent};
 use crate::events::{self, AnyEvent};
 use crate::state::StateInterface;
 
-pub fn parse_feed_event(feed_event: EventuallyEvent, state: &StateInterface) -> QueryResult<(AnyEvent, Vec<(String, Option<Uuid>, serde_json::Value)>)> {
+pub fn parse_feed_event(feed_event: &EventuallyEvent, state: &StateInterface) -> QueryResult<(AnyEvent, Vec<(String, Option<Uuid>, serde_json::Value)>)> {
     match feed_event.r#type {
         EventType::LetsGo => events::LetsGo::parse(feed_event),
         EventType::PlayBall => events::PlayBall::parse(feed_event),

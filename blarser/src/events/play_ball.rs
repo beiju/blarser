@@ -16,7 +16,7 @@ pub struct PlayBall {
 }
 
 impl PlayBall {
-    pub fn parse(feed_event: EventuallyEvent) -> QueryResult<(AnyEvent, Vec<(String, Option<Uuid>, serde_json::Value)>)> {
+    pub fn parse(feed_event: &EventuallyEvent) -> QueryResult<(AnyEvent, Vec<(String, Option<Uuid>, serde_json::Value)>)> {
         let time = feed_event.created;
         let game_id = feed_event.game_id().expect("PlayBall event must have a game id");
 

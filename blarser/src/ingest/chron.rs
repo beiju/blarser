@@ -12,7 +12,7 @@ use thiserror::Error;
 use partial_information::Conflict;
 
 use crate::api::chronicler;
-use crate::ingest::task::ChronIngest;
+use crate::ingest::task::{ChronIngest, IsSerializationFailure};
 use crate::entity::{AnyEntity, Entity, EntityParseError, EntityRaw};
 use crate::ingest::observation::Observation;
 use crate::state::{EventEffect, MergedSuccessors, NewVersion, StateInterface, Version, VersionLink};
@@ -116,7 +116,7 @@ fn kmerge_stream(streams: impl Iterator<Item=PinnedObservationStream>) -> impl S
 pub async fn init_chron(ingest: &ChronIngest, start_at_time: &'static str, start_time_parsed: DateTime<Utc>) {
     let initial_versions: Vec<_> = initial_state(start_at_time).collect().await;
 
-    ingest.run_transaction(move |state| {
+    ingest.run(move |state| {
         state.add_initial_versions(start_time_parsed, initial_versions.into_iter())
     }).await
         .expect("Failed to save initial versions");
@@ -216,6 +216,15 @@ pub enum ChronIngestError {
 
     #[error(transparent)]
     DbError(#[from] diesel::result::Error),
+}
+
+impl IsSerializationFailure for ChronIngestError {
+    fn is_serialization_failure(&self) -> bool {
+        match self {
+            ChronIngestError::DbError(db_err) => db_err.is_serialization_failure(),
+            _ => false
+        }
+    }
 }
 
 pub type ChronIngestResult<T> = Result<T, ChronIngestError>;

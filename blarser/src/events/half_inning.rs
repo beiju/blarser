@@ -42,7 +42,7 @@ fn read_active_pitcher(state: &StateInterface, team_id: Uuid, day: i32) -> Query
 }
 
 impl HalfInning {
-    pub fn parse(feed_event: EventuallyEvent, state: &StateInterface) -> QueryResult<(AnyEvent, Vec<(String, Option<Uuid>, serde_json::Value)>)> {
+    pub fn parse(feed_event: &EventuallyEvent, state: &StateInterface) -> QueryResult<(AnyEvent, Vec<(String, Option<Uuid>, serde_json::Value)>)> {
         let time = feed_event.created;
 
         let game_id = feed_event.game_id().expect("HalfInning event must have a game id");

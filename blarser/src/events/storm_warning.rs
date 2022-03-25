@@ -15,7 +15,7 @@ pub struct StormWarning {
 }
 
 impl StormWarning {
-    pub fn parse(feed_event: EventuallyEvent) -> QueryResult<(AnyEvent, Vec<(String, Option<Uuid>, serde_json::Value)>)> {
+    pub fn parse(feed_event: &EventuallyEvent) -> QueryResult<(AnyEvent, Vec<(String, Option<Uuid>, serde_json::Value)>)> {
         let time = feed_event.created;
         let game_id = feed_event.game_id().expect("StormWarning event must have a game id");
         let event = Self {

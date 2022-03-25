@@ -20,7 +20,7 @@ pub struct GameUpdate {
 }
 
 impl GameUpdate {
-    pub fn parse(event: EventuallyEvent) -> GameUpdate {
+    pub fn parse(event: &EventuallyEvent) -> GameUpdate {
         let last_update_full = event.metadata.siblings.iter().map(|event| {
             let team_tags = match event.r#type {
                 EventType::AddedMod | EventType::RunsScored | EventType::WinCollectedRegular => {
