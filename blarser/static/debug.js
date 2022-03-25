@@ -55,11 +55,11 @@ async function addEntityView(entityType, entityId) {
         .attr("transform", ({x, y}) => `translate(${x}, ${y})`)
         .attr("title", ({data}) => Object.keys(data.event).join(", "))
         .attr("data-bs-content", ({data}) => (
-            (data.terminated ? `<p>Terminated: ${data.terminated}</p>\n` : "") +
-            (data.observations.map(obs => `<p>Observed by: ${obs}</p>`).join("\n") +
-                `<pre>${JSON.stringify(data.event, null, 4)}</pre>` +
-                `<pre>${JSON.stringify(data.eventAux, null, 4)}</pre>` +
-                `<pre>${JSON.stringify(data.entity, null, 4)}</pre>`)
+            (data.terminated ? `<h3>Terminated</h3><p>${data.terminated}</p>\n` : "") +
+            (data.observations.length > 0 ? "<h3>Observed</h3><ul>" + data.observations.map(obs => `<li>${obs}</li>`).join("\n") + "</ul>" : "") +
+                `<h3>Event</h3><pre>${JSON.stringify(data.event, null, 4)}</pre>` +
+                `<h3>Event Aux</h3><pre>${JSON.stringify(data.eventAux, null, 4)}</pre>` +
+                `<h3>Entity</h3><pre>${JSON.stringify(data.entity, null, 4)}</pre>`
         ));
 
     // Plot node circles
