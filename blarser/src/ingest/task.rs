@@ -94,7 +94,7 @@ impl IngestImpl {
                 })
         };
 
-        loop {
+        for _ in 0..20 {
             let result = self.db.run(closure.clone()).await;
 
             if let Err(user_err) = &result {
@@ -106,6 +106,8 @@ impl IngestImpl {
 
             return result;
         }
+
+        panic!("Serialization failure recovery behavior is stuck (over 20 iterations)");
     }
 }
 
