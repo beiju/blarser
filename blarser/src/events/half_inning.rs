@@ -30,6 +30,8 @@ use crate::state::StateInterface;
 pub struct HalfInning {
     game_update: GameUpdate,
     time: DateTime<Utc>,
+    #[serde(flatten)]
+    which_inning: WhichInning,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -43,13 +45,6 @@ pub struct WhichInning {
 pub struct StartingPitchers {
     pub home: (Uuid, String),
     pub away: (Uuid, String),
-}
-
-#[derive(Clone, Serialize, Deserialize)]
-pub struct HalfInningAux {
-    #[serde(flatten)]
-    pub which_inning: WhichInning,
-    pub starting_pitchers: Option<StartingPitchers>,
 }
 
 pub fn parse_which_inning(input: &str) -> IResult<&str, WhichInning, VerboseError<&str>> {
@@ -118,8 +113,7 @@ impl HalfInning {
         };
 
         let effects = starting_pitchers.into_iter()
-            .map(move |starting_pitchers| {
-                let aux = HalfInningAux { which_inning: which_inning.clone(), starting_pitchers };
+            .map(move |aux| {
                 ("game".to_string(), Some(game_id), serde_json::to_value(aux).unwrap())
             })
             .collect();
@@ -127,6 +121,7 @@ impl HalfInning {
         let event = Self {
             game_update: GameUpdate::parse(feed_event),
             time,
+            which_inning,
         };
 
         Ok((AnyEvent::HalfInning(event), effects))
@@ -139,7 +134,7 @@ impl Event for HalfInning {
     }
 
     fn forward(&self, entity: AnyEntity, aux: serde_json::Value) -> AnyEntity {
-        let aux: HalfInningAux = serde_json::from_value(aux)
+        let aux: Option<StartingPitchers> = serde_json::from_value(aux)
             .expect("Failed to parse StartingPitchers from HalfInning event");
 
         match entity {
@@ -154,7 +149,7 @@ impl Event for HalfInning {
                 game.half_inning_score = 0.0;
 
                 // The first halfInning event re-sets the data that PlayBall clears
-                if let Some(starting_pitchers) = aux.starting_pitchers {
+                if let Some(starting_pitchers) = aux {
                     let (home_pitcher, home_pitcher_name) = starting_pitchers.home;
                     let (away_pitcher, away_pitcher_name) = starting_pitchers.away;
 
