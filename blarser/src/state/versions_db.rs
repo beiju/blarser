@@ -244,35 +244,3 @@ pub fn get_entity_debug<EntityT: Entity>(c: &PgConnection, ingest_id: i32, entit
 //
 //     Ok((loaded_events, versions_with_parents))
 // }
-
-
-pub fn terminate_versions(c: &PgConnection, mut to_update: Vec<i32>, reason: String) -> QueryResult<()> {
-    use crate::schema::versions::dsl as versions;
-
-    #[derive(QueryableByName)]
-    #[table_name = "versions"]
-    struct VersionId {
-        id: i32,
-    }
-
-    while !to_update.is_empty() {
-        diesel::update(versions::versions.filter(versions::id.eq_any(to_update)))
-            .set(versions::terminated.eq(Some(&reason)))
-            .execute(c)?;
-
-        to_update = diesel::sql_query("
-            select v.id
-            from versions v
-                     join versions_parents vp on vp.child = v.id
-                     join versions p on p.id = vp.parent
-            where v.terminated is null
-            group by v.id
-            having count(*) = count(p.terminated)
-        ").get_results::<VersionId>(c)?
-            .into_iter()
-            .map(|v| v.id)
-            .collect();
-    }
-
-    Ok(())
-}

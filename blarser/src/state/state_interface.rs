@@ -7,6 +7,7 @@ use serde::Serialize;
 use uuid::Uuid;
 use serde_json::json;
 use partial_information::PartialInformationCompare;
+use std::iter;
 
 use crate::{entity, with_any_entity, with_any_entity_raw};
 use crate::entity::{Entity, AnyEntity, EntityRaw, entity_description};
@@ -137,23 +138,38 @@ impl<'conn> StateInterface<'conn> {
         Ok(events.zip(effects).collect())
     }
 
-    pub fn get_events_for_entity_raw_after<EntityRawT: EntityRaw>(&self, entity_raw: &EntityRawT, after_time: DateTime<Utc>) -> QueryResult<Vec<(StoredEvent, Vec<EventEffect>)>> {
+    pub fn get_events_for_versions_after<EntityRawT: EntityRaw>(&self, entity_raw: &EntityRawT, after_time: DateTime<Utc>) -> QueryResult<Vec<(StoredEvent, Vec<EventEffect>)>> {
         use crate::schema::events::dsl as events;
         use crate::schema::event_effects::dsl as event_effects;
 
-        let (mut events, effects): (Vec<_>, Vec<_>) = events::events
+        let all_events_for_entity = events::events
             .inner_join(event_effects::event_effects.on(event_effects::event_id.eq(events::id)))
             // Is from the right ingest
             .filter(events::ingest_id.eq(self.ingest_id))
             // Is for the right entity type
             .filter(event_effects::entity_type.eq(EntityRawT::name()))
             // Is for the right entity id (null entity id = all entities of that type)
-            .filter(event_effects::entity_id.eq(entity_raw.id()).or(event_effects::entity_id.is_null()))
-            // Is after the requested time. Needs to be ge, not gt
-            .filter(events::time.ge(after_time))
+            .filter(event_effects::entity_id.eq(entity_raw.id()).or(event_effects::entity_id.is_null()));
+
+        // I assume these could be unioned somehow, and the documentation says it works, but the
+        // compiler disagrees and I'm not inclined to investigate that right now.
+        let active_event = all_events_for_entity
+            // Is before or at the requested time
+            .filter(events::time.le(after_time))
+            // Select just the latest one
+            .order(events::time.desc())
+            .limit(1)
+            .get_result::<(DbEvent, EventEffect)>(self.conn)?;
+
+        let later_events = all_events_for_entity
+            // Is strictly after the requested time
+            .filter(events::time.gt(after_time))
+            // Select all in ascending order
             .order(events::time.asc())
-            .get_results::<(DbEvent, EventEffect)>(self.conn)?
-            .into_iter()
+            .get_results::<(DbEvent, EventEffect)>(self.conn)?;
+
+        let (mut events, effects): (Vec<_>, Vec<_>) = iter::once(active_event)
+            .chain(later_events)
             .unzip();
 
         events.dedup();
@@ -337,9 +353,9 @@ impl<'conn> StateInterface<'conn> {
         Ok::<_, diesel::result::Error>(inserted)
     }
 
-    pub fn save_successors(&self, successors: Vec<((AnyEntity, serde_json::Value), Vec<i32>)>, start_time: DateTime<Utc>, from_event: i32) -> QueryResult<Vec<i32>> {
+    pub fn save_successors(&self, successors: impl IntoIterator<Item=((AnyEntity, serde_json::Value, Vec<DateTime<Utc>>), Vec<i32>)>, start_time: DateTime<Utc>, from_event: i32) -> QueryResult<Vec<i32>> {
         let (new_versions, parents): (Vec<_>, Vec<_>) = successors.into_iter()
-            .map(|((entity, event_aux_data), parents)| {
+            .map(|((entity, event_aux_data, observations), parents)| {
                 let entity_type = entity.name();
                 let new_version = with_any_entity!(entity, e => NewVersion {
                     ingest_id: self.ingest_id,
@@ -349,7 +365,7 @@ impl<'conn> StateInterface<'conn> {
                     entity: serde_json::to_value(e).expect("Error serializing successor entity"),
                     from_event,
                     event_aux_data,
-                    observations: vec![],
+                    observations,
                 });
 
                 (new_version, parents)
@@ -401,6 +417,37 @@ impl<'conn> StateInterface<'conn> {
         } else {
             Ok(ApprovalState::Pending(id))
         }
+    }
+
+    pub fn terminate_versions(&self, mut to_update: Vec<i32>, reason: String) -> QueryResult<()> {
+        use crate::schema::versions::dsl as versions;
+
+        #[derive(QueryableByName)]
+        #[table_name = "versions"]
+        struct VersionId {
+            id: i32,
+        }
+
+        while !to_update.is_empty() {
+            diesel::update(versions::versions.filter(versions::id.eq_any(to_update)))
+                .set(versions::terminated.eq(Some(&reason)))
+                .execute(self.conn)?;
+
+            to_update = diesel::sql_query("
+            select v.id
+            from versions v
+                     join version_links vp on vp.child_id = v.id
+                     join versions p on p.id = vp.parent_id
+            where v.terminated is null
+            group by v.id
+            having count(*) = count(p.terminated)
+        ").get_results::<VersionId>(self.conn)?
+                .into_iter()
+                .map(|v| v.id)
+                .collect();
+        }
+
+        Ok(())
     }
 
     pub fn get_recently_updated_entity_descriptions(&self, limit: i64) -> QueryResult<Vec<EntityDescription>> {

@@ -35,16 +35,26 @@ pub async fn ingest_feed(mut ingest: FeedIngest, start_at_time: &'static str, st
     }
 }
 
-fn apply_event_effect<EntityT: Entity, EventT: Event>(state: &StateInterface, successors: &mut MergedSuccessors<(AnyEntity, serde_json::Value)>, entity_id: Option<Uuid>, event: &EventT, aux_info: &serde_json::Value) -> QueryResult<()> {
+fn apply_event_effect<EntityT: Entity, EventT: Event>(
+    state: &StateInterface,
+    successors: &mut MergedSuccessors<(AnyEntity, serde_json::Value, Vec<DateTime<Utc>>)>,
+    entity_id: Option<Uuid>,
+    event: &EventT,
+    aux_info: &serde_json::Value
+) -> QueryResult<()> {
     for version in state.get_versions_at::<EntityT>(entity_id, event.time())? {
         let new_entity = event.forward(version.entity.into(), aux_info.clone());
-        successors.add_successor(version.id, (new_entity, aux_info.clone()));
+        successors.add_successor(version.id, (new_entity, aux_info.clone(), vec![]));
     }
 
     Ok(())
 }
 
-fn apply_event_effects<'a, EventT: Event>(state: &StateInterface, event: &EventT, effects: impl IntoIterator<Item=&'a (String, Option<Uuid>, serde_json::Value)>) -> QueryResult<Vec<((AnyEntity, serde_json::Value), Vec<i32>)>> {
+fn apply_event_effects<'a, EventT: Event>(
+    state: &StateInterface,
+    event: &EventT,
+    effects: impl IntoIterator<Item=&'a (String, Option<Uuid>, serde_json::Value)>
+) -> QueryResult<Vec<((AnyEntity, serde_json::Value, Vec<DateTime<Utc>>), Vec<i32>)>> {
     let mut successors = MergedSuccessors::new();
 
     for (entity_type, entity_id, aux_info) in effects {
