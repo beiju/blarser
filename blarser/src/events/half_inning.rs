@@ -4,25 +4,12 @@ use itertools::{iproduct, Itertools};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use partial_information::MaybeKnown;
-use nom::{
-    IResult,
-    bytes::complete::{tag},
-    character::complete::digit1,
-    branch::alt,
-    bytes::complete::{take_while1},
-    character::complete::{multispace1},
-    error::VerboseError,
-    multi::many_till,
-    sequence::terminated
-};
-use nom_supreme::{
-    final_parser::final_parser,
-    ParserExt
-};
+use nom::{branch::alt, bytes::complete::tag, character::complete::digit1, Finish, IResult, Parser};
+use nom_supreme::{error::ErrorTree, ParserExt};
 
 use crate::api::EventuallyEvent;
 use crate::entity::AnyEntity;
-use crate::events::{AnyEvent, Event};
+use crate::events::{AnyEvent, Event, nom_utils};
 use crate::events::game_update::GameUpdate;
 use crate::state::StateInterface;
 
@@ -47,13 +34,13 @@ pub struct StartingPitchers {
     pub away: (Uuid, String),
 }
 
-pub fn parse_which_inning(input: &str) -> IResult<&str, WhichInning, VerboseError<&str>> {
+pub fn parse_which_inning(input: &str) -> IResult<&str, WhichInning, ErrorTree<&str>> {
     let (input, top_or_bottom) = alt((tag("Top"), tag("Bottom")))(input)?;
     let (input, _) = tag(" of ")(input)?;
     let (input, inning_str) = digit1(input)?;
     let (input, _) = tag(", ")(input)?;
-    let (input, (batting_team_name, _)) = many_till(terminated(take_while1(|c: char| !c.is_whitespace()), multispace1),
-                                                    tag("batting.").all_consuming())(input)?;
+    let (input, batting_team_name) = nom_utils::greedy_text(tag(" batting.").all_consuming()).parse(input)?;
+    let (input, _) = tag(" batting.").all_consuming().parse(input)?;
 
     let top_of_inning = match top_or_bottom {
         "Top" => true,
@@ -67,10 +54,9 @@ pub fn parse_which_inning(input: &str) -> IResult<&str, WhichInning, VerboseErro
         top_of_inning,
         // Parsed inning is 1-indexed and stored inning should be 0-indexed
         inning: inning - 1,
-        batting_team_name: batting_team_name.join(""),
+        batting_team_name: batting_team_name.to_string(),
     }))
 }
-
 
 fn read_active_pitcher(state: &StateInterface, team_id: Uuid, day: i32) -> QueryResult<Vec<(Uuid, String)>> {
     let result = state.read_team(team_id, |team| {
@@ -98,7 +84,7 @@ impl HalfInning {
         let (away_team, home_team): (&Uuid, &Uuid) = feed_event.team_tags.iter().collect_tuple()
             .expect("HalfInning event must have exactly two teams");
 
-        let which_inning = final_parser(parse_which_inning)(&feed_event.description)
+        let (_, which_inning) = parse_which_inning(&feed_event.description).finish()
             .expect("Error parsing inning");
 
         let starting_pitchers = if which_inning.inning == 0 && which_inning.top_of_inning {

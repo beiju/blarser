@@ -33,7 +33,7 @@ diesel-derive-enum = { version = "1.1.1", features = ["postgres"] }
 uuid = { version = "0.8.2", features = ["serde"] }
 async-recursion = "0.3.2"
 nom = { version = "7.1.1", features = ["alloc"] }
-nom-supreme = "0.7.0"
+nom-supreme = { version = "0.7.0", features = ["error"] }
 owning_ref = "0.4.1"
 partial_information = { path = "../partial_information" }
 partial_information_derive = { path = "../partial_information_derive" }

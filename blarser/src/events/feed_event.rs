@@ -423,28 +423,6 @@
 //     });
 // }
 //
-// fn batter_up(state: &impl StateInterface, event: &EventuallyEvent) {
-//     let game_id = event.game_id().expect(concat!("BatterUp event must have a game id"));
-//     state.with_game(game_id, |mut game| {
-//         let (batter_count, batter_id) = *state.read_team(game.team_at_bat().team, |team| {
-//             let batter_count = 1 + game.team_at_bat().team_batter_count
-//                 .expect("Team batter count must be populated during a game");
-//             (batter_count, team.batter_for_count(batter_count as usize))
-//         }).iter().exactly_one().expect("Can't handle ambiguity in team lineup order");
-//
-//         let batter_name = state.read_player(batter_id, |player| { player.name })
-//             .iter().exactly_one().expect("Can't handle ambiguity in player name").clone();
-//
-//         game.team_at_bat_mut().team_batter_count = Some(batter_count);
-//         game.team_at_bat_mut().batter = Some(batter_id);
-//         game.team_at_bat_mut().batter_name = Some(batter_name);
-//
-//         game.game_update_common(event);
-//
-//         Ok(vec![game])
-//     })
-// }
-//
 // fn strike(state: &impl StateInterface, event: &EventuallyEvent) {
 //     let game_id = event.game_id().expect(concat!("Strike event must have a game id"));
 //     state.with_game(game_id, |mut game| {
