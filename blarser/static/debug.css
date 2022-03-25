@@ -1,7 +1,14 @@
 .popover {
     box-sizing: border-box;
     max-height: 100%;
+    max-width: 550px;
     overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.popover-body {
+    overflow-y: auto;
 }
 
 .tooltip-diff .diff-same {

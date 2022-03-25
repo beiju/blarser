@@ -1,14 +1,13 @@
-let tooltip;
-
 async function addEntityView(entityType, entityId) {
     // fetch data and render
     const resp = await fetch(`/debug/${entityType}/${entityId}`);
-    const data = await resp.json();
-    const dag = d3.dagStratify()
-        // d3-dag can't handle integer ids, so these funcs stringify them
-        .id(datum => datum.id + "")
-        .parentIds(datum => datum.parentIds.map(id => id + ""))
-        (data);
+    const {nodes, edges} = await resp.json();
+    const dag = d3.dagConnect()
+        // d3-dag can't handle integer ids, so the accessors also stringify them
+        .sourceId(({parentId}) => parentId + "")
+        .targetId(({childId}) => childId + "")
+        .nodeDatum(nodeId => nodes[nodeId])
+        (edges);
     const nodeRadius = 20;
     const layout = d3
         .sugiyama() // base layout
@@ -45,32 +44,35 @@ async function addEntityView(entityType, entityId) {
         .attr("stroke", "black");
 
     // Select nodes
-    const nodes = svgSelection
+    const nodesSvg = svgSelection
         .append("g")
         .selectAll("g")
         .data(dag.descendants())
         .enter()
-        .append("g")
+        .append("a")
         .attr("class", "version")
+        .attr("tabindex", ({value}) => value)
         .attr("transform", ({x, y}) => `translate(${x}, ${y})`)
-        .attr("title", ({data}) => data.startTime)
+        .attr("title", ({data}) => Object.keys(data.event).join(", "))
         .attr("data-bs-content", ({data}) => (
             (data.terminated ? `<p>Terminated: ${data.terminated}</p>\n` : "") +
             (data.observations.map(obs => `<p>Observed by: ${obs}</p>`).join("\n") +
-            `<pre>${JSON.stringify(data.entity, null, 4)}</pre>`)
+                `<pre>${JSON.stringify(data.event, null, 4)}</pre>` +
+                `<pre>${JSON.stringify(data.eventAux, null, 4)}</pre>` +
+                `<pre>${JSON.stringify(data.entity, null, 4)}</pre>`)
         ));
 
     // Plot node circles
-    nodes
+    nodesSvg
         .append("ellipse")
         .attr("rx", nodeRadius * 5)
         .attr("ry", nodeRadius)
         .attr("fill", (n) => n.data.terminated ? "red" : (n.data.observations.length > 0 ? "green" : "blue"));
 
     // Add text to nodes
-    nodes
+    nodesSvg
         .append("text")
-        .text(({ data }) => data.startTime)
+        .text(({data}) => Object.keys(data.event).join(", "))
         .attr("font-weight", "bold")
         .attr("font-family", "sans-serif")
         .attr("text-anchor", "middle")
@@ -89,7 +91,7 @@ document.addEventListener("DOMContentLoaded", function (event) {
         selector: '.version',
         placement: 'right',
         html: true,
-        trigger: 'hover',
+        trigger: 'focus hover',
         boundary: main,
     })
 

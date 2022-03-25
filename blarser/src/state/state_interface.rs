@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use chrono::{DateTime, Utc};
-use diesel::{prelude::*, PgConnection, QueryResult, insert_into};
+use diesel::{prelude::*, dsl, PgConnection, QueryResult, insert_into};
 use itertools::Itertools;
 use rocket::info;
 use serde::Serialize;
@@ -16,6 +16,8 @@ use crate::state::{ApprovalState, NewVersion, Version, VersionLink};
 use crate::state::approvals_db::NewApproval;
 use crate::state::events_db::{DbEvent, EventEffect, EventSource, NewEvent, NewEventEffect, StoredEvent};
 use crate::state::versions_db::{DbVersionWithEnd, NewVersionLink};
+
+use crate::schema::versions_with_end::dsl as versions_dsl;
 
 pub struct StateInterface<'conn> {
     conn: &'conn PgConnection,
@@ -33,14 +35,25 @@ pub struct EntityDescription {
 #[serde(rename_all = "camelCase")]
 pub struct VersionDebug {
     pub id: i32,
-    pub parent_ids: Vec<i32>,
     pub start_time: DateTime<Utc>,
     pub event: serde_json::Value,
     pub event_aux: serde_json::Value,
     pub entity: serde_json::Value,
-    pub entity_diff: Option<serde_json::Value>,
     pub terminated: Option<String>,
     pub observations: Vec<DateTime<Utc>>,
+}
+
+#[derive(Serialize, Queryable)]
+#[serde(rename_all = "camelCase")]
+pub struct VersionLinkDebug {
+    pub parent_id: i32,
+    pub child_id: i32,
+}
+
+#[derive(Serialize)]
+pub struct EntityVersionsDebug {
+    pub edges: Vec<VersionLinkDebug>,
+    pub nodes: HashMap<i32, VersionDebug>,
 }
 
 macro_rules! reader_with_id {
@@ -196,13 +209,7 @@ impl<'conn> StateInterface<'conn> {
 
     pub fn get_versions_for_entity_raw_between<EntityRawT: EntityRaw>(&self, entity_raw: &EntityRawT, time_start: DateTime<Utc>, time_end: DateTime<Utc>) -> QueryResult<Vec<(i32, Vec<(Version<EntityRawT::Entity>, Vec<VersionLink>)>)>> {
         use crate::schema::versions_with_end::dsl as versions;
-        let versions = versions::versions_with_end
-            // Is from the right ingest
-            .filter(versions::ingest_id.eq(self.ingest_id))
-            // Has the right entity type
-            .filter(versions::entity_type.eq(EntityRawT::name()))
-            // Has the right entity id
-            .filter(versions::entity_id.eq(entity_raw.id()))
+        let versions = self.query_versions_with_end(EntityRawT::name(), entity_raw.id())
             // Has not been terminated
             .filter(versions::terminated.is_null())
             // Version's range ends after the requested range starts
@@ -423,48 +430,49 @@ impl<'conn> StateInterface<'conn> {
         Ok(result)
     }
 
-    pub fn get_entity_debug(&self, entity_type: &str, entity_id: Uuid) -> QueryResult<Vec<VersionDebug>> {
+    fn query_versions_with_end<'a>(&self, entity_type: &'a str, entity_id: Uuid) ->
+    dsl::FindBy<dsl::FindBy<dsl::FindBy<versions_dsl::versions_with_end,
+        versions_dsl::ingest_id, i32>,
+        versions_dsl::entity_type, &'a str>,
+        versions_dsl::entity_id, Uuid> {
         use crate::schema::versions_with_end::dsl as versions;
-        use crate::schema::events::dsl as events;
-        use crate::schema::version_links::dsl as version_links;
 
-        let results = versions::versions_with_end
-            // Database constraints should ensure inner join and left join are identical
-            .inner_join(events::events.on(events::id.eq(versions::from_event)))
+        versions::versions_with_end
             // Is from the right ingest
             .filter(versions::ingest_id.eq(self.ingest_id))
             // Is the requested entity type
             .filter(versions::entity_type.eq(entity_type))
             // Is the requested entity id
             .filter(versions::entity_id.eq(entity_id))
+    }
+
+    pub fn get_entity_debug(&self, entity_type: &str, entity_id: Uuid) -> QueryResult<EntityVersionsDebug> {
+        use crate::schema::versions_with_end::dsl as versions;
+        use crate::schema::events::dsl as events;
+        use crate::schema::version_links::dsl as version_links;
+
+        let nodes = self.query_versions_with_end(entity_type, entity_id)
+            // Database constraints should ensure inner join and left join are identical
+            .inner_join(events::events.on(events::id.eq(versions::from_event)))
             .select((
                 versions::id,
-                coalesce(
-                    version_links::version_links
-                        .filter(version_links::child_id.eq(versions::id))
-                        .select(array_agg(version_links::parent_id))
-                        .single_value(),
-                    diesel::dsl::sql("'{}'"),
-                ),
                 versions::start_time,
                 events::data,
                 versions::event_aux_data,
                 versions::entity,
-                diesel::dsl::sql::<sql_types::Nullable<sql_types::Jsonb>>("null"), // Gets filled in with entity_diff later
                 versions::terminated,
                 versions::observations
             ))
-            .get_results::<VersionDebug>(self.conn)?;
-        //
-        // let id_map: HashMap<_, _> = results.iter()
-        //     .enumerate()
-        //     .map(|(i, version)| (version.id, i))
-        //     .collect();
-        //
-        // for mut version in results {
-        //
-        // }
+            .get_results::<VersionDebug>(self.conn)?
+            .into_iter()
+            .map(|version| (version.id, version))
+            .collect();
 
-        Ok(results)
+        let edges = self.query_versions_with_end(entity_type, entity_id)
+            .inner_join(version_links::version_links.on(version_links::parent_id.eq(versions::id)))
+            .select((version_links::parent_id, version_links::child_id))
+            .get_results::<VersionLinkDebug>(self.conn)?;
+
+        Ok(EntityVersionsDebug { edges, nodes })
     }
 }
