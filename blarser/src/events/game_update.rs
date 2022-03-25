@@ -83,7 +83,8 @@ impl GameUpdate {
         };
 
         Self {
-            play_count: event.metadata.play.expect("Game event must have a play count"),
+            // play and playCount are out of sync by exactly 1
+            play_count: 1 + event.metadata.play.expect("Game event must have a play count"),
             last_update_full,
             score,
         }
@@ -92,8 +93,7 @@ impl GameUpdate {
 
 impl GameUpdate {
     pub fn forward(&self, game: &mut Game) {
-        // play and playCount are out of sync by exactly 1
-        game.play_count = 1 + self.play_count;
+        game.play_count = self.play_count;
 
         // last_update is all the descriptions of the sibling events, separated by \n, and with an
         // extra \n at the end

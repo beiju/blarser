@@ -49,6 +49,7 @@ impl HalfInning {
         let (away_team, home_team): (&Uuid, &Uuid) = feed_event.team_tags.iter().collect_tuple()
             .expect("HalfInning event must have exactly two teams");
 
+        // TODO Better to parse this, then make it available in aux info
         let is_first_half = state.read_game(game_id, |game| {
             game.inning == 0 && game.top_of_inning
         })?;

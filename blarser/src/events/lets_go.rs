@@ -44,16 +44,10 @@ impl Event for LetsGo {
             AnyEntity::Game(mut game) => {
                 self.game_update.forward(&mut game);
 
-                game.game_start_phase = 20;
-                game.inning = -1;
-                game.phase = 2;
-                game.top_of_inning = false;
-
-                // Yeah, it unsets pitchers. Why, blaseball.
-                game.home.pitcher = None;
-                game.home.pitcher_name = Some(MaybeKnown::Known(String::new()));
-                game.away.pitcher = None;
-                game.away.pitcher_name = Some(MaybeKnown::Known(String::new()));
+                game.game_start = true;
+                game.game_start_phase = -1;
+                game.home.team_batter_count = Some(-1);
+                game.away.team_batter_count = Some(-1);
 
                 game.into()
             }
