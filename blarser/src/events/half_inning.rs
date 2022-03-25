@@ -72,6 +72,7 @@ impl HalfInning {
             })
             .collect::<Result<Vec<_>, _>>()?
             .into_iter()
+            .flatten()
             .map(|aux| {
                 ("game".to_string(), Some(game_id), serde_json::to_value(aux).unwrap())
             })
