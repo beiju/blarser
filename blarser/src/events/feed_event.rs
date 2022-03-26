@@ -423,16 +423,6 @@
 //     });
 // }
 //
-// fn strike(state: &impl StateInterface, event: &EventuallyEvent) {
-//     let game_id = event.game_id().expect(concat!("Strike event must have a game id"));
-//     state.with_game(game_id, |mut game| {
-//         game.at_bat_strikes += 1;
-//         game.game_update_pitch(event);
-//
-//         Ok(vec![game])
-//     })
-// }
-//
 // fn ball(state: &impl StateInterface, event: &EventuallyEvent) {
 //     let game_id = event.game_id().expect(concat!("Ball event must have a game id"));
 //     state.with_game(game_id, |mut game| {

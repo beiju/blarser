@@ -11,6 +11,7 @@ mod half_inning;
 mod storm_warning;
 mod batter_up;
 mod nom_utils;
+mod count_events;
 
 pub use start::Start;
 pub use earlseason_start::EarlseasonStart;
@@ -19,6 +20,7 @@ pub use play_ball::PlayBall;
 pub use half_inning::HalfInning;
 pub use storm_warning::StormWarning;
 pub use batter_up::BatterUp;
+pub use count_events::{Strike};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -41,6 +43,7 @@ pub enum AnyEvent {
     HalfInning(HalfInning),
     StormWarning(StormWarning),
     BatterUp(BatterUp),
+    Strike(Strike),
 }
 
 #[macro_export]
@@ -54,6 +57,7 @@ macro_rules! with_any_event {
             crate::events::AnyEvent::HalfInning($bound_name) => { $arm }
             crate::events::AnyEvent::StormWarning($bound_name) => { $arm }
             crate::events::AnyEvent::BatterUp($bound_name) => { $arm }
+            crate::events::AnyEvent::Strike($bound_name) => { $arm }
         }
     };
 }
@@ -74,6 +78,7 @@ impl AnyEvent {
             AnyEvent::HalfInning(_) => { "HalfInning" }
             AnyEvent::StormWarning(_) => { "StormWarning" }
             AnyEvent::BatterUp(_) => { "BatterUp" }
+            AnyEvent::Strike(_) => { "Strike" }
         }
     }
 }
