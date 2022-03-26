@@ -21,7 +21,7 @@ pub fn parse_feed_event(feed_event: &EventuallyEvent, state: &StateInterface) ->
         // EventType::GameEnd => events::GameEnd::parse(feed_event),
         EventType::BatterUp => events::BatterUp::parse(feed_event),
         EventType::Strike => events::Strike::parse(feed_event),
-        // EventType::Ball => events::Ball::parse(feed_event),
+        EventType::Ball => events::Ball::parse(feed_event),
         // EventType::FoulBall => events::FoulBall::parse(feed_event),
         // EventType::InningEnd => events::InningEnd::parse(feed_event),
         // EventType::BatterSkipped => events::BatterSkipped::parse(feed_event),

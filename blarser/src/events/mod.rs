@@ -20,7 +20,7 @@ pub use play_ball::PlayBall;
 pub use half_inning::HalfInning;
 pub use storm_warning::StormWarning;
 pub use batter_up::BatterUp;
-pub use count_events::{Strike};
+pub use count_events::{Strike, Ball};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -44,6 +44,7 @@ pub enum AnyEvent {
     StormWarning(StormWarning),
     BatterUp(BatterUp),
     Strike(Strike),
+    Ball(Ball),
 }
 
 #[macro_export]
@@ -58,6 +59,7 @@ macro_rules! with_any_event {
             crate::events::AnyEvent::StormWarning($bound_name) => { $arm }
             crate::events::AnyEvent::BatterUp($bound_name) => { $arm }
             crate::events::AnyEvent::Strike($bound_name) => { $arm }
+            crate::events::AnyEvent::Ball($bound_name) => { $arm }
         }
     };
 }
@@ -79,6 +81,7 @@ impl AnyEvent {
             AnyEvent::StormWarning(_) => { "StormWarning" }
             AnyEvent::BatterUp(_) => { "BatterUp" }
             AnyEvent::Strike(_) => { "Strike" }
+            AnyEvent::Ball(_) => { "Ball" }
         }
     }
 }

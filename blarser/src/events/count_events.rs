@@ -20,6 +20,17 @@ pub struct Count {
     pub strikes: i32,
 }
 
+pub fn parse_count(input: &str) -> IResult<&str, Count, ErrorTree<&str>> {
+    let (input, balls_str) = digit1(input)?;
+    let (input, _) = tag("-")(input)?;
+    let (input, strikes_str) = digit1(input)?;
+
+    Ok((input, Count {
+        balls: balls_str.parse().expect("Failed to convert balls in count to integer"),
+        strikes: strikes_str.parse().expect("Failed to convert strikes in count to integer"),
+    }))
+}
+
 #[derive(Serialize, Deserialize)]
 pub enum StrikeType {
     Swinging,
@@ -39,17 +50,6 @@ pub struct Strike {
     time: DateTime<Utc>,
     #[serde(flatten)]
     parsed: StrikeParsed,
-}
-
-pub fn parse_count(input: &str) -> IResult<&str, Count, ErrorTree<&str>> {
-    let (input, balls_str) = digit1(input)?;
-    let (input, _) = tag("-")(input)?;
-    let (input, strikes_str) = digit1(input)?;
-
-    Ok((input, Count {
-        balls: balls_str.parse().expect("Failed to convert balls in count to integer"),
-        strikes: strikes_str.parse().expect("Failed to convert strikes in count to integer"),
-    }))
 }
 
 pub fn parse_strike(input: &str) -> IResult<&str, StrikeParsed, ErrorTree<&str>> {
@@ -108,6 +108,63 @@ impl Event for Strike {
                 game.into()
             }
             other => panic!("Strike event does not apply to {}", other.name())
+        }
+    }
+
+    fn reverse(&self, _entity: AnyEntity, _aux: serde_json::Value) -> AnyEntity {
+        todo!()
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Ball {
+    game_update: GameUpdate,
+    time: DateTime<Utc>,
+    count: Count,
+}
+
+pub fn parse_ball(input: &str) -> IResult<&str, Count, ErrorTree<&str>> {
+    let (input, _) = tag("Ball. ")(input)?;
+    parse_count.all_consuming().parse(input)
+}
+
+impl Ball {
+    pub fn parse(feed_event: &EventuallyEvent) -> QueryResult<(AnyEvent, Vec<(String, Option<Uuid>, serde_json::Value)>)> {
+        let time = feed_event.created;
+        let game_id = feed_event.game_id().expect("Ball event must have a game id");
+
+        let event = Self {
+            game_update: GameUpdate::parse(feed_event),
+            time,
+            count: parse_ball(&feed_event.description).finish()
+                .expect("Failed to parse Ball from feed event description").1
+        };
+
+        let effects = vec![(
+            "game".to_string(),
+            Some(game_id),
+            serde_json::Value::Null
+        )];
+
+        Ok((AnyEvent::Ball(event), effects))
+    }
+}
+
+impl Event for Ball {
+    fn time(&self) -> DateTime<Utc> {
+        self.time
+    }
+
+    fn forward(&self, entity: AnyEntity, _: serde_json::Value) -> AnyEntity {
+        match entity {
+            AnyEntity::Game(mut game) => {
+                self.game_update.forward(&mut game);
+
+                game.at_bat_balls += 1;
+
+                game.into()
+            }
+            other => panic!("Ball event does not apply to {}", other.name())
         }
     }
 
