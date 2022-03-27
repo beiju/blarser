@@ -2,6 +2,7 @@ use chrono::{DateTime, Utc};
 use diesel::QueryResult;
 use rocket::{info, warn};
 use futures::{pin_mut, StreamExt};
+use itertools::Itertools;
 use uuid::Uuid;
 
 use crate::api::{EventType, eventually, EventuallyEvent};
@@ -101,14 +102,35 @@ async fn run_time_until(ingest: FeedIngest, start_time: DateTime<Utc>, end_time:
     ingest
 }
 
-async fn apply_feed_event(ingest: FeedIngest, feed_event: EventuallyEvent) -> FeedIngest {
-    // FOR DEBUGGING: Pause as soon as we've ingested enough for the first Chron ingest to kick off
-    // if feed_event.created.to_string().as_str() > "2021-12-06 16:00:05.056 UTC" {
-    //     info!("Feed ingest: pausing forever for debug");
-    //     loop {
-    //         tokio::time::sleep(tokio::time::Duration::from_secs(100000)).await;
-    //     }
-    // }
+async fn apply_feed_event(mut ingest: FeedIngest, mut feed_event: EventuallyEvent) -> FeedIngest {
+    if feed_event.r#type == EventType::PlayerStatReroll {
+        // I think snowfall events are the only time a PlayerStatReroll event is at the top level
+        let player_id = feed_event.player_id()
+            .expect("PlayerStatReroll event must have exactly one player id");
+        // Unfortunately, team_id isn't set, so I need to read it from state
+        let team_id = ingest.run(move |state| {
+            Ok::<_, diesel::result::Error>(
+                state.read_player(player_id, |player| {
+                    player.league_team_id
+                        .expect("Players from a PlayerStatReroll event must have a team id")
+                })?
+                    .into_iter()
+                    .exactly_one()
+                    .expect("Can't handle ambiguity in player's team")
+            )
+        }).await
+            .expect("Error fetching player's team");
+        ingest.add_pending_snowfall(team_id, feed_event);
+
+        return ingest;
+    } else if feed_event.r#type == EventType::Snowflakes {
+        for team_id in &feed_event.team_tags {
+            if let Some(snowfalls) = ingest.get_snowfalls_for_team(team_id) {
+                feed_event.metadata.siblings.extend(snowfalls.into_iter());
+            }
+        }
+    }
+
     ingest.run_transaction(move |state| {
         info!("Feed ingest: Applying new {:?} event at {}", feed_event.r#type, feed_event.created);
         let (event, effects) = parse_feed_event(&feed_event, &state)?;

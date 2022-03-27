@@ -4,9 +4,11 @@ use std::sync::{Arc, Mutex as StdMutex, Mutex};
 use chrono::{DateTime, Duration, Utc};
 use diesel::{ExpressionMethods, OptionalExtension, PgConnection, QueryDsl, QueryResult, RunQueryDsl};
 use diesel::result::Error;
+use multimap::MultiMap;
 use rocket::info;
 use tokio::sync::{watch, oneshot};
 use uuid::Uuid;
+use crate::api::EventuallyEvent;
 
 use crate::db::BlarserDbConn;
 use crate::ingest::chron::{init_chron, ingest_chron};
@@ -196,6 +198,7 @@ pub struct FeedIngest {
     ingest_impl: IngestImpl,
     send_feed_progress: watch::Sender<DateTime<Utc>>,
     receive_chron_progress: watch::Receiver<DateTime<Utc>>,
+    pending_snowfalls: MultiMap<Uuid, EventuallyEvent>,
 }
 
 impl FeedIngest {
@@ -212,6 +215,7 @@ impl FeedIngest {
             },
             send_feed_progress,
             receive_chron_progress,
+            pending_snowfalls: MultiMap::new(),
         }
     }
 
@@ -246,6 +250,14 @@ impl FeedIngest {
             self.receive_chron_progress.changed().await
                 .expect("Error communicating with Chronicler ingest");
         }
+    }
+
+    pub fn add_pending_snowfall(&mut self, team_id: Uuid, event: EventuallyEvent) {
+        self.pending_snowfalls.insert(team_id, event);
+    }
+
+    pub fn get_snowfalls_for_team(&mut self, team_id: &Uuid) -> Option<Vec<EventuallyEvent>> {
+        self.pending_snowfalls.remove(team_id)
     }
 }
 
