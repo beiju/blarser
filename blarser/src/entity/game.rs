@@ -255,32 +255,32 @@ impl Game {
     //     self.baserunner_count -= 1;
     // }
     //
-    // pub(crate) fn out(&mut self, event: &EventuallyEvent, outs_added: i32) {
-    //     self.game_update_pitch(event);
-    //
-    //     let end_of_half_inning = self.half_inning_outs + outs_added == 3;
-    //     if end_of_half_inning {
-    //         self.half_inning_outs = 0;
-    //         self.phase = 3;
-    //         self.clear_bases();
-    //
-    //         // Reset both top and bottom inning scored only when the bottom half ends
-    //         if !self.top_of_inning {
-    //             self.top_inning_score = 0.0;
-    //             self.bottom_inning_score = 0.0;
-    //             self.half_inning_score = 0.0;
-    //         }
-    //
-    //         // End the game
-    //         if self.game_should_end() {
-    //             self.top_inning_score = 0.0;
-    //             self.half_inning_score = 0.0;
-    //             self.phase = 7;
-    //         }
-    //     } else {
-    //         self.half_inning_outs += outs_added;
-    //     }
-    // }
+    pub(crate) fn add_out(&mut self, outs_added: i32) {
+        let end_of_half_inning = self.half_inning_outs + outs_added == 3;
+        if end_of_half_inning {
+            self.half_inning_outs = 0;
+            self.phase = 3;
+            self.clear_bases();
+
+            // Reset both top and bottom inning scored only when the bottom half ends
+            if !self.top_of_inning {
+                self.top_inning_score = 0.0;
+                self.bottom_inning_score = 0.0;
+                self.half_inning_score = 0.0;
+            }
+
+            // End the game
+            if self.game_should_end() {
+                self.top_inning_score = 0.0;
+                self.half_inning_score = 0.0;
+                self.phase = 7;
+            }
+        } else {
+            self.half_inning_outs += outs_added;
+        }
+
+        self.end_at_bat()
+    }
 
     fn game_should_end(&self) -> bool {
         if self.inning < 8 { return false; }
@@ -296,20 +296,20 @@ impl Game {
         }
     }
 
-    // fn clear_bases(&mut self) {
-    //     self.base_runners.clear();
-    //     self.base_runner_names.clear();
-    //     self.base_runner_mods.clear();
-    //     self.bases_occupied.clear();
-    //     self.baserunner_count = 0;
-    // }
-    //
-    // pub(crate) fn end_at_bat(&mut self) {
-    //     self.team_at_bat_mut().batter = None;
-    //     self.team_at_bat_mut().batter_name = Some("".to_string());
-    //     self.at_bat_balls = 0;
-    //     self.at_bat_strikes = 0;
-    // }
+    fn clear_bases(&mut self) {
+        self.base_runners.clear();
+        self.base_runner_names.clear();
+        self.base_runner_mods.clear();
+        self.bases_occupied.clear();
+        self.baserunner_count = 0;
+    }
+
+    pub(crate) fn end_at_bat(&mut self) {
+        self.team_at_bat_mut().batter = None;
+        self.team_at_bat_mut().batter_name = Some("".to_string());
+        self.at_bat_balls = 0;
+        self.at_bat_strikes = 0;
+    }
 
     pub(crate) fn get_baserunner_with_name(&self, expected_name: &str, base_plus_one: Base) -> usize {
         self.get_baserunner_with_property(expected_name, base_plus_one, &self.base_runner_names)

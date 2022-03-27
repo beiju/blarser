@@ -172,3 +172,65 @@ impl Event for Ball {
         todo!()
     }
 }
+
+#[derive(Serialize, Deserialize)]
+pub struct FoulBall {
+    game_update: GameUpdate,
+    time: DateTime<Utc>,
+    count: Count,
+}
+
+// One day this will probably have Very Foul Ball parsing in it but not this day
+pub fn parse_foul_ball(input: &str) -> IResult<&str, Count, ErrorTree<&str>> {
+    let (input, _) = tag("Foul Ball. ")(input)?;
+    parse_count.all_consuming().parse(input)
+}
+
+impl FoulBall {
+    pub fn parse(feed_event: &EventuallyEvent) -> QueryResult<(AnyEvent, Vec<(String, Option<Uuid>, serde_json::Value)>)> {
+        let time = feed_event.created;
+        let game_id = feed_event.game_id().expect("FoulBall event must have a game id");
+
+        let event = Self {
+            game_update: GameUpdate::parse(feed_event),
+            time,
+            count: parse_foul_ball(&feed_event.description).finish()
+                .expect("Failed to parse FoulBall from feed event description").1
+        };
+
+        let effects = vec![(
+            "game".to_string(),
+            Some(game_id),
+            serde_json::Value::Null
+        )];
+
+        Ok((AnyEvent::FoulBall(event), effects))
+    }
+}
+
+impl Event for FoulBall {
+    fn time(&self) -> DateTime<Utc> {
+        self.time
+    }
+
+    fn forward(&self, entity: AnyEntity, _: serde_json::Value) -> AnyEntity {
+        match entity {
+            AnyEntity::Game(mut game) => {
+                self.game_update.forward(&mut game);
+
+                let strikes_to_strike_out = game.team_at_bat().strikes
+                    .expect("{home/away}Strikes must be set during FoulBall event");
+                if game.at_bat_strikes + 1 < strikes_to_strike_out {
+                    game.at_bat_strikes += 1;
+                }
+
+                game.into()
+            }
+            other => panic!("FoulBall event does not apply to {}", other.name())
+        }
+    }
+
+    fn reverse(&self, _entity: AnyEntity, _aux: serde_json::Value) -> AnyEntity {
+        todo!()
+    }
+}

@@ -36,7 +36,7 @@ pub struct FieldersChoiceParsed {
 
 enum FieldingOutParsed {
     GroundOut(GroundOrFlyOutParsed),
-    FlyOut(GroundOrFlyOutParsed),
+    Flyout(GroundOrFlyOutParsed),
     DoublePlay(DoublePlayParsed),
     FieldersChoice(FieldersChoiceParsed),
 }
@@ -55,7 +55,9 @@ pub fn parse(event: &EventuallyEvent) -> QueryResult<(AnyEvent, Vec<(String, Opt
         FieldingOutParsed::GroundOut(parsed) => {
             GroundOut::from_parsed(event, parsed)
         }
-        FieldingOutParsed::FlyOut(_) => { todo!() }
+        FieldingOutParsed::Flyout(parsed) => {
+            Flyout::from_parsed(event, parsed)
+        }
         FieldingOutParsed::DoublePlay(_) => { todo!() }
         FieldingOutParsed::FieldersChoice(_) => { todo!() }
     }
@@ -79,7 +81,7 @@ fn parse_single_batter_out(input: &str) -> IResult<&str, FieldingOutParsed, Erro
     };
 
     let out = match out_type {
-        "flyout" => FieldingOutParsed::FlyOut(parsed),
+        "flyout" => FieldingOutParsed::Flyout(parsed),
         "ground out" => FieldingOutParsed::GroundOut(parsed),
         _ => panic!("Invalid fielding out type")
     };
@@ -158,11 +160,63 @@ impl Event for GroundOut {
             AnyEntity::Game(mut game) => {
                 self.game_update.forward(&mut game);
 
-                todo!();
+                game.add_out(1);
 
                 game.into()
             }
             other => panic!("GroundOut event does not apply to {}", other.name())
+        }
+    }
+
+    fn reverse(&self, _entity: AnyEntity, _aux: serde_json::Value) -> AnyEntity {
+        todo!()
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Flyout {
+    game_update: GameUpdate,
+    time: DateTime<Utc>,
+    #[serde(flatten)]
+    parsed: GroundOrFlyOutParsed,
+}
+
+impl Flyout {
+    pub fn from_parsed(feed_event: &EventuallyEvent, parsed: GroundOrFlyOutParsed) -> QueryResult<(AnyEvent, Vec<(String, Option<Uuid>, serde_json::Value)>)> {
+        let time = feed_event.created;
+        let game_id = feed_event.game_id().expect("Flyout event must have a game id");
+
+        let event = Self {
+            game_update: GameUpdate::parse(feed_event),
+            time,
+            parsed,
+        };
+
+        let effects = vec![(
+            "game".to_string(),
+            Some(game_id),
+            serde_json::Value::Null
+        )];
+
+        Ok((AnyEvent::Flyout(event), effects))
+    }
+}
+
+impl Event for Flyout {
+    fn time(&self) -> DateTime<Utc> {
+        self.time
+    }
+
+    fn forward(&self, entity: AnyEntity, _: serde_json::Value) -> AnyEntity {
+        match entity {
+            AnyEntity::Game(mut game) => {
+                self.game_update.forward(&mut game);
+
+                game.add_out(1);
+
+                game.into()
+            }
+            other => panic!("Flyout event does not apply to {}", other.name())
         }
     }
 
