@@ -6,10 +6,13 @@ use nom::bytes::complete::{tag, take_till1, take_while1};
 use nom::combinator::{peek, recognize};
 use nom_supreme::error::ErrorTree;
 use nom_supreme::multi::collect_separated_terminated;
+use rocket::http::ext::IntoCollection;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 use crate::api::{EventType, EventuallyEvent};
-use crate::entity::Base;
+use crate::entity::{Base, RunnerAdvancement};
 
-pub struct RunsScored<'e> {
+pub struct RunsScoredEvents<'e> {
     pub players: &'e [EventuallyEvent],
     pub team: &'e EventuallyEvent,
 }
@@ -17,7 +20,7 @@ pub struct RunsScored<'e> {
 pub struct CollatedEvents<'e> {
     pub shame: Option<&'e EventuallyEvent>,
     pub action: &'e [EventuallyEvent],
-    pub score: Option<RunsScored<'e>>,
+    pub score: Option<RunsScoredEvents<'e>>,
 }
 
 // This function collates the siblings of an event into shaming event (if any), "action events"
@@ -65,7 +68,7 @@ pub fn collate_siblings(events: &[EventuallyEvent]) -> CollatedEvents {
         let (players, events) = events.split_at(after_last_score);
         let (team, events) = events.split_first().unwrap();
 
-        (Some(RunsScored { players, team }), events)
+        (Some(RunsScoredEvents { players, team }), events)
     } else {
         (None, events)
     };
@@ -88,6 +91,32 @@ pub fn parse_base(input: &str) -> IResult<&str, Base, ErrorTree<&str>> {
     ))(input)?;
 
     Ok((input, Base::from_string(base_name)))
+}
+
+pub fn generate_runner_advancements(runners: &[Uuid], bases: &[i32], always_advance: i32) -> Vec<Vec<RunnerAdvancement>> {
+    let base_advancements: Vec<_> = runners.iter().zip(bases)
+        .map(|(&runner_id, &from_base)| RunnerAdvancement {
+            runner_id,
+            from_base,
+            to_base: from_base + always_advance
+        })
+        .collect();
+
+    (0..runners.len()).powerset()
+        .map(|runners_who_advance_extra| {
+            let mut advancements = base_advancements.clone();
+            for i in runners_who_advance_extra {
+                advancements[i].to_base += 1;
+            }
+
+            advancements
+        })
+        .filter(|advancements| {
+            advancements.iter()
+                .tuple_windows::<(_, _)>()
+                .all(|(a, b)| a.to_base != b.to_base)
+        })
+        .collect()
 }
 
 // Split greedy text on any character that might be the end of the string: whitespace, newline,

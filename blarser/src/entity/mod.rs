@@ -16,7 +16,7 @@ use partial_information::PartialInformationCompare;
 
 use crate::events::AnyEvent;
 
-pub use common::Base;
+pub use common::{Base, RunnerAdvancement};
 pub use sim::Sim;
 pub use player::Player;
 pub use team::Team;

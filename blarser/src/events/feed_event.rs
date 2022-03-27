@@ -296,48 +296,6 @@
 //     increment_consecutive_hits(state, event_batter_id);
 // }
 //
-// fn hit(state: &impl StateInterface, event: &EventuallyEvent) {
-//     let game_id = event.game_id().expect("Hit event must have a game id");
-//     let event_batter_id = event.player_id()
-//         .expect("Hit event must have exactly one player id");
-//
-//     state.with_game(game_id, |mut game| {
-//         let batter_id = game.team_at_bat().batter
-//             .expect("Batter must exist during Hit event");
-//         let batter_name = game.team_at_bat().batter_name.clone()
-//             .expect("Batter name must exist during Hit event");
-//
-//         assert_eq!(event_batter_id, batter_id,
-//                    "Batter in Hit event didn't match batter in game state");
-//
-//         let hit_type = parse::parse_hit(&batter_name, &event.description)
-//             .expect("Error parsing Hit description");
-//
-//         let (scoring_runners, _) = separate_scoring_events(&event.metadata.siblings, batter_id);
-//         for runner_id in scoring_runners {
-//             game.score_runner(runner_id);
-//         }
-//
-//         game.game_update_pitch(event);
-//         game.end_at_bat();
-//
-//         // Must advance runners before putting the batter on first because otherwise forced batter
-//         // advancement would mess things up
-//         let games = game.advance_runners(hit_type as i32 + 1).into_iter()
-//             .update(|game| {
-//                 let batter_mod = game.team_at_bat().batter_mod.clone();
-//                 game.push_base_runner(batter_id, batter_name.clone(), batter_mod, hit_type);
-//             })
-//             // See note in FieldersChoice
-//             .unique_by(|g| g.bases_occupied.clone())
-//             .collect();
-//
-//         Ok(games)
-//     });
-//
-//     increment_consecutive_hits(state, event_batter_id);
-// }
-//
 // fn game_end(state: &impl StateInterface, event: &EventuallyEvent) {
 //     let game_id = event.game_id().expect("GameEnd event must have a game id");
 //     let winner_id: Uuid = serde_json::from_value(

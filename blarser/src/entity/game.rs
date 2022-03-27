@@ -7,7 +7,7 @@ use uuid::Uuid;
 use partial_information::{PartialInformationCompare, MaybeKnown};
 use partial_information_derive::PartialInformationCompare;
 
-use crate::entity::{AnyEntity, Base, Entity, EntityRaw, WrongEntityError};
+use crate::entity::{AnyEntity, Base, Entity, EntityRaw, RunnerAdvancement, WrongEntityError};
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]
@@ -328,6 +328,14 @@ impl Game {
             .exactly_one().ok()
     }
 
+    pub fn advance_runners(&mut self, advancements: &[RunnerAdvancement]) {
+        for (i, advancement) in advancements.iter().enumerate() {
+            assert_eq!(self.base_runners[i], advancement.runner_id);
+            assert_eq!(self.bases_occupied[i], advancement.from_base);
+            self.bases_occupied[i] = advancement.to_base;
+        }
+    }
+
     // pub(crate) fn remove_base_runner(&mut self, runner_idx: usize) {
     //     self.base_runners.remove(runner_idx);
     //     self.base_runner_names.remove(runner_idx);
@@ -350,56 +358,29 @@ impl Game {
     //         })
     // }
     //
-    // pub(crate) fn advance_runners(mut self, advance_at_least: i32) -> Vec<Self> {
-    //     // Start by advancing everyone by the minimum amount
-    //     for base in &mut self.bases_occupied { *base += advance_at_least; }
     //
-    //     let num_bases_occupied = self.bases_occupied.len();
-    //     let mut versions = vec![self];
-    //     for i in (0..num_bases_occupied).rev() {
-    //         // Can't modify versions if I iterate it in place, and I need to clone most of the
-    //         // versions anyway, so might as well clone versions here
-    //         for mut version in versions.clone() {
-    //             let base = version.bases_occupied[i];
-    //
-    //             // Don't add a version that involves players advancing to the same base as another
-    //             // player (TODO: except circumstances known to cause handholding)
-    //             if let Some(next_occupied_base) = version.bases_occupied.get(i + 1) {
-    //                 if *next_occupied_base == base + 1 {
-    //                     continue;
-    //                 }
-    //             }
-    //
-    //             version.bases_occupied[i] += 1;
-    //             versions.push(version);
-    //         }
-    //     }
-    //
-    //     versions
-    // }
-    //
-    // pub(crate) fn push_base_runner(&mut self, runner_id: Uuid, runner_name: String, runner_mod: String, to_base: Base) {
-    //     self.base_runners.push(runner_id);
-    //     self.base_runner_names.push(runner_name);
-    //     self.base_runner_mods.push(runner_mod);
-    //     self.bases_occupied.push(to_base as i32);
-    //     self.baserunner_count += 1;
-    //
-    //     let mut last_occupied_base: Option<i32> = None;
-    //     for base_num in self.bases_occupied.iter_mut().rev() {
-    //         if let Some(last_occupied_base_num) = last_occupied_base.as_mut() {
-    //             if *base_num <= *last_occupied_base_num {
-    //                 *last_occupied_base_num = *base_num + 1;
-    //
-    //                 *base_num = *last_occupied_base_num;
-    //             } else {
-    //                 *last_occupied_base_num = *base_num;
-    //             }
-    //         } else {
-    //             last_occupied_base = Some(*base_num);
-    //         }
-    //     }
-    // }
+    pub(crate) fn push_base_runner(&mut self, runner_id: Uuid, runner_name: String, runner_mod: String, to_base: Base) {
+        self.base_runners.push(runner_id);
+        self.base_runner_names.push(runner_name);
+        self.base_runner_mods.push(runner_mod);
+        self.bases_occupied.push(to_base as i32);
+        self.baserunner_count += 1;
+
+        let mut last_occupied_base: Option<i32> = None;
+        for base_num in self.bases_occupied.iter_mut().rev() {
+            if let Some(last_occupied_base_num) = last_occupied_base.as_mut() {
+                if *base_num <= *last_occupied_base_num {
+                    *last_occupied_base_num = *base_num + 1;
+
+                    *base_num = *last_occupied_base_num;
+                } else {
+                    *last_occupied_base_num = *base_num;
+                }
+            } else {
+                last_occupied_base = Some(*base_num);
+            }
+        }
+    }
     //
     // pub(crate) fn apply_successful_steal(&mut self, event: &EventuallyEvent, thief_id: Uuid, base: Base) {
     //     let baserunner_index = self.get_baserunner_with_id(thief_id, base);

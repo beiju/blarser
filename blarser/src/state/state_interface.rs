@@ -65,6 +65,16 @@ macro_rules! reader_with_id {
     };
 }
 
+macro_rules! flat_reader_with_id {
+    ($fn_name:ident, $read_type:ty) => {
+        pub fn $fn_name<ReadT: PartialEq, IterT: IntoIterator<Item=ReadT>, Reader: Fn($read_type) -> IterT>(
+            &self, id: Uuid, reader: Reader
+        ) -> QueryResult<Vec<ReadT>> {
+            self.read_entity_flat(Some(id), reader)
+        }
+    };
+}
+
 macro_rules! reader_with_nil_id {
     ($fn_name:ident, $read_type:ty) => {
         pub fn $fn_name<ReadT: PartialEq, Reader: Fn($read_type) -> ReadT>(&self, reader: Reader) -> QueryResult<Vec<ReadT>> {
@@ -111,12 +121,39 @@ impl<'conn> StateInterface<'conn> {
         Ok(unique_vals)
     }
 
-    reader_with_nil_id! {read_sim, entity::Sim }
-    reader_with_id! {read_player, entity::Player }
-    reader_with_id! {read_team, entity::Team }
-    reader_with_id! {read_game, entity::Game }
-    reader_with_id! {read_standings, entity::Standings }
-    reader_with_id! {read_season, entity::Season }
+    fn read_entity_flat<EntityT: Entity, ReadT, IterT, Reader>(
+        &self,
+        entity_id: Option<Uuid>,
+        reader: Reader,
+    ) -> QueryResult<Vec<ReadT>>
+        where ReadT: PartialEq,
+              Reader: Fn(EntityT) -> IterT,
+              IterT: IntoIterator<Item=ReadT> {
+        let mut unique_vals = Vec::new();
+        let versions = self.get_versions_at_generic::<EntityT>(entity_id, None)?;
+
+        assert!(!versions.is_empty(),
+                "Error: There are no versions for the requested entity");
+
+        for version in versions {
+            let vals = reader(version.entity);
+            for val in vals {
+                if !unique_vals.iter().any(|existing_val| existing_val == &val) {
+                    unique_vals.push(val);
+                }
+            }
+        }
+
+        Ok(unique_vals)
+    }
+
+    reader_with_nil_id! { read_sim, entity::Sim }
+    reader_with_id! { read_player, entity::Player }
+    reader_with_id! { read_team, entity::Team }
+    reader_with_id! { read_game, entity::Game }
+    reader_with_id! { read_standings, entity::Standings }
+    reader_with_id! { read_season, entity::Season }
+    flat_reader_with_id! { read_game_flat, entity::Game }
 
     pub fn get_events_between(&self, start_time: DateTime<Utc>, end_time: DateTime<Utc>) -> QueryResult<Vec<(StoredEvent, Vec<EventEffect>)>> {
         use crate::schema::events::dsl as events;

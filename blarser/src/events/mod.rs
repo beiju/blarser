@@ -13,6 +13,7 @@ mod batter_up;
 mod parse_utils;
 mod count_events;
 mod fielding_outs;
+mod hit;
 
 pub use start::Start;
 pub use earlseason_start::EarlseasonStart;
@@ -23,6 +24,7 @@ pub use storm_warning::StormWarning;
 pub use batter_up::BatterUp;
 pub use count_events::{Strike, Ball, FoulBall};
 pub use fielding_outs::{parse as parse_fielding_out, GroundOut, Flyout};
+pub use hit::Hit;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -50,6 +52,7 @@ pub enum AnyEvent {
     FoulBall(FoulBall),
     GroundOut(GroundOut),
     Flyout(Flyout),
+    Hit(Hit),
 }
 
 #[macro_export]
@@ -68,6 +71,7 @@ macro_rules! with_any_event {
             crate::events::AnyEvent::FoulBall($bound_name) => { $arm }
             crate::events::AnyEvent::GroundOut($bound_name) => { $arm }
             crate::events::AnyEvent::Flyout($bound_name) => { $arm }
+            crate::events::AnyEvent::Hit($bound_name) => { $arm }
         }
     };
 }
@@ -93,6 +97,7 @@ impl AnyEvent {
             AnyEvent::FoulBall(_) => { "FoulBall" }
             AnyEvent::GroundOut(_) => { "GroundOut" }
             AnyEvent::Flyout(_) => { "Flyout" }
+            AnyEvent::Hit(_) => { "Hit" }
         }
     }
 }

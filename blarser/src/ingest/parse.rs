@@ -17,7 +17,7 @@ pub fn parse_feed_event(feed_event: &EventuallyEvent, state: &StateInterface) ->
         EventType::FlyOut => events::parse_fielding_out(feed_event),
         EventType::GroundOut => events::parse_fielding_out(feed_event),
         // EventType::HomeRun => events::HomeRun::parse(feed_event),
-        // EventType::Hit => events::Hit::parse(feed_event),
+        EventType::Hit => events::Hit::parse(feed_event, state),
         // EventType::GameEnd => events::GameEnd::parse(feed_event),
         EventType::BatterUp => events::BatterUp::parse(feed_event),
         EventType::Strike => events::Strike::parse(feed_event),

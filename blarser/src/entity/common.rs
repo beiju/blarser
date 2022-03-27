@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 #[derive(Copy, Clone, Serialize, Deserialize)]
 #[repr(i64)]
@@ -38,4 +39,11 @@ impl Base {
             _ => panic!("Invalid hit type {}", hit_name)
         }
     }
+}
+
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RunnerAdvancement {
+    pub runner_id: Uuid,
+    pub from_base: i32,
+    pub to_base: i32,
 }
