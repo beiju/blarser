@@ -1,7 +1,7 @@
 use std::iter;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
-use crate::api::{EventType, EventuallyEvent};
+use crate::api::{EventType, EventuallyEvent, Weather};
 use crate::entity::{Game, UpdateFull};
 
 #[derive(Serialize, Deserialize)]
@@ -89,9 +89,7 @@ impl GameUpdate {
             score,
         }
     }
-}
 
-impl GameUpdate {
     pub fn forward(&self, game: &mut Game) {
         game.play_count = self.play_count;
 
@@ -127,5 +125,23 @@ impl GameUpdate {
         // TODO Check the conditionals on this
         game.shame = (game.inning > 8 || game.inning > 7 && !game.top_of_inning) &&
             game.home.score.unwrap() > game.away.score.unwrap();
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct GamePitch(GameUpdate);
+
+impl GamePitch {
+    pub fn parse(event: &EventuallyEvent) -> GamePitch {
+        GamePitch(GameUpdate::parse(event))
+    }
+
+    pub fn forward(&self, game: &mut Game) {
+        self.0.forward(game);
+
+        if game.weather == (Weather::Snowy as i32) && game.state.snowfall_events.is_none() {
+            game.state.snowfall_events = Some(0);
+        }
     }
 }

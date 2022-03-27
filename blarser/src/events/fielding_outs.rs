@@ -12,7 +12,7 @@ use uuid::Uuid;
 use crate::api::EventuallyEvent;
 use crate::entity::{AnyEntity, Base};
 use crate::events::{AnyEvent, Event};
-use crate::events::game_update::GameUpdate;
+use crate::events::game_update::{GamePitch, GameUpdate};
 use crate::events::parse_utils::{collate_siblings, greedy_text, parse_base};
 
 
@@ -123,7 +123,7 @@ fn parse_fielders_choice<'i>(input1: &'i str, input2: &'i str) -> IResult<&'i st
 
 #[derive(Serialize, Deserialize)]
 pub struct GroundOut {
-    game_update: GameUpdate,
+    game_update: GamePitch,
     time: DateTime<Utc>,
     #[serde(flatten)]
     parsed: GroundOrFlyOutParsed,
@@ -135,7 +135,7 @@ impl GroundOut {
         let game_id = feed_event.game_id().expect("GroundOut event must have a game id");
 
         let event = Self {
-            game_update: GameUpdate::parse(feed_event),
+            game_update: GamePitch::parse(feed_event),
             time,
             parsed,
         };
@@ -175,7 +175,7 @@ impl Event for GroundOut {
 
 #[derive(Serialize, Deserialize)]
 pub struct Flyout {
-    game_update: GameUpdate,
+    game_update: GamePitch,
     time: DateTime<Utc>,
     #[serde(flatten)]
     parsed: GroundOrFlyOutParsed,
@@ -187,7 +187,7 @@ impl Flyout {
         let game_id = feed_event.game_id().expect("Flyout event must have a game id");
 
         let event = Self {
-            game_update: GameUpdate::parse(feed_event),
+            game_update: GamePitch::parse(feed_event),
             time,
             parsed,
         };

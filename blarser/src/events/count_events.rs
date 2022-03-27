@@ -12,7 +12,7 @@ use uuid::Uuid;
 use crate::api::EventuallyEvent;
 use crate::entity::AnyEntity;
 use crate::events::{AnyEvent, Event};
-use crate::events::game_update::GameUpdate;
+use crate::events::game_update::{GamePitch, GameUpdate};
 
 #[derive(Serialize, Deserialize)]
 pub struct Count {
@@ -46,7 +46,7 @@ pub struct StrikeParsed {
 
 #[derive(Serialize, Deserialize)]
 pub struct Strike {
-    game_update: GameUpdate,
+    game_update: GamePitch,
     time: DateTime<Utc>,
     #[serde(flatten)]
     parsed: StrikeParsed,
@@ -77,7 +77,7 @@ impl Strike {
         let game_id = feed_event.game_id().expect("Strike event must have a game id");
 
         let event = Self {
-            game_update: GameUpdate::parse(feed_event),
+            game_update: GamePitch::parse(feed_event),
             time,
             parsed: parse_strike(&feed_event.description).finish()
                 .expect("Failed to parse Strike from feed event description").1
@@ -118,7 +118,7 @@ impl Event for Strike {
 
 #[derive(Serialize, Deserialize)]
 pub struct Ball {
-    game_update: GameUpdate,
+    game_update: GamePitch,
     time: DateTime<Utc>,
     count: Count,
 }
@@ -134,7 +134,7 @@ impl Ball {
         let game_id = feed_event.game_id().expect("Ball event must have a game id");
 
         let event = Self {
-            game_update: GameUpdate::parse(feed_event),
+            game_update: GamePitch::parse(feed_event),
             time,
             count: parse_ball(&feed_event.description).finish()
                 .expect("Failed to parse Ball from feed event description").1
@@ -175,7 +175,7 @@ impl Event for Ball {
 
 #[derive(Serialize, Deserialize)]
 pub struct FoulBall {
-    game_update: GameUpdate,
+    game_update: GamePitch,
     time: DateTime<Utc>,
     count: Count,
 }
@@ -192,7 +192,7 @@ impl FoulBall {
         let game_id = feed_event.game_id().expect("FoulBall event must have a game id");
 
         let event = Self {
-            game_update: GameUpdate::parse(feed_event),
+            game_update: GamePitch::parse(feed_event),
             time,
             count: parse_foul_ball(&feed_event.description).finish()
                 .expect("Failed to parse FoulBall from feed event description").1

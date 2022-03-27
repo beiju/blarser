@@ -204,14 +204,6 @@ impl EntityRaw for <Game as PartialInformationCompare>::Raw {
 }
 
 impl Game {
-    // pub(crate) fn game_update_pitch(&mut self, first_event: &EventuallyEvent) {
-    //     self.game_update_common(first_event);
-    //
-    //     if self.weather == (Weather::Snowy as i32) && self.state.snowfall_events.is_none() {
-    //         self.state.snowfall_events = Some(0);
-    //     }
-    // }
-
     pub(crate) fn team_at_bat(&self) -> &GameByTeam {
         if self.top_of_inning {
             &self.away
