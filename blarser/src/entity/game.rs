@@ -7,8 +7,7 @@ use uuid::Uuid;
 use partial_information::{PartialInformationCompare, MaybeKnown};
 use partial_information_derive::PartialInformationCompare;
 
-use crate::parse::{Base};
-use crate::entity::{AnyEntity, Entity, EntityRaw, Player, WrongEntityError};
+use crate::entity::{AnyEntity, Base, Entity, EntityRaw, WrongEntityError};
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]

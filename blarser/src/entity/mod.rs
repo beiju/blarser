@@ -5,6 +5,7 @@ mod game;
 mod team;
 mod standings;
 mod season;
+mod common;
 
 use std::fmt::{Display, Formatter};
 use uuid::Uuid;
@@ -15,6 +16,7 @@ use partial_information::PartialInformationCompare;
 
 use crate::events::AnyEvent;
 
+pub use common::Base;
 pub use sim::Sim;
 pub use player::Player;
 pub use team::Team;

@@ -9,7 +9,7 @@ use crate::api::EventuallyEvent;
 use crate::entity::AnyEntity;
 use crate::events::{AnyEvent, Event};
 use crate::events::game_update::GameUpdate;
-use crate::events::nom_utils::greedy_text;
+use crate::events::parse_utils::greedy_text;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct WhichBatter {

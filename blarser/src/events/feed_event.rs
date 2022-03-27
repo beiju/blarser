@@ -742,23 +742,3 @@
 //     });
 // }
 //
-// pub fn separate_scoring_events(siblings: &[EventuallyEvent], hitter_id: Uuid) -> (Vec<Uuid>, Vec<&EventuallyEvent>) {
-//     // The first event is never a scoring event, and it mixes up the rest of the logic because the
-//     // "hit" or "walk" event type is reused
-//     let (first, rest) = siblings.split_first()
-//         .expect("Event's siblings array is empty");
-//     let mut scores = Vec::new();
-//     let mut others = vec![first];
-//
-//     for event in rest {
-//         if event.r#type == EventType::Hit || event.r#type == EventType::Walk {
-//             let runner_id = event.player_id_excluding(hitter_id)
-//                 .expect("Scoring event must have a player id");
-//             scores.push(runner_id);
-//         } else if event.r#type != EventType::RunsScored {
-//             others.push(event);
-//         }
-//     }
-//
-//     (scores, others)
-// }

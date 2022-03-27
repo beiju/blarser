@@ -9,7 +9,7 @@ use nom_supreme::{error::ErrorTree, ParserExt};
 
 use crate::api::EventuallyEvent;
 use crate::entity::AnyEntity;
-use crate::events::{AnyEvent, Event, nom_utils};
+use crate::events::{AnyEvent, Event, parse_utils};
 use crate::events::game_update::GameUpdate;
 use crate::state::StateInterface;
 
@@ -39,7 +39,7 @@ pub fn parse_which_inning(input: &str) -> IResult<&str, WhichInning, ErrorTree<&
     let (input, _) = tag(" of ")(input)?;
     let (input, inning_str) = digit1(input)?;
     let (input, _) = tag(", ")(input)?;
-    let (input, batting_team_name) = nom_utils::greedy_text(tag(" batting.").all_consuming()).parse(input)?;
+    let (input, batting_team_name) = parse_utils::greedy_text(tag(" batting.").all_consuming()).parse(input)?;
     let (input, _) = tag(" batting.").all_consuming().parse(input)?;
 
     let top_of_inning = match top_or_bottom {

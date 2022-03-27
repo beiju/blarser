@@ -14,8 +14,8 @@ pub fn parse_feed_event(feed_event: &EventuallyEvent, state: &StateInterface) ->
         // EventType::Walk => events::Walk::parse(feed_event),
         // EventType::Strikeout => events::Strikeout::parse(feed_event),
         // // It's easier to combine ground out and flyout types into one function
-        // EventType::FlyOut => events::FieldingOut::Parse(feed_event, state),
-        // EventType::GroundOut => events::FieldingOut::Parse(feed_event, state),
+        EventType::FlyOut => events::parse_fielding_out(feed_event),
+        EventType::GroundOut => events::parse_fielding_out(feed_event),
         // EventType::HomeRun => events::HomeRun::parse(feed_event),
         // EventType::Hit => events::Hit::parse(feed_event),
         // EventType::GameEnd => events::GameEnd::parse(feed_event),

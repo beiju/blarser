@@ -2,7 +2,6 @@ use chrono::{DateTime, Utc};
 use diesel::QueryResult;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use partial_information::MaybeKnown;
 
 use crate::api::EventuallyEvent;
 use crate::entity::AnyEntity;

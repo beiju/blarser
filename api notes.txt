@@ -1,9 +1,15 @@
 these are all observed in gamma9 and not checked in other eras
 
+- "<player name> scored!" events should have their own event type. Currently, they re-use the Hit event type if the run
+  was scored off a hit, ground out, or flyout and the Walk event type if it was scored off a walk (I haven't looked at
+  any other scoring situations, like blaserunning).
+- I inferred this from looking at Chron records so the details might not be quite right, but the general idea is. After
+  each game on the first day of gamma9 ended, the team object from the polling API updated correctly but the one in
+  streamData stayed at 0. I have not checked if this happened in any other seasons. (Also, winStreak is a bit misleading
+  as a name because it also tracks the loss streak using a negative number.)
+
+TODO Re-verify all these
 - snowfall events aren't visible in player entities until some time after they happen
 - standings changes likewise, and also "wins" and "losses" will update before of "runs" and "gamesPlayed", but only for the winner of the game
-- i think the initialization of the snowfallEvents field (but not subsequent updates) is also delayed, but it might just be that i don't understand what causes it to be initialized
 - consecutiveHits went up for this home run: https://reblase.sibr.dev/game/018f094a-ffa1-4173-b4bb-378577094358#5a8e03a5-0045-f766-f79b-4ded89a70767
-- teams winStreak will flicker between 0 and the true value for some time after the game ends
-    - also winStreak decrements when a team loses instead of being reset to 0 as the name implies
 - this gameUpdate is timestamped significantly later than the updates that surround it https://reblase.sibr.dev/game/ac68c433-9981-4264-83dc-1ba12f3b3fa4#376cdcee-379a-5c83-d0e0-12cd138f4498
