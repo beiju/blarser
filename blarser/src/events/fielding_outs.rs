@@ -160,7 +160,7 @@ impl Event for GroundOut {
             AnyEntity::Game(mut game) => {
                 self.game_update.forward(&mut game);
 
-                game.add_out(1);
+                game.out(1);
 
                 game.into()
             }
@@ -212,7 +212,7 @@ impl Event for Flyout {
             AnyEntity::Game(mut game) => {
                 self.game_update.forward(&mut game);
 
-                game.add_out(1);
+                game.out(1);
 
                 game.into()
             }

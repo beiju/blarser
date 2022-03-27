@@ -4,6 +4,8 @@ use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::character::complete::digit1;
 use nom::{Finish, IResult, Parser};
+use nom::combinator::eof;
+use nom::sequence::terminated;
 use nom_supreme::error::ErrorTree;
 use nom_supreme::ParserExt;
 use serde::{Deserialize, Serialize};
@@ -13,6 +15,7 @@ use crate::api::EventuallyEvent;
 use crate::entity::AnyEntity;
 use crate::events::{AnyEvent, Event};
 use crate::events::game_update::{GamePitch, GameUpdate};
+use crate::events::parse_utils::greedy_text;
 
 #[derive(Serialize, Deserialize)]
 pub struct Count {
@@ -227,6 +230,89 @@ impl Event for FoulBall {
                 game.into()
             }
             other => panic!("FoulBall event does not apply to {}", other.name())
+        }
+    }
+
+    fn reverse(&self, _entity: AnyEntity, _aux: serde_json::Value) -> AnyEntity {
+        todo!()
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub enum StrikeoutType {
+    Swinging,
+    Looking,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct StrikeoutParsed {
+    batter_name: String,
+    strikeout_type: StrikeoutType,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Strikeout {
+    game_update: GamePitch,
+    time: DateTime<Utc>,
+    #[serde(flatten)]
+    parsed: StrikeoutParsed,
+}
+
+pub fn parse_strikeout(input: &str) -> IResult<&str, StrikeoutParsed, ErrorTree<&str>> {
+    let (input, batter_name) = greedy_text(tag(" strikes out ")).parse(input)?;
+    let (input, _) = tag(" strikes out ")(input)?;
+    let (input, strikeout_str) = alt((tag("swinging"), tag("looking")))(input)?;
+    let (input, _) = terminated(tag("."), eof)(input)?;
+
+    let strikeout_type = match strikeout_str {
+        "swinging" => StrikeoutType::Swinging,
+        "looking" => StrikeoutType::Looking,
+        other => panic!("Unexpected strikeout type {}", other),
+    };
+
+    Ok((input, StrikeoutParsed {
+        batter_name: batter_name.to_string(),
+        strikeout_type
+    }))
+}
+
+impl Strikeout {
+    pub fn parse(feed_event: &EventuallyEvent) -> QueryResult<(AnyEvent, Vec<(String, Option<Uuid>, serde_json::Value)>)> {
+        let time = feed_event.created;
+        let game_id = feed_event.game_id().expect("Strikeout event must have a game id");
+
+        let event = Self {
+            game_update: GamePitch::parse(feed_event),
+            time,
+            parsed: parse_strikeout(&feed_event.description).finish()
+                .expect("Failed to parse Strikeout from feed event description").1
+        };
+
+        let effects = vec![(
+            "game".to_string(),
+            Some(game_id),
+            serde_json::Value::Null
+        )];
+
+        Ok((AnyEvent::Strikeout(event), effects))
+    }
+}
+
+impl Event for Strikeout {
+    fn time(&self) -> DateTime<Utc> {
+        self.time
+    }
+
+    fn forward(&self, entity: AnyEntity, _: serde_json::Value) -> AnyEntity {
+        match entity {
+            AnyEntity::Game(mut game) => {
+                self.game_update.forward(&mut game);
+
+                game.out(1);
+
+                game.into()
+            }
+            other => panic!("Strikeout event does not apply to {}", other.name())
         }
     }
 

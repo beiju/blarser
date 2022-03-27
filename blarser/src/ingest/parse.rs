@@ -12,11 +12,11 @@ pub fn parse_feed_event(feed_event: &EventuallyEvent, state: &StateInterface) ->
         // EventType::PitcherChange => events::PitcherChange::parse(feed_event),
         // EventType::StolenBase => events::StolenBase::parse(feed_event),
         // EventType::Walk => events::Walk::parse(feed_event),
-        // EventType::Strikeout => events::Strikeout::parse(feed_event),
+        EventType::Strikeout => events::Strikeout::parse(feed_event),
         // It's easier to combine ground out and flyout types into one function
         EventType::FlyOut => events::parse_fielding_out(feed_event),
         EventType::GroundOut => events::parse_fielding_out(feed_event),
-        // EventType::HomeRun => events::HomeRun::parse(feed_event),
+        EventType::HomeRun => events::HomeRun::parse(feed_event),
         EventType::Hit => events::Hit::parse(feed_event, state),
         // EventType::GameEnd => events::GameEnd::parse(feed_event),
         EventType::BatterUp => events::BatterUp::parse(feed_event),

@@ -22,9 +22,9 @@ pub use play_ball::PlayBall;
 pub use half_inning::HalfInning;
 pub use storm_warning::StormWarning;
 pub use batter_up::BatterUp;
-pub use count_events::{Strike, Ball, FoulBall};
+pub use count_events::{Strike, Ball, FoulBall, Strikeout};
 pub use fielding_outs::{parse as parse_fielding_out, GroundOut, Flyout};
-pub use hit::Hit;
+pub use hit::{Hit, HomeRun};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -50,9 +50,11 @@ pub enum AnyEvent {
     Strike(Strike),
     Ball(Ball),
     FoulBall(FoulBall),
+    Strikeout(Strikeout),
     GroundOut(GroundOut),
     Flyout(Flyout),
     Hit(Hit),
+    HomeRun(HomeRun),
 }
 
 #[macro_export]
@@ -69,9 +71,11 @@ macro_rules! with_any_event {
             crate::events::AnyEvent::Strike($bound_name) => { $arm }
             crate::events::AnyEvent::Ball($bound_name) => { $arm }
             crate::events::AnyEvent::FoulBall($bound_name) => { $arm }
+            crate::events::AnyEvent::Strikeout($bound_name) => { $arm }
             crate::events::AnyEvent::GroundOut($bound_name) => { $arm }
             crate::events::AnyEvent::Flyout($bound_name) => { $arm }
             crate::events::AnyEvent::Hit($bound_name) => { $arm }
+            crate::events::AnyEvent::HomeRun($bound_name) => { $arm }
         }
     };
 }
@@ -95,9 +99,11 @@ impl AnyEvent {
             AnyEvent::Strike(_) => { "Strike" }
             AnyEvent::Ball(_) => { "Ball" }
             AnyEvent::FoulBall(_) => { "FoulBall" }
+            AnyEvent::Strikeout(_) => { "Strikeout" }
             AnyEvent::GroundOut(_) => { "GroundOut" }
             AnyEvent::Flyout(_) => { "Flyout" }
             AnyEvent::Hit(_) => { "Hit" }
+            AnyEvent::HomeRun(_) => { "HomeRun" }
         }
     }
 }

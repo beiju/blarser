@@ -125,3 +125,116 @@ impl Event for Hit {
         todo!()
     }
 }
+
+#[derive(Serialize, Deserialize)]
+pub enum HomeRunType {
+    Solo,
+    TwoRun,
+    ThreeRun,
+    GrandSlam,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct HomeRunParsed {
+    batter_name: String,
+    home_run_type: HomeRunType,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct HomeRun {
+    game_update: GamePitch,
+    time: DateTime<Utc>,
+    #[serde(flatten)]
+    parsed: HomeRunParsed,
+    batter_id: Uuid,
+}
+
+pub fn parse_home_run(input: &str) -> IResult<&str, HomeRunParsed, ErrorTree<&str>> {
+    let (input, batter_name) = greedy_text(tag(" hits a ")).parse(input)?;
+    let (input, _) = tag(" hits a ")(input)?;
+    let (input, home_run_type) = parse_home_run_type(input)?;
+    let (input, _) = eof(input)?;
+
+    Ok((input, HomeRunParsed {
+        batter_name: batter_name.to_string(),
+        home_run_type,
+    }))
+}
+
+
+fn parse_home_run_type(input: &str) -> IResult<&str, HomeRunType, ErrorTree<&str>> {
+    let (input, home_run_type_name) = alt((tag("solo home run!"),
+                                           tag("2-run home run!"),
+                                           tag("3-run home run!"),
+                                           tag("grand slam!")))(input)?;
+
+    let result = match home_run_type_name {
+        "solo home run!" => HomeRunType::Solo,
+        "2-run home run!" => HomeRunType::TwoRun,
+        "3-run home run!" => HomeRunType::ThreeRun,
+        "grand slam!" => HomeRunType::GrandSlam,
+        _ => panic!("Invalid home_run type {}", home_run_type_name)
+    };
+
+    IResult::Ok((input, result))
+}
+
+impl HomeRun {
+    pub fn parse(feed_event: &EventuallyEvent) -> QueryResult<(AnyEvent, Vec<(String, Option<Uuid>, serde_json::Value)>)> {
+        let time = feed_event.created;
+        let game_id = feed_event.game_id().expect("HomeRun event must have a game id");
+
+        let collated = collate_siblings(&feed_event.metadata.siblings);
+        let action_event = collated.action.iter()
+            .exactly_one()
+            .expect("Expected HomeRun event to have exactly one action event");
+
+        let event = Self {
+            game_update: GamePitch::parse(feed_event),
+            time,
+            parsed: parse_home_run(&action_event.description).finish()
+                .expect("Failed to parse HomeRun from feed event description").1,
+            batter_id: feed_event.player_id()
+                .expect("HomeRun event must have exactly one player id"),
+        };
+
+        let effects = vec![(
+            "game".to_string(),
+            Some(game_id),
+            serde_json::Value::Null
+        )];
+
+        Ok((AnyEvent::HomeRun(event), effects))
+    }
+}
+
+impl Event for HomeRun {
+    fn time(&self) -> DateTime<Utc> {
+        self.time
+    }
+
+    fn forward(&self, entity: AnyEntity, _: serde_json::Value) -> AnyEntity {
+        match entity {
+            AnyEntity::Game(mut game) => {
+                self.game_update.forward(&mut game);
+
+                let batter_id = game.team_at_bat().batter
+                    .expect("Batter must exist during HomeRun event");
+                assert_eq!(self.batter_id, batter_id,
+                           "Batter in HomeRun event didn't match batter in game state");
+
+                // game_update takes care of the scoring
+                game.clear_bases();
+                game.end_at_bat();
+
+
+                game.into()
+            }
+            other => panic!("HomeRun event does not apply to {}", other.name())
+        }
+    }
+
+    fn reverse(&self, _entity: AnyEntity, _aux: serde_json::Value) -> AnyEntity {
+        todo!()
+    }
+}

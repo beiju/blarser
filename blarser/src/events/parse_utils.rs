@@ -44,9 +44,12 @@ pub fn collate_siblings(events: &[EventuallyEvent]) -> CollatedEvents {
         .expect("Siblings array is missing an action-defining event")
         .r#type;
 
-    let (action, events) = if action_type == EventType::Hit || action_type == EventType::Walk {
-        // Hit and Walk events have only one action event. They need to be separated out this way
-        // because scoring events reuse the Hit and Walk event type
+    let (action, events) = if action_type == EventType::Hit ||
+        action_type == EventType::Walk ||
+        action_type == EventType::HomeRun {
+        // Hit, Walk, and HomeRun events have only one action event. They need to be separated out
+        // this way because scoring events reuse the Hit and Walk event type and HomeRun events
+        // have a "team scored" event but not a "player scored" event, which confuses my code.
         events.split_at(1)
     } else {
         // Other action events are delineated by the next scoring event (which seems to always use
@@ -98,7 +101,7 @@ pub fn generate_runner_advancements(runners: &[Uuid], bases: &[i32], always_adva
         .map(|(&runner_id, &from_base)| RunnerAdvancement {
             runner_id,
             from_base,
-            to_base: from_base + always_advance
+            to_base: from_base + always_advance,
         })
         .collect();
 

@@ -247,7 +247,7 @@ impl Game {
     //     self.baserunner_count -= 1;
     // }
     //
-    pub(crate) fn add_out(&mut self, outs_added: i32) {
+    pub(crate) fn out(&mut self, outs_added: i32) {
         let end_of_half_inning = self.half_inning_outs + outs_added == 3;
         if end_of_half_inning {
             self.half_inning_outs = 0;
@@ -288,7 +288,7 @@ impl Game {
         }
     }
 
-    fn clear_bases(&mut self) {
+    pub fn clear_bases(&mut self) {
         self.base_runners.clear();
         self.base_runner_names.clear();
         self.base_runner_mods.clear();
