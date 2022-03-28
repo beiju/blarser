@@ -46,24 +46,3 @@ fn parse_base(input: &str) -> IResult<&str, Base, VerboseError<&str>> {
     IResult::Ok((input, Base::from_string(base_name)))
 }
 
-pub fn parse_snowfall(input: &str) -> Result<(i32, &str), anyhow::Error> {
-    snowfall(input)
-        .finish()
-        .map_err(|err| anyhow!("Couldn't parse snowfall: {}", err))
-        .map(|(_, result)| result)
-}
-
-fn snowfall(input: &str) -> IResult<&str, (i32, &str), VerboseError<&str>> {
-    let (input, num_snowflakes) = digit1(input)?;
-    let (input, _) = tag(" Snowflakes ")(input)?;
-    let (input, modified_type) = alt((tag("slightly modified"), tag("modified"), tag("greatly modified")))(input)?;
-    let (input, _) = tag(" the field!")(input)?;
-    let (input, _) = eof(input)?;
-
-
-    let num_snowflakes: i32 = num_snowflakes.parse()
-        .expect("Can't parse number of snowflakes: {}");
-
-
-    IResult::Ok((input, (num_snowflakes, modified_type)))
-}

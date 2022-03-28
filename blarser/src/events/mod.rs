@@ -14,6 +14,7 @@ mod parse_utils;
 mod count_events;
 mod fielding_outs;
 mod hit;
+mod player_reroll;
 
 pub use start::Start;
 pub use earlseason_start::EarlseasonStart;
@@ -25,6 +26,7 @@ pub use batter_up::BatterUp;
 pub use count_events::{Strike, Ball, FoulBall, Strikeout};
 pub use fielding_outs::{parse as parse_fielding_out, GroundOut, Flyout};
 pub use hit::{Hit, HomeRun};
+pub use player_reroll::{parse as parse_player_reroll, Snow};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -55,6 +57,7 @@ pub enum AnyEvent {
     Flyout(Flyout),
     Hit(Hit),
     HomeRun(HomeRun),
+    Snow(Snow),
 }
 
 #[macro_export]
@@ -76,6 +79,7 @@ macro_rules! with_any_event {
             crate::events::AnyEvent::Flyout($bound_name) => { $arm }
             crate::events::AnyEvent::Hit($bound_name) => { $arm }
             crate::events::AnyEvent::HomeRun($bound_name) => { $arm }
+            crate::events::AnyEvent::Snow($bound_name) => { $arm }
         }
     };
 }
@@ -104,6 +108,7 @@ impl AnyEvent {
             AnyEvent::Flyout(_) => { "Flyout" }
             AnyEvent::Hit(_) => { "Hit" }
             AnyEvent::HomeRun(_) => { "HomeRun" }
+            AnyEvent::Snow(_) => { "Snow" }
         }
     }
 }

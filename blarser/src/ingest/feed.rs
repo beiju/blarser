@@ -124,11 +124,17 @@ async fn apply_feed_event(mut ingest: FeedIngest, mut feed_event: EventuallyEven
 
         return ingest;
     } else if feed_event.r#type == EventType::Snowflakes {
-        for team_id in &feed_event.team_tags {
-            if let Some(snowfalls) = ingest.get_snowfalls_for_team(team_id) {
-                feed_event.metadata.siblings.extend(snowfalls.into_iter());
-            }
-        }
+        let mut new_events: Vec<_> = feed_event.team_tags.iter()
+            .filter_map(|team_id| ingest.get_snowfalls_for_team(team_id))
+            .flatten()
+            .sorted_by_key(|event| event.created)
+            .collect();
+        // In gamma10, these were properly placed in the feed and they were before all other
+        // messages, so that's what I'm doing for the stranded events too.
+        new_events.append(&mut feed_event.metadata.siblings);
+        feed_event.metadata.siblings = Vec::new();
+        feed_event = new_events.first().unwrap().clone();
+        feed_event.metadata.siblings = new_events;
     }
 
     ingest.run_transaction(move |state| {

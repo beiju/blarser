@@ -12,7 +12,7 @@ use uuid::Uuid;
 use crate::api::EventuallyEvent;
 use crate::entity::{AnyEntity, Base};
 use crate::events::{AnyEvent, Event};
-use crate::events::game_update::{GamePitch, GameUpdate};
+use crate::events::game_update::GamePitch;
 use crate::events::parse_utils::{collate_siblings, greedy_text, parse_base};
 
 

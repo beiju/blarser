@@ -26,6 +26,9 @@ pub fn parse_feed_event(feed_event: &EventuallyEvent, state: &StateInterface) ->
         // EventType::InningEnd => events::InningEnd::parse(feed_event),
         // EventType::BatterSkipped => events::BatterSkipped::parse(feed_event),
         // EventType::PeanutFlavorText => events::FlavorText::parse(feed_event),
+        // PlayerStatReroll is a prefix for Snowflakes event, but it's theoretically possible that
+        // there would be a Snowflakes event with no PlayerStatRerolls
+        EventType::PlayerStatReroll | EventType::Snowflakes => events::parse_player_reroll(feed_event),
         // EventType::WinCollectedRegular => events::WinCollectedRegular::parse(feed_event),
         // EventType::GameOver => events::GameOver::parse(feed_event),
         EventType::StormWarning => events::StormWarning::parse(feed_event),

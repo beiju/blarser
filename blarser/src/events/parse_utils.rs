@@ -124,10 +124,10 @@ pub fn generate_runner_advancements(runners: &[Uuid], bases: &[i32], always_adva
 
 // Split greedy text on any character that might be the end of the string: whitespace, newline,
 // period, apostrophe, anything else I think of later. These can be inside the string, but they
-// denote places we'll start looking for
+// denote places we'll start looking for the terminator.
 fn greedy_text_split(c: char) -> bool {
     match c {
-        '.' | '\'' => true,
+        '.' | '\'' | '!' => true,
         c if c.is_whitespace() => true,
         _ => false
     }
