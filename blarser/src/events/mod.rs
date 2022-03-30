@@ -36,6 +36,10 @@ use crate::entity::AnyEntity;
 pub trait Event: Serialize + for<'de> Deserialize<'de> {
     fn time(&self) -> DateTime<Utc>;
 
+    fn generate_successors(&self) -> Vec<(AnyEvent, Effects)> {
+        Vec::new()
+    }
+
     fn forward(&self, entity: AnyEntity, aux: serde_json::Value) -> AnyEntity;
     fn reverse(&self, entity: AnyEntity, aux: serde_json::Value) -> AnyEntity;
 }
@@ -85,6 +89,7 @@ macro_rules! with_any_event {
 }
 
 pub use with_any_event;
+use crate::state::Effects;
 
 impl AnyEvent {
     pub fn time(&self) -> DateTime<Utc> {

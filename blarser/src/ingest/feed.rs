@@ -1,3 +1,4 @@
+use std::cmp::Reverse;
 use chrono::{DateTime, Utc};
 use diesel::QueryResult;
 use rocket::{info, warn};
@@ -75,8 +76,11 @@ fn apply_event_effects<'a, EventT: Event>(
 
 async fn run_time_until(ingest: FeedIngest, start_time: DateTime<Utc>, end_time: DateTime<Utc>) -> FeedIngest {
     ingest.run_transaction(move |state| {
-        // TODO: Properly handle when a timed event generates another timed event
-        for (stored_event, effects) in state.get_events_between(start_time, end_time)? {
+        let mut timed_events = state.get_events_between(start_time, end_time)?;
+        // Reverse timed_events so that popping returns them in the right order
+        timed_events.reverse();
+
+        while let Some((stored_event, effects)) = timed_events.pop() {
             info!("Feed ingest: Applying stored {} event at {}",
                 stored_event.event.type_name(), stored_event.event.time());
             let effects: Vec<_> = effects.into_iter()
@@ -91,7 +95,19 @@ async fn run_time_until(ingest: FeedIngest, start_time: DateTime<Utc>, end_time:
                 warn!("{} event has no effects", stored_event.event.type_name());
             }
 
-            let successors = with_any_event!(stored_event.event, event => apply_event_effects(&state, &event, &effects))?;
+            let successors = with_any_event!(stored_event.event, event => {
+                for (event, effects) in event.generate_successors() {
+                    let (stored_event, stored_effects) = state.save_timed_event(event, effects)?;
+                    if stored_event.time > start_time && stored_event.time <= end_time {
+                        // This will happen so rarely I'm not going to bother with a proper sorted
+                        // insert
+                        timed_events.push((stored_event, stored_effects));
+                        timed_events.sort_by_key(|(e, _)| Reverse(e.time));
+                        todo!("Verify the above sorting");
+                    }
+                }
+                apply_event_effects(&state, &event, &effects)
+            })?;
             state.save_successors(successors, stored_event.time, stored_event.id)?;
         }
 
@@ -145,8 +161,14 @@ async fn apply_feed_event(mut ingest: FeedIngest, mut feed_event: EventuallyEven
             warn!("{} event has no effects", event.type_name());
         }
 
-        let successors = with_any_event!(&event, event => apply_event_effects(&state, event, &effects))?;
-        let stored_event = StateInterface::save_feed_event(&state, event, effects)?;
+        let successors = with_any_event!(&event, event => {
+            for (event,  effects) in event.generate_successors() {
+                state.save_timed_event(event, effects)?;
+            }
+
+            apply_event_effects(&state, event, &effects)
+        })?;
+        let (stored_event, _) = StateInterface::save_feed_event(&state, event, effects)?;
         state.save_successors(successors, stored_event.time, stored_event.id)
     }).await
         .expect("Ingest failed");

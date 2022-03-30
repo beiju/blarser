@@ -84,6 +84,7 @@ macro_rules! reader_with_nil_id {
 }
 
 use diesel::sql_types;
+use crate::schema::event_effects::dsl::event_effects;
 sql_function! {
     #[aggregate]
     fn array_agg(expr: sql_types::Integer) -> sql_types::Array<sql_types::Integer>;
@@ -92,6 +93,8 @@ sql_function! {
 sql_function! {
     fn coalesce(x: sql_types::Nullable<sql_types::Array<sql_types::Integer>>, y: sql_types::Array<sql_types::Integer>) -> sql_types::Array<sql_types::Integer>;
 }
+
+pub type Effects = Vec<(String, Option<Uuid>, serde_json::Value)>;
 
 impl<'conn> StateInterface<'conn> {
     pub fn new(conn: &'conn PgConnection, ingest_id: i32) -> Self {
@@ -302,20 +305,20 @@ impl<'conn> StateInterface<'conn> {
         Ok(versions_grouped)
     }
 
-    pub fn save_start_event(&self, event: AnyEvent, effects: Vec<(String, Option<Uuid>, serde_json::Value)>) -> QueryResult<StoredEvent> {
+    pub fn save_start_event(&self, event: AnyEvent, effects: Effects) -> QueryResult<(StoredEvent, Vec<EventEffect>)> {
         self.save_event(EventSource::Start, event, effects)
     }
 
-    pub fn save_feed_event(&self, event: AnyEvent, effects: Vec<(String, Option<Uuid>, serde_json::Value)>) -> QueryResult<StoredEvent> {
+    pub fn save_feed_event(&self, event: AnyEvent, effects: Effects) -> QueryResult<(StoredEvent, Vec<EventEffect>)> {
         self.save_event(EventSource::Feed, event, effects)
     }
 
-    pub fn save_timed_event(&self, event: AnyEvent, effects: Vec<(String, Option<Uuid>, serde_json::Value)>) -> QueryResult<StoredEvent> {
+    pub fn save_timed_event(&self, event: AnyEvent, effects: Effects) -> QueryResult<(StoredEvent, Vec<EventEffect>)> {
         self.save_event(EventSource::Timed, event, effects)
     }
 
     // This must take an AnyEvent, not generic EventT
-    fn save_event(&self, source: EventSource, event: AnyEvent, effects: Vec<(String, Option<Uuid>, serde_json::Value)>) -> QueryResult<StoredEvent> {
+    fn save_event(&self, source: EventSource, event: AnyEvent, effects: Effects) -> QueryResult<(StoredEvent, Vec<EventEffect>)> {
         use crate::schema::events::dsl as events;
         use crate::schema::event_effects::dsl as event_effects;
 
@@ -341,14 +344,15 @@ impl<'conn> StateInterface<'conn> {
             })
             .collect();
 
-        insert_into(event_effects::event_effects)
+        let effects = insert_into(event_effects::event_effects)
             .values(insert_effects)
-            .execute(self.conn)?;
+            .returning(event_effects::event_effects::all_columns())
+            .get_results::<EventEffect>(self.conn)?;
 
-        Ok(stored_event.parse())
+        Ok((stored_event.parse(), effects))
     }
 
-    fn version_from_start<EntityRawT: EntityRaw>(&self, entity_raw: EntityRawT, start_time: DateTime<Utc>, from_event: i32) -> (NewVersion, Vec<(AnyEvent, Vec<(String, Option<Uuid>, serde_json::Value)>)>) {
+    fn version_from_start<EntityRawT: EntityRaw>(&self, entity_raw: EntityRawT, start_time: DateTime<Utc>, from_event: i32) -> (NewVersion, Vec<(AnyEvent, Effects)>) {
         let events = entity_raw.init_events(start_time);
         let version = NewVersion {
             ingest_id: self.ingest_id,
@@ -366,7 +370,7 @@ impl<'conn> StateInterface<'conn> {
     }
 
     pub fn add_initial_versions(&self, start_time: DateTime<Utc>, entities: impl Iterator<Item=Observation>) -> QueryResult<usize> {
-        let from_event = self.save_event(EventSource::Start, AnyEvent::Start(StartEvent::new(start_time)), Vec::new())?;
+        let (from_event, _) = self.save_event(EventSource::Start, AnyEvent::Start(StartEvent::new(start_time)), Vec::new())?;
 
         let chunks = entities
             .map(move |observation| {

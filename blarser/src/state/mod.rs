@@ -13,4 +13,4 @@ pub use versions_db::{
     Version,
     NewVersion,
 };
-pub use state_interface::{StateInterface, EntityDescription};
+pub use state_interface::{StateInterface, EntityDescription, Effects};
