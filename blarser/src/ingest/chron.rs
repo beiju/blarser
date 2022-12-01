@@ -11,9 +11,10 @@ use rocket::{info, warn};
 use serde_json::Value;
 use thiserror::Error;
 use partial_information::Conflict;
+use fed::FedEvent;
 
-use crate::api::chronicler;
-use crate::ingest::task::{ChronIngest, IsSerializationFailure};
+use crate::api::{chronicler, ChroniclerItem};
+use crate::ingest::task::Ingest;
 use crate::entity::{AnyEntity, Entity, EntityParseError, EntityRaw};
 use crate::ingest::observation::Observation;
 use crate::state::{EventEffect, MergedSuccessors, NewVersion, StateInterface, Version, VersionLink};
@@ -114,7 +115,7 @@ fn kmerge_stream(streams: impl Iterator<Item=PinnedObservationStream>) -> impl S
     })
 }
 
-pub async fn init_chron(ingest: &ChronIngest, start_at_time: &'static str, start_time_parsed: DateTime<Utc>) {
+pub async fn init_chron(ingest: &Ingest, start_at_time: &'static str, start_time_parsed: DateTime<Utc>) {
     let initial_versions: Vec<_> = initial_state(start_at_time).collect().await;
 
     ingest.run(move |state| {
@@ -125,59 +126,99 @@ pub async fn init_chron(ingest: &ChronIngest, start_at_time: &'static str, start
     info!("Finished populating initial Chron values");
 }
 
-pub async fn ingest_chron(mut ingest: ChronIngest, start_at_time: &'static str, start_time: DateTime<Utc>) {
-    info!("Started Chron ingest task");
+struct StreamWithCursor<CursorT: PartialOrd, ItemT> {
+    produce_fn: tokio::sync::mpsc::Receiver<(CursorT, Option<ItemT>)>,
+    next_cursor: CursorT,
+}
 
-    let updates = chron_updates(start_at_time);
-
-    pin_mut!(updates);
-
-    let mut prev_observation_time = start_time;
-
-    while let Some(observation) = updates.next().await {
-        // Just to ensure observations are processed in latest_time order
-        assert!(observation.latest_time() >= prev_observation_time,
-                "Observations were not processed in chronological order");
-        prev_observation_time = observation.latest_time();
-
-        ingest.wait_for_feed_ingest(observation.latest_time()).await;
-
-        let normal_ingest_result = {
-            let observation = observation.clone();
-            ingest.run_transaction(move |state| {
-                with_any_entity_raw!(&observation.entity_raw, raw => {
-                    forward_ingest(&state, raw, observation.perceived_at)?;
-
-                    reverse_ingest(&state, raw, observation.perceived_at)?;
-                });
-
-                Ok::<_, ChronIngestError>(())
-            }).await
-        };
-
-        match normal_ingest_result {
-            Err(ChronIngestError::Conflicts(conflicts)) => {
-                let conflicts_str = conflicts.to_string();
-                warn!("Getting approval for conflicts: {}", conflicts_str);
-                let approved = ingest.get_approval(observation.entity_raw.name(), observation.entity_raw.id(),
-                                                   observation.perceived_at, conflicts_str).await
-                    .expect("Error in get_approval");
-                if !approved {
-                    panic!("User rejected conflicts. Nothing to do.");
-                } else {
-                    ingest.run_transaction(move |state| {
-                        with_any_entity_raw!(&observation.entity_raw, raw => {
-                            add_manual_event(&state, raw, observation.perceived_at)
-                        })
-                    }).await
-                        .expect("Error adding approved manual event");
-                }
-            }
-            other => other.expect("Error in Chron ingest")
-        }
+impl<CursorT: PartialOrd, ItemT> StreamWithCursor<CursorT, ItemT> {
+    pub fn produce_until(&mut self, limit: CursorT) -> impl Stream<Item=ItemT> {
+        stream::unfold((), |()| async {
+            todo!()
+        })
     }
 
+    pub fn next_cursor(&self) -> &CursorT {
+        &self.next_cursor
+    }
+}
+
+fn get_event_producer(start_at_time: &'static str) -> StreamWithCursor<DateTime<Utc>, FedEvent> {
     todo!()
+}
+
+fn get_observation_producer(start_at_time: &'static str) -> StreamWithCursor<DateTime<Utc>, ChroniclerItem> {
+    todo!()
+}
+
+pub async fn run_ingest(mut ingest: Ingest, start_at_time: &'static str, start_time: DateTime<Utc>) {
+    info!("Started ingest task");
+
+    let mut event_producer = get_event_producer(start_at_time);
+    let mut observation_producer = get_observation_producer(start_at_time);
+
+    let mut events_processed_until = start_time;
+
+    loop {
+        let new_observations = observation_producer.produce_until(events_processed_until);
+        pin_mut!(new_observations);
+        while let Some(observation) = new_observations.next().await {
+            todo!();
+        }
+        let new_events = event_producer.produce_until(events_processed_until);
+        pin_mut!(new_events);
+        while let Some(event) = new_events.next().await {
+            todo!();
+        }
+        events_processed_until = *event_producer.next_cursor();
+    }
+
+    // let mut prev_observation_time = start_time;
+    //
+    // while let Some(observation) = updates.next().await {
+    //     // Just to ensure observations are processed in latest_time order
+    //     assert!(observation.latest_time() >= prev_observation_time,
+    //             "Observations were not processed in chronological order");
+    //     prev_observation_time = observation.latest_time();
+    //
+    //     ingest.wait_for_feed_ingest(observation.latest_time()).await;
+    //
+    //     let normal_ingest_result = {
+    //         let observation = observation.clone();
+    //         ingest.run_transaction(move |state| {
+    //             with_any_entity_raw!(&observation.entity_raw, raw => {
+    //                 forward_ingest(&state, raw, observation.perceived_at)?;
+    //
+    //                 reverse_ingest(&state, raw, observation.perceived_at)?;
+    //             });
+    //
+    //             Ok::<_, ChronIngestError>(())
+    //         }).await
+    //     };
+    //
+    //     match normal_ingest_result {
+    //         Err(ChronIngestError::Conflicts(conflicts)) => {
+    //             let conflicts_str = conflicts.to_string();
+    //             warn!("Getting approval for conflicts: {}", conflicts_str);
+    //             let approved = ingest.get_approval(observation.entity_raw.name(), observation.entity_raw.id(),
+    //                                                observation.perceived_at, conflicts_str).await
+    //                 .expect("Error in get_approval");
+    //             if !approved {
+    //                 panic!("User rejected conflicts. Nothing to do.");
+    //             } else {
+    //                 ingest.run_transaction(move |state| {
+    //                     with_any_entity_raw!(&observation.entity_raw, raw => {
+    //                         add_manual_event(&state, raw, observation.perceived_at)
+    //                     })
+    //                 }).await
+    //                     .expect("Error adding approved manual event");
+    //             }
+    //         }
+    //         other => other.expect("Error in Chron ingest")
+    //     }
+    // }
+    //
+    // todo!()
 }
 
 #[derive(Debug)]
@@ -217,15 +258,6 @@ pub enum ChronIngestError {
 
     #[error(transparent)]
     DbError(#[from] diesel::result::Error),
-}
-
-impl IsSerializationFailure for ChronIngestError {
-    fn is_serialization_failure(&self) -> bool {
-        match self {
-            ChronIngestError::DbError(db_err) => db_err.is_serialization_failure(),
-            _ => false
-        }
-    }
 }
 
 pub type ChronIngestResult<T> = Result<T, ChronIngestError>;

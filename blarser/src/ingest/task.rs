@@ -11,8 +11,7 @@ use uuid::Uuid;
 use crate::api::EventuallyEvent;
 
 use crate::db::BlarserDbConn;
-use crate::ingest::chron::{init_chron, ingest_chron};
-use crate::ingest::feed::ingest_feed;
+use crate::ingest::chron::{init_chron, run_ingest};
 use crate::schema;
 use crate::state::{ApprovalState, StateInterface};
 
@@ -53,220 +52,11 @@ pub struct IngestTask {
     pending_approvals: Arc<StdMutex<HashMap<i32, oneshot::Sender<bool>>>>,
 }
 
-struct IngestImpl {
-    pub ingest_id: i32,
-    pub db: BlarserDbConn,
-}
-
-pub trait IsSerializationFailure {
-    fn is_serialization_failure(&self) -> bool;
-}
-
-impl IsSerializationFailure for diesel::result::Error {
-    fn is_serialization_failure(&self) -> bool {
-        if let diesel::result::Error::DatabaseError(diesel::result::DatabaseErrorKind::SerializationFailure, _) = self {
-            true
-        } else {
-            false
-        }
-    }
-}
-
-impl IngestImpl {
-    #[allow(dead_code)]
-    pub async fn run<F, R>(&self, f: F) -> R
-        where F: FnOnce(StateInterface) -> R + Send + 'static,
-              R: Send + 'static {
-        let ingest_id = self.ingest_id;
-        self.db.run(move |c| {
-            f(StateInterface::new(c, ingest_id))
-        }).await
-    }
-
-    pub async fn run_transaction<F, T, E>(&self, f: F) -> Result<T, E>
-        where F: Fn(StateInterface) -> Result<T, E> + Send + Clone + 'static,
-              T: Send + 'static,
-              E: From<diesel::result::Error> + IsSerializationFailure + Send + 'static {
-        let ingest_id = self.ingest_id;
-        let closure = move |c: &mut PgConnection| {
-            c.build_transaction()
-                .serializable()
-                .run(|| {
-                    f(StateInterface::new(c, ingest_id))
-                })
-        };
-
-        for _ in 0..20 {
-            let result = self.db.run(closure.clone()).await;
-
-            if let Err(user_err) = &result {
-                if user_err.is_serialization_failure() {
-                    info!("Retrying operation after serialization failure");
-                    continue;
-                }
-            }
-
-            return result;
-        }
-
-        panic!("Serialization failure recovery behavior is stuck (over 20 iterations)");
-    }
-}
-
-pub struct ChronIngest {
-    ingest_impl: IngestImpl,
-    pub send_chron_progress: watch::Sender<DateTime<Utc>>,
-    pub receive_feed_progress: watch::Receiver<DateTime<Utc>>,
-    pub pending_approvals: Arc<StdMutex<HashMap<i32, oneshot::Sender<bool>>>>,
-}
-
-impl ChronIngest {
-    pub fn new(
-        db: BlarserDbConn,
-        ingest_id: i32,
-        send_chron_progress: watch::Sender<DateTime<Utc>>,
-        receive_feed_progress: watch::Receiver<DateTime<Utc>>,
-    ) -> Self {
-        Self {
-            ingest_impl: IngestImpl {
-                ingest_id,
-                db,
-            },
-            send_chron_progress,
-            receive_feed_progress,
-            pending_approvals: Arc::new(Mutex::new(Default::default())),
-        }
-    }
-
-    //noinspection DuplicatedCode
-    pub async fn run<F, R>(&self, f: F) -> R
-        where F: FnOnce(StateInterface) -> R + Send + 'static,
-              R: Send + 'static {
-        self.ingest_impl.run(f).await
-    }
-
-    //noinspection DuplicatedCode
-    pub async fn run_transaction<F, T, E>(&self, f: F) -> Result<T, E>
-        where F: Fn(StateInterface) -> Result<T, E> + Send + Clone + 'static,
-              T: Send + 'static,
-              E: From<diesel::result::Error> + IsSerializationFailure + Send + 'static {
-        self.ingest_impl.run_transaction(f).await
-    }
-
-    pub async fn wait_for_feed_ingest(&mut self, wait_until_time: DateTime<Utc>) {
-        self.send_chron_progress.send(wait_until_time)
-            .expect("Error communicating with Chronicler ingest");
-        // info!("Chron ingest sent {} as requested time", wait_until_time);
-
-        loop {
-            let feed_time = *self.receive_feed_progress.borrow();
-            if wait_until_time < feed_time {
-                break;
-            }
-            // info!("Chronicler ingest waiting for Eventually ingest to catch up (at {} and we need {}, difference of {}s)",
-            // feed_time, wait_until_time, (wait_until_time - feed_time).num_seconds());
-            self.receive_feed_progress.changed().await
-                .expect("Error communicating with Eventually ingest");
-        }
-    }
-
-    pub async fn get_approval(&self, entity_type: &'static str, entity_id: Uuid, perceived_at: DateTime<Utc>, message: String) -> QueryResult<bool> {
-        let result = self.run_transaction(move |state| {
-            state.upsert_approval(entity_type, entity_id, perceived_at, &message)
-        }).await?;
-
-        match result {
-            ApprovalState::Pending(id) => {
-                let (send, recv) = oneshot::channel();
-                // New scope to make sure pending_approvals is unlocked before waiting on the channel
-                {
-                    let mut pending_approvals = self.pending_approvals.lock().unwrap();
-                    pending_approvals.insert(id, send);
-                }
-                let result = recv.await
-                    .expect("Pending approval channel dropped unexpectedly");
-
-                Ok(result)
-            }
-            ApprovalState::Approved => { Ok(true) }
-            ApprovalState::Rejected => { Ok(false) }
-        }
-    }
-}
-
-pub struct FeedIngest {
-    ingest_impl: IngestImpl,
-    send_feed_progress: watch::Sender<DateTime<Utc>>,
-    receive_chron_progress: watch::Receiver<DateTime<Utc>>,
-    pending_snowfalls: MultiMap<Uuid, EventuallyEvent>,
-}
-
-impl FeedIngest {
-    pub fn new(
-        db: BlarserDbConn,
-        ingest_id: i32,
-        send_feed_progress: watch::Sender<DateTime<Utc>>,
-        receive_chron_progress: watch::Receiver<DateTime<Utc>>,
-    ) -> Self {
-        Self {
-            ingest_impl: IngestImpl {
-                ingest_id,
-                db,
-            },
-            send_feed_progress,
-            receive_chron_progress,
-            pending_snowfalls: MultiMap::new(),
-        }
-    }
-
-    //noinspection DuplicatedCode
-    pub async fn run<F, R>(&self, f: F) -> R
-        where F: FnOnce(StateInterface) -> R + Send + 'static,
-              R: Send + 'static {
-        self.ingest_impl.run(f).await
-    }
-
-    //noinspection DuplicatedCode
-    pub async fn run_transaction<F, T, E>(&self, f: F) -> Result<T, E>
-        where F: Fn(StateInterface) -> Result<T, E> + Send + Clone + 'static,
-              T: Send + 'static,
-              E: From<diesel::result::Error> + IsSerializationFailure + Send + 'static {
-        self.ingest_impl.run_transaction(f).await
-    }
-
-    pub async fn wait_for_chron_ingest(&mut self, feed_event_time: DateTime<Utc>) {
-        self.send_feed_progress.send(feed_event_time)
-            .expect("Error communicating with Chronicler ingest");
-        // info!("Feed ingest sent progress {}", feed_event_time);
-
-        loop {
-            let chron_requests_time = *self.receive_chron_progress.borrow();
-            let stop_at = chron_requests_time + Duration::seconds(1);
-            if feed_event_time < stop_at {
-                break;
-            }
-            // info!("Eventually ingest waiting for Chronicler ingest to catch up (at {} and we are at {}, {}s ahead)",
-            //         chron_requests_time, feed_event_time, (feed_event_time - chron_requests_time).num_seconds());
-            self.receive_chron_progress.changed().await
-                .expect("Error communicating with Chronicler ingest");
-        }
-    }
-
-    pub fn add_pending_snowfall(&mut self, team_id: Uuid, event: EventuallyEvent) {
-        self.pending_snowfalls.insert(team_id, event);
-    }
-
-    pub fn get_snowfalls_for_team(&mut self, team_id: &Uuid) -> Option<Vec<EventuallyEvent>> {
-        self.pending_snowfalls.remove(team_id)
-    }
-}
-
-
 impl IngestTask {
-    pub async fn new(feed_db: BlarserDbConn, chron_db: BlarserDbConn) -> IngestTask {
+    pub async fn new(conn: BlarserDbConn) -> IngestTask {
         info!("Starting ingest");
 
-        let ingest_id: i32 = feed_db.run(|c| {
+        let ingest_id: i32 = conn.run(|c| {
             use diesel::dsl::*;
             use schema::ingests::dsl::*;
 
@@ -286,25 +76,16 @@ impl IngestTask {
         }).await
             .expect("Failed to create new ingest record");
 
-        let blarser_start = DateTime::parse_from_rfc3339(BLARSER_START)
-            .expect("Couldn't parse Blarser start time")
-            .with_timezone(&Utc);
-
-        let (send_feed_progress, receive_feed_progress) = watch::channel(blarser_start);
-        let (send_chron_progress, receive_chron_progress) = watch::channel(blarser_start);
-
         let approvals = Arc::new(StdMutex::new(HashMap::new()));
-        let feed_ingest = FeedIngest::new(feed_db, ingest_id, send_feed_progress, receive_chron_progress);
-        let chron_ingest = ChronIngest::new(chron_db, ingest_id, send_chron_progress, receive_feed_progress);
+        let ingest = Ingest::new(ingest_id, conn);
 
         let start_time_parsed = DateTime::parse_from_rfc3339(BLARSER_START)
             .expect("Couldn't parse hard-coded Blarser start time")
             .with_timezone(&Utc);
 
-        init_chron(&chron_ingest, BLARSER_START, start_time_parsed).await;
+        init_chron(&ingest, BLARSER_START, start_time_parsed).await;
 
-        tokio::spawn(ingest_chron(chron_ingest, BLARSER_START, start_time_parsed));
-        tokio::spawn(ingest_feed(feed_ingest, BLARSER_START, start_time_parsed));
+        tokio::spawn(run_ingest(ingest, BLARSER_START, start_time_parsed));
 
         IngestTask {
             ingest_id,
@@ -317,6 +98,54 @@ impl IngestTask {
         if let Some(sender) = pending_approvals.remove(&id) {
             sender.send(result)
                 .expect("Approval channel was unexpectedly closed");
+        }
+    }
+}
+
+pub struct Ingest {
+    pub ingest_id: i32,
+    pub db: BlarserDbConn,
+    pub pending_approvals: Arc<StdMutex<HashMap<i32, oneshot::Sender<bool>>>>,
+}
+
+impl Ingest {
+    pub fn new(ingest_id: i32, db: BlarserDbConn) -> Self {
+        Self {
+            ingest_id,
+            db,
+            pending_approvals: Arc::new(Mutex::new(Default::default())),
+        }
+    }
+
+    pub async fn run<F, R>(&self, f: F) -> R
+        where F: FnOnce(StateInterface) -> R + Send + 'static,
+              R: Send + 'static {
+        let ingest_id = self.ingest_id;
+        self.db.run(move |c| {
+            f(StateInterface::new(c, ingest_id))
+        }).await
+    }
+
+    pub async fn get_approval(&self, entity_type: &'static str, entity_id: Uuid, perceived_at: DateTime<Utc>, message: String) -> QueryResult<bool> {
+        let result = self.run(move |state| {
+            state.upsert_approval(entity_type, entity_id, perceived_at, &message)
+        }).await?;
+
+        match result {
+            ApprovalState::Pending(id) => {
+                let (send, recv) = oneshot::channel();
+                // New scope to make sure pending_approvals is unlocked before waiting on the channel
+                {
+                    let mut pending_approvals = self.pending_approvals.lock().unwrap();
+                    pending_approvals.insert(id, send);
+                }
+                let result = recv.await
+                    .expect("Pending approval channel dropped unexpectedly");
+
+                Ok(result)
+            }
+            ApprovalState::Approved => { Ok(true) }
+            ApprovalState::Rejected => { Ok(false) }
         }
     }
 }

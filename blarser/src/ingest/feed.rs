@@ -11,7 +11,6 @@ use crate::entity::{AnyEntity, Entity};
 use crate::{entity_dispatch, with_any_event};
 use crate::events::Event;
 use crate::ingest::parse::parse_feed_event;
-use crate::ingest::task::FeedIngest;
 
 use crate::state::{MergedSuccessors, StateInterface};
 

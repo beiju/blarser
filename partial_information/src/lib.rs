@@ -1,5 +1,3 @@
-#![feature(generic_associated_types)]
-
 mod rerollable;
 mod maybe_known;
 mod compare;

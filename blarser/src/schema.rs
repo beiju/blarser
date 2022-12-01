@@ -1,8 +1,12 @@
-table! {
-    use diesel::sql_types::*;
-    use crate::db_types::*;
-    use crate::state::Event_source;
+// @generated automatically by Diesel CLI.
 
+pub mod sql_types {
+    #[derive(diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "event_source"))]
+    pub struct EventSource;
+}
+
+diesel::table! {
     approvals (id) {
         id -> Int4,
         entity_type -> Text,
@@ -14,11 +18,7 @@ table! {
     }
 }
 
-table! {
-    use diesel::sql_types::*;
-    use crate::db_types::*;
-    use crate::state::Event_source;
-
+diesel::table! {
     event_effects (id) {
         id -> Int4,
         event_id -> Int4,
@@ -28,36 +28,27 @@ table! {
     }
 }
 
-table! {
+diesel::table! {
     use diesel::sql_types::*;
-    use crate::db_types::*;
-    use crate::state::Event_source;
+    use super::sql_types::EventSource;
 
     events (id) {
         id -> Int4,
         ingest_id -> Int4,
         time -> Timestamptz,
-        source -> Event_source,
+        source -> EventSource,
         data -> Jsonb,
     }
 }
 
-table! {
-    use diesel::sql_types::*;
-    use crate::db_types::*;
-    use crate::state::Event_source;
-
+diesel::table! {
     ingests (id) {
         id -> Int4,
         started_at -> Timestamptz,
     }
 }
 
-table! {
-    use diesel::sql_types::*;
-    use crate::db_types::*;
-    use crate::state::Event_source;
-
+diesel::table! {
     version_links (id) {
         id -> Int4,
         parent_id -> Int4,
@@ -65,11 +56,7 @@ table! {
     }
 }
 
-table! {
-    use diesel::sql_types::*;
-    use crate::db_types::*;
-    use crate::state::Event_source;
-
+diesel::table! {
     versions (id) {
         id -> Int4,
         ingest_id -> Int4,
@@ -79,41 +66,19 @@ table! {
         entity -> Jsonb,
         from_event -> Int4,
         event_aux_data -> Jsonb,
-        observations -> Array<Timestamptz>,
+        observations -> Array<Nullable<Timestamptz>>,
         terminated -> Nullable<Text>,
     }
 }
 
-table! {
-    use diesel::sql_types::*;
-    use crate::db_types::*;
-    use crate::state::Event_source;
+diesel::joinable!(event_effects -> events (event_id));
+diesel::joinable!(versions -> events (from_event));
 
-    versions_with_end (id) {
-        id -> Int4,
-        ingest_id -> Int4,
-        entity_type -> Text,
-        entity_id -> Uuid,
-        start_time -> Timestamptz,
-        end_time -> Nullable<Timestamptz>,
-        entity -> Jsonb,
-        from_event -> Int4,
-        event_aux_data -> Jsonb,
-        observations -> Array<Timestamptz>,
-        terminated -> Nullable<Text>,
-    }
-}
-
-joinable!(event_effects -> events (event_id));
-joinable!(versions -> events (from_event));
-joinable!(versions_with_end -> events (from_event));
-
-allow_tables_to_appear_in_same_query!(
+diesel::allow_tables_to_appear_in_same_query!(
     approvals,
     event_effects,
     events,
     ingests,
     version_links,
     versions,
-    versions_with_end,
 );

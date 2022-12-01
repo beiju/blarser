@@ -37,7 +37,7 @@ pub async fn debug(conn: BlarserDbConn, ingest_holder: &State<IngestTaskHolder>)
 }
 
 #[rocket::get("/debug/<entity_type>/<entity_id>")]
-pub async fn entity_debug_json(conn: BlarserDbConn, ingest: &State<IngestTaskHolder>, entity_type: String, entity_id: Uuid) -> Result<Value, ApiError> {
+pub async fn entity_debug_json(conn: BlarserDbConn, ingest: &State<IngestTaskHolder>, entity_type: String, entity_id: kkkkkkkkkkkkkkkkkkkkkkkkkUuid) -> Result<Value, ApiError> {
     let ingest_id = ingest.latest_ingest_id()
         .ok_or_else(|| ApiError::InternalError("There is no ingest yet".to_string()))?;
 
