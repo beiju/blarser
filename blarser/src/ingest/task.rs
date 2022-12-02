@@ -126,8 +126,8 @@ impl Ingest {
         }).await
     }
 
-    pub async fn get_approval(&self, entity_type: &'static str, entity_id: Uuid, perceived_at: DateTime<Utc>, message: String) -> QueryResult<bool> {
-        let result = self.run(move |state| {
+    pub async fn get_approval(&mut self, entity_type: &'static str, entity_id: Uuid, perceived_at: DateTime<Utc>, message: String) -> QueryResult<bool> {
+        let result = self.run(move |mut state| {
             state.upsert_approval(entity_type, entity_id, perceived_at, &message)
         }).await?;
 

@@ -11,7 +11,7 @@ use im::HashMap;
 
 use blarser::db::BlarserDbConn;
 use blarser::ingest::IngestTaskHolder;
-use blarser::state::{get_entity_debug, VersionLink, Version, StateInterface, EntityDescription};
+use blarser::state::{VersionLink, Version, StateInterface, EntityDescription};
 use crate::routes::ApiError;
 
 #[rocket::get("/debug")]
@@ -24,25 +24,26 @@ pub async fn debug(conn: BlarserDbConn, ingest_holder: &State<IngestTaskHolder>)
         pub entities: Vec<EntityDescription>,
     }
 
-    let entities = conn.run(move |c| {
-        let state = StateInterface::new(c, ingest_id);
-        state.get_recently_updated_entity_descriptions(500)
-    }).await
-        .map_err(|e| {
-            error!("Diesel error: {}", e);
-            ApiError::InternalError(anyhow!(e).context("In debug route").to_string())
-        })?;
-
-    Ok(Template::render("debug", DebugTemplateParams { entities }))
+    todo!()
+    // let entities = conn.run(move |c| {
+    //     let state = StateInterface::new(c, ingest_id);
+    //     state.get_recently_updated_entity_descriptions(500)
+    // }).await
+    //     .map_err(|e| {
+    //         error!("Diesel error: {}", e);
+    //         ApiError::InternalError(anyhow!(e).context("In debug route").to_string())
+    //     })?;
+    //
+    // Ok(Template::render("debug", DebugTemplateParams { entities }))
 }
 
 #[rocket::get("/debug/<entity_type>/<entity_id>")]
-pub async fn entity_debug_json(conn: BlarserDbConn, ingest: &State<IngestTaskHolder>, entity_type: String, entity_id: kkkkkkkkkkkkkkkkkkkkkkkkkUuid) -> Result<Value, ApiError> {
+pub async fn entity_debug_json(conn: BlarserDbConn, ingest: &State<IngestTaskHolder>, entity_type: String, entity_id: Uuid) -> Result<Value, ApiError> {
     let ingest_id = ingest.latest_ingest_id()
         .ok_or_else(|| ApiError::InternalError("There is no ingest yet".to_string()))?;
 
     let versions_info = conn.run(move |c| {
-        let state = StateInterface::new(c, ingest_id);
+        let mut state = StateInterface::new(c, ingest_id);
         state.get_entity_debug(&entity_type, entity_id)
     }).await
         .map_err(|e| ApiError::InternalError(anyhow!(e).context("In entity debug json route").to_string()))?;

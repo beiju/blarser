@@ -1,14 +1,12 @@
 use chrono::{DateTime, Utc};
-
 use diesel_derive_enum::DbEnum;
 use uuid::Uuid;
 
 use crate::schema::*;
-use crate::events::AnyEvent;
+// use crate::events::AnyEvent;
 
-// define your enum
 #[derive(PartialEq, Debug, DbEnum, Clone)]
-#[DieselType = "Event_source"]
+#[DieselTypePath = "crate::schema::sql_types::EventSource"]
 pub enum EventSource {
     Start,
     Feed,
@@ -57,24 +55,24 @@ pub struct EventEffect {
     pub aux_data: serde_json::Value,
 }
 
-pub struct StoredEvent {
-    pub id: i32,
-    pub ingest_id: i32,
-    pub time: DateTime<Utc>,
-    pub source: EventSource,
-    pub event: AnyEvent,
-}
+// pub struct StoredEvent {
+//     pub id: i32,
+//     pub ingest_id: i32,
+//     pub time: DateTime<Utc>,
+//     pub source: EventSource,
+//     pub event: AnyEvent,
+// }
 
-impl DbEvent {
-    pub fn parse(self) -> StoredEvent {
-        StoredEvent {
-            id: self.id,
-            ingest_id: self.ingest_id,
-            time: self.time,
-            source: self.source,
-            event: serde_json::from_value(self.data)
-                .expect("Failed to parse event from database")
-        }
-    }
-}
+// impl DbEvent {
+//     pub fn parse(self) -> StoredEvent {
+//         StoredEvent {
+//             id: self.id,
+//             ingest_id: self.ingest_id,
+//             time: self.time,
+//             source: self.source,
+//             event: serde_json::from_value(self.data)
+//                 .expect("Failed to parse event from database")
+//         }
+//     }
+// }
 

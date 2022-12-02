@@ -6,7 +6,7 @@ use itertools::{izip};
 
 use crate::schema::*;
 use crate::entity::Entity;
-use crate::events::AnyEvent;
+// use crate::events::AnyEvent;
 use crate::state::events_db::DbEvent;
 
 #[derive(Insertable)]
@@ -145,34 +145,34 @@ pub struct VersionLink {
     pub child_id: i32,
 }
 
-pub fn get_entity_debug<EntityT: Entity>(c: &PgConnection, ingest_id: i32, entity_type: &str, entity_id: Uuid) -> QueryResult<Vec<(Version<EntityT>, AnyEvent, Vec<VersionLink>)>> {
-    use crate::schema::versions::dsl as versions;
-    use crate::schema::events::dsl as events;
-    let (versions, events): (Vec<DbVersion>, Vec<DbEvent>) = versions::versions
-        .inner_join(events::events.on(versions::from_event.eq(events::id)))
-        // Is from the right ingest
-        .filter(versions::ingest_id.eq(ingest_id))
-        // Is the right entity
-        .filter(versions::entity_type.eq(entity_type))
-        .filter(versions::entity_id.eq(entity_id))
-        .get_results::<(DbVersion, DbEvent)>(c)?
-        .into_iter()
-        .unzip();
-
-    let parents = VersionLink::belonging_to(&versions)
-        .load::<VersionLink>(c)?
-        .grouped_by(&versions);
-
-    let versions = versions.into_iter()
-        .map(|version| version.parse::<EntityT>());
-
-    let events = events.into_iter()
-        .map(|event| event.parse().event);
-
-    Ok(izip!(versions, events, parents).collect())
-}
-
-// pub fn get_events_for_entity_after(c: &PgConnection, ingest_id: i32, entity_type: &str, entity_id: Uuid, start_time: DateTime<Utc>) -> QueryResult<Vec<DbEvent>> {
+// pub fn get_entity_debug<EntityT: Entity>(c: &mut PgConnection, ingest_id: i32, entity_type: &str, entity_id: Uuid) -> QueryResult<Vec<(Version<EntityT>, AnyEvent, Vec<VersionLink>)>> {
+//     use crate::schema::versions::dsl as versions;
+//     use crate::schema::events::dsl as events;
+//     let (versions, events): (Vec<DbVersion>, Vec<DbEvent>) = versions::versions
+//         .inner_join(events::events.on(versions::from_event.eq(events::id)))
+//         // Is from the right ingest
+//         .filter(versions::ingest_id.eq(ingest_id))
+//         // Is the right entity
+//         .filter(versions::entity_type.eq(entity_type))
+//         .filter(versions::entity_id.eq(entity_id))
+//         .get_results::<(DbVersion, DbEvent)>(c)?
+//         .into_iter()
+//         .unzip();
+//
+//     let parents = VersionLink::belonging_to(&versions)
+//         .load::<VersionLink>(c)?
+//         .grouped_by(&versions);
+//
+//     let versions = versions.into_iter()
+//         .map(|version| version.parse::<EntityT>());
+//
+//     let events = events.into_iter()
+//         .map(|event| event.parse().event);
+//
+//     Ok(izip!(versions, events, parents).collect())
+// }
+//
+// pub fn get_events_for_entity_after(c: &mut PgConnection, ingest_id: i32, entity_type: &str, entity_id: Uuid, start_time: DateTime<Utc>) -> QueryResult<Vec<DbEvent>> {
 //     use crate::schema::versions::dsl as versions;
 //     use crate::schema::events::dsl as events;
 //
@@ -192,7 +192,7 @@ pub fn get_entity_debug<EntityT: Entity>(c: &PgConnection, ingest_id: i32, entit
 //         .get_results::<DbEvent>(c)
 // }
 //
-// pub fn get_event_for_entity_preceding(c: &PgConnection, ingest_id: i32, entity_type: &str, entity_id: Uuid, start_time: DateTime<Utc>) -> QueryResult<DbEvent> {
+// pub fn get_event_for_entity_preceding(c: &mut PgConnection, ingest_id: i32, entity_type: &str, entity_id: Uuid, start_time: DateTime<Utc>) -> QueryResult<DbEvent> {
 //     use crate::schema::versions::dsl as versions;
 //     use crate::schema::events::dsl as events;
 //
@@ -213,7 +213,7 @@ pub fn get_entity_debug<EntityT: Entity>(c: &PgConnection, ingest_id: i32, entit
 //         .get_result::<DbEvent>(c)
 // }
 //
-// pub fn get_entity_update_tree(c: &PgConnection, ingest_id: i32, entity_type: &str, entity_id: Uuid, start_time: DateTime<Utc>) -> QueryResult<(Vec<DbEvent>, Vec<Vec<(Version, Vec<VersionLink>)>>)> {
+// pub fn get_entity_update_tree(c: &mut PgConnection, ingest_id: i32, entity_type: &str, entity_id: Uuid, start_time: DateTime<Utc>) -> QueryResult<(Vec<DbEvent>, Vec<Vec<(Version, Vec<VersionLink>)>>)> {
 //     use crate::schema::versions::dsl as versions;
 //
 //     let mut loaded_events = get_events_for_entity_after(c, ingest_id, entity_type, entity_id, start_time)?;

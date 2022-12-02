@@ -1,19 +1,64 @@
+diff --git a/blarser/src/schema.patch b/blarser/src/schema.patch
+index 188bb7a..e69de29 100644
+--- a/blarser/src/schema.patch
++++ b/blarser/src/schema.patch
+@@ -1,44 +0,0 @@
+-diff --git a/blarser/src/schema.rs b/blarser/src/schema.rs
+-index 3a80c7b..750fd25 100644
+---- a/blarser/src/schema.rs
+-+++ b/blarser/src/schema.rs
+-@@ -81,17 +81,39 @@ table! {
+-         event_aux_data -> Jsonb,
+-         observations -> Array<Timestamptz>,
+-         terminated -> Nullable<Text>,
+-     }
+- }
+- 
+-+table! {
+-+    use diesel::sql_types::*;
+-+    use crate::db_types::*;
+-+    use crate::state::Event_source;
+-+
+-+    versions_with_end (id) {
+-+        id -> Int4,
+-+        ingest_id -> Int4,
+-+        entity_type -> Text,
+-+        entity_id -> Uuid,
+-+        start_time -> Timestamptz,
+-+        end_time -> Nullable<Timestamptz>,
+-+        entity -> Jsonb,
+-+        from_event -> Int4,
+-+        event_aux_data -> Jsonb,
+-+        observations -> Array<Timestamptz>,
+-+        terminated -> Nullable<Text>,
+-+    }
+-+}
+-+
+- joinable!(event_effects -> events (event_id));
+- joinable!(versions -> events (from_event));
+-+joinable!(versions_with_end -> events (from_event));
+- 
+- allow_tables_to_appear_in_same_query!(
+-     approvals,
+-     event_effects,
+-     events,
+-     ingests,
+-     version_links,
+-     versions,
+-+    versions_with_end,
+- );
 diff --git a/blarser/src/schema.rs b/blarser/src/schema.rs
-index 3a80c7b..750fd25 100644
+index f8ef404..56b2295 100644
 --- a/blarser/src/schema.rs
 +++ b/blarser/src/schema.rs
-@@ -81,17 +81,39 @@ table! {
+@@ -68,17 +68,35 @@ diesel::table! {
          event_aux_data -> Jsonb,
-         observations -> Array<Timestamptz>,
+         observations -> Array<Nullable<Timestamptz>>,
          terminated -> Nullable<Text>,
      }
  }
  
-+table! {
-+    use diesel::sql_types::*;
-+    use crate::db_types::*;
-+    use crate::state::Event_source;
-+
++diesel::table! {
 +    versions_with_end (id) {
 +        id -> Int4,
 +        ingest_id -> Int4,
@@ -24,16 +69,16 @@ index 3a80c7b..750fd25 100644
 +        entity -> Jsonb,
 +        from_event -> Int4,
 +        event_aux_data -> Jsonb,
-+        observations -> Array<Timestamptz>,
++        observations -> Array<Nullable<Timestamptz>>,
 +        terminated -> Nullable<Text>,
 +    }
 +}
 +
- joinable!(event_effects -> events (event_id));
- joinable!(versions -> events (from_event));
-+joinable!(versions_with_end -> events (from_event));
+ diesel::joinable!(event_effects -> events (event_id));
+ diesel::joinable!(versions -> events (from_event));
++diesel::joinable!(versions_with_end -> events (from_event));
  
- allow_tables_to_appear_in_same_query!(
+ diesel::allow_tables_to_appear_in_same_query!(
      approvals,
      event_effects,
      events,

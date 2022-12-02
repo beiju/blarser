@@ -66,13 +66,30 @@ diesel::table! {
         entity -> Jsonb,
         from_event -> Int4,
         event_aux_data -> Jsonb,
-        observations -> Array<Nullable<Timestamptz>>,
+        observations -> Array<Timestamptz>,
+        terminated -> Nullable<Text>,
+    }
+}
+
+diesel::table! {
+    versions_with_end (id) {
+        id -> Int4,
+        ingest_id -> Int4,
+        entity_type -> Text,
+        entity_id -> Uuid,
+        start_time -> Timestamptz,
+        end_time -> Nullable<Timestamptz>,
+        entity -> Jsonb,
+        from_event -> Int4,
+        event_aux_data -> Jsonb,
+        observations -> Array<Timestamptz>,
         terminated -> Nullable<Text>,
     }
 }
 
 diesel::joinable!(event_effects -> events (event_id));
 diesel::joinable!(versions -> events (from_event));
+diesel::joinable!(versions_with_end -> events (from_event));
 
 diesel::allow_tables_to_appear_in_same_query!(
     approvals,
@@ -81,4 +98,5 @@ diesel::allow_tables_to_appear_in_same_query!(
     ingests,
     version_links,
     versions,
+    versions_with_end,
 );

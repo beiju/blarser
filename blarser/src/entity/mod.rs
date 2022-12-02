@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use partial_information::PartialInformationCompare;
 
-use crate::events::AnyEvent;
+// use crate::events::AnyEvent;
 
 pub use common::{Base, RunnerAdvancement};
 pub use sim::Sim;
@@ -87,9 +87,9 @@ pub trait EntityRaw: Serialize + for<'de> Deserialize<'de> {
     fn id(&self) -> Uuid;
 
     // By default an entity doesn't have any init events
-    fn init_events(&self, _after_time: DateTime<Utc>) -> Vec<(AnyEvent, Vec<(String, Option<Uuid>, serde_json::Value)>)> {
-        Vec::new()
-    }
+    // fn init_events(&self, _after_time: DateTime<Utc>) -> Vec<(AnyEvent, Vec<(String, Option<Uuid>, serde_json::Value)>)> {
+    //     Vec::new()
+    // }
 
     fn earliest_time(&self, valid_from: DateTime<Utc>) -> DateTime<Utc>;
     fn latest_time(&self, valid_from: DateTime<Utc>) -> DateTime<Utc>;

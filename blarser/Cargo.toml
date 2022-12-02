@@ -25,11 +25,13 @@ log = "0.4.14"
 env_logger = "0.9.0"
 dialoguer = "0.9.0"
 tap = "1.0.1"
-rocket = { version = "0.5.0-rc.2", features = ["uuid", "json"] }
-rocket_dyn_templates = { version = "0.1.0-rc.2", features = ["handlebars"] }
+# This commit adds diesel 2.0 support. Return to cargo when it's merged.
+rocket = { git = "https://github.com/SergioBenitez/Rocket.git", rev = "f0d678d", features = ["uuid", "json"] }
+rocket_dyn_templates = { git = "https://github.com/SergioBenitez/Rocket.git", rev = "f0d678d", features = ["handlebars"] }
+rocket_sync_db_pools = { git = "https://github.com/SergioBenitez/Rocket.git", rev = "f0d678d", default-features = false, features = ["diesel_postgres_pool"] }
 tokio-stream = "0.1.8"
 diesel = { version = "2.0.2", features = ["postgres", "chrono", "uuid", "serde_json"] }
-#diesel-derive-enum = { version = "2.0.0-rc.0", features = ["postgres"] }
+diesel-derive-enum = { version = "2.0.0-rc.0", features = ["postgres"] }
 async-recursion = "0.3.2"
 nom = { version = "7.1.1", features = ["alloc"] }
 nom-supreme = { version = "0.7.0", features = ["error"] }
@@ -43,10 +45,4 @@ base64 = "0.13.0"
 enum_dispatch = "0.3.8"
 multimap = "0.8.3"
 fed = { path = "../../fed/fed" }
-uuid = "=0.8.2"
-
-
-[dependencies.rocket_sync_db_pools]
-version = "0.1.0-rc.2"
-default-features = false
-features = ["diesel_postgres_pool"]
+uuid = { version = "1.2.2", features = ["serde"] }

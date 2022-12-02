@@ -10,8 +10,8 @@ use crate::with_any_entity_raw;
 #[derive(Clone)]
 pub struct Observation {
     // TODO Reorganize so this isn't pub
-    pub entity_raw: AnyEntityRaw,
     pub perceived_at: DateTime<Utc>,
+    pub entity_raw: AnyEntityRaw,
 }
 
 impl Observation {
