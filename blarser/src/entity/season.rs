@@ -39,34 +39,9 @@ impl EntityRaw for <Season as PartialInformationCompare>::Raw {
 
     fn name() -> &'static str { "season" }
     fn id(&self) -> Uuid { self.id }
-
-    fn earliest_time(&self, valid_from: DateTime<Utc>) -> DateTime<Utc> {
-        valid_from - Duration::minutes(1)
-    }
-
-    fn latest_time(&self, valid_from: DateTime<Utc>) -> DateTime<Utc> {
-        valid_from + Duration::minutes(1)
-    }
-}
-
-impl Into<AnyEntity> for Season {
-    fn into(self) -> AnyEntity {
-        AnyEntity::Season(self)
-    }
-}
-
-impl TryFrom<AnyEntity> for Season {
-    type Error = WrongEntityError;
-
-    fn try_from(value: AnyEntity) -> Result<Self, Self::Error> {
-        match value {
-            AnyEntity::Season(value) => { Ok(value) }
-            other => Err(WrongEntityError { expected: "season", found: other.name() })
-        }
-    }
 }
 
 impl Entity for Season {
-    fn name() -> &'static str { "season" }
+    fn entity_type(self) -> &'static str { "season" }
     fn id(&self) -> Uuid { self.id }
 }

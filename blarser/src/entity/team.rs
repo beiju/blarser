@@ -101,37 +101,11 @@ impl EntityRaw for <Team as PartialInformationCompare>::Raw {
 
     fn name() -> &'static str { "team" }
     fn id(&self) -> Uuid { self.id }
-
-    // Teams are timestamped before the fetch
-    fn earliest_time(&self, valid_from: DateTime<Utc>) -> DateTime<Utc> {
-        valid_from
-    }
-
-    fn latest_time(&self, valid_from: DateTime<Utc>) -> DateTime<Utc> {
-        valid_from + Duration::minutes(1)
-    }
-}
-
-impl Into<AnyEntity> for Team {
-    fn into(self) -> AnyEntity {
-        AnyEntity::Team(self)
-    }
 }
 
 impl Entity for Team {
-    fn name() -> &'static str { "team" }
+    fn entity_type(self) -> &'static str { "team" }
     fn id(&self) -> Uuid { self.id }
-}
-
-impl TryFrom<AnyEntity> for Team {
-    type Error = WrongEntityError;
-
-    fn try_from(value: AnyEntity) -> Result<Self, Self::Error> {
-        match value {
-            AnyEntity::Team(value) => { Ok(value) }
-            other => Err(WrongEntityError { expected: "team", found: other.name() })
-        }
-    }
 }
 
 impl Team {

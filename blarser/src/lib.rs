@@ -15,7 +15,7 @@ pub mod db;
 #[allow(unused_imports)]
 pub mod schema;
 pub mod entity;
-// pub mod events;
+pub mod events;
 pub mod state;
 // #[allow(dead_code)]
 // mod parse;

@@ -9,6 +9,7 @@ pub use approvals_db::{ApprovalState};
 pub use events_db::EventEffect;
 pub use versions_db::{
     // get_entity_debug,
+    EntityType,
     VersionLink,
     Version,
     NewVersion,

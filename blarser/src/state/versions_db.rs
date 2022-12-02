@@ -1,19 +1,62 @@
+use std::fmt::{Display, Formatter};
 use diesel::prelude::*;
 use diesel::{Insertable, QueryDsl, RunQueryDsl, BelongingToDsl};
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
 use itertools::{izip};
+use diesel_derive_enum::DbEnum;
+use serde::{Deserialize, Serialize};
 
 use crate::schema::*;
-use crate::entity::Entity;
+use crate::entity::{Entity, };
 // use crate::events::AnyEvent;
 use crate::state::events_db::DbEvent;
+
+#[derive(PartialEq, Debug, DbEnum, Clone, Copy, Serialize, Deserialize)]
+#[DieselTypePath = "crate::schema::sql_types::EntityType"]
+pub enum EntityType {
+    Sim,
+    Player,
+    Team,
+    Game,
+    Standings,
+    Season,
+}
+
+impl TryFrom<&str> for EntityType {
+    type Error = ();
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Ok(match value {
+            "sim" => { Self::Sim },
+            "player" => { Self::Player },
+            "team" => { Self::Team },
+            "game" => { Self::Game },
+            "standings" => { Self::Standings },
+            "season" => { Self::Season },
+            _ => { return Err(()); }
+        })
+    }
+}
+
+impl Display for EntityType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EntityType::Sim => { write!(f, "sim") }
+            EntityType::Player => { write!(f, "player") }
+            EntityType::Team => { write!(f, "team") }
+            EntityType::Game => { write!(f, "game") }
+            EntityType::Standings => { write!(f, "standings") }
+            EntityType::Season => { write!(f, "season") }
+        }
+    }
+}
 
 #[derive(Insertable)]
 #[table_name = "versions"]
 pub struct NewVersion {
     pub ingest_id: i32,
-    pub entity_type: &'static str,
+    pub entity_type: EntityType,
     pub entity_id: Uuid,
     pub start_time: DateTime<Utc>,
     pub entity: serde_json::Value,

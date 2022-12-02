@@ -1,5 +1,7 @@
 CREATE TYPE event_source AS ENUM ('start', 'feed', 'timed', 'manual');
 
+CREATE TYPE entity_type AS ENUM ('sim', 'player', 'team', 'game', 'standings', 'season');
+
 CREATE TABLE events
 (
     id        SERIAL PRIMARY KEY,
@@ -17,7 +19,7 @@ CREATE TABLE event_effects
     id                SERIAL PRIMARY KEY,
     event_id          INT NOT NULL,
 
-    entity_type       TEXT NOT NULL,
+    entity_type       entity_type NOT NULL,
     entity_id         UUID,
     aux_data          JSONB NOT NULL,
 
@@ -32,7 +34,7 @@ CREATE TABLE versions
     id             SERIAL PRIMARY KEY,
     ingest_id      INT                        NOT NULL,
 
-    entity_type    TEXT                       NOT NULL,
+    entity_type    entity_type                NOT NULL,
     entity_id      UUID                       NOT NULL,
     start_time     TIMESTAMP WITH TIME ZONE   NOT NULL,
 

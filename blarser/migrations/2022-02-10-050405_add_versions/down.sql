@@ -5,4 +5,5 @@ DROP TABLE versions;
 DROP INDEX event_effect_index;
 DROP TABLE event_effects;
 DROP TABLE events;
+DROP TYPE entity_type;
 DROP TYPE event_source;

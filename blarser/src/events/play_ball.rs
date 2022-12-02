@@ -5,7 +5,7 @@ use uuid::Uuid;
 use partial_information::MaybeKnown;
 
 use crate::api::EventuallyEvent;
-use crate::entity::AnyEntity;
+use crate::entity::{AnyEntity, Entity};
 use crate::events::{AnyEvent, Event};
 use crate::events::game_update::GameUpdate;
 
@@ -58,7 +58,7 @@ impl Event for PlayBall {
 
                 game.into()
             },
-            other => panic!("PlayBall event does not apply to {}", other.name())
+            other => panic!("PlayBall event does not apply to {}", other.entity_type())
         }
     }
 

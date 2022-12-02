@@ -38,37 +38,10 @@ impl EntityRaw for <Standings as PartialInformationCompare>::Raw {
 
     fn name() -> &'static str { "standings" }
     fn id(&self) -> Uuid { self.id }
-
-    // It's definitely timestamped after when it's extracted from streamData, but it may also be
-    // polled and timestamped before in that case
-    fn earliest_time(&self, valid_from: DateTime<Utc>) -> DateTime<Utc> {
-        valid_from - Duration::minutes(1)
-    }
-
-    fn latest_time(&self, valid_from: DateTime<Utc>) -> DateTime<Utc> {
-        valid_from + Duration::minutes(1)
-    }
-}
-
-impl Into<AnyEntity> for Standings {
-    fn into(self) -> AnyEntity {
-        AnyEntity::Standings(self)
-    }
-}
-
-impl TryFrom<AnyEntity> for Standings {
-    type Error = WrongEntityError;
-
-    fn try_from(value: AnyEntity) -> Result<Self, Self::Error> {
-        match value {
-            AnyEntity::Standings(value) => { Ok(value) }
-            other => Err(WrongEntityError { expected: "standings", found: other.name() })
-        }
-    }
 }
 
 impl Entity for Standings {
-    fn name() -> &'static str { "standings" }
+    fn entity_type(self) -> &'static str { "standings" }
     fn id(&self) -> Uuid { self.id }
 }
 // impl Standings {

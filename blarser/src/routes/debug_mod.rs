@@ -3,7 +3,7 @@ use uuid::Uuid;
 use serde_json::{Value, json};
 use text_diff::Difference;
 use rocket_dyn_templates::Template;
-use blarser::{entity, entity_dispatch};
+use blarser::entity;
 use itertools::Itertools;
 use serde::Serialize;
 use anyhow::anyhow;
@@ -42,9 +42,12 @@ pub async fn entity_debug_json(conn: BlarserDbConn, ingest: &State<IngestTaskHol
     let ingest_id = ingest.latest_ingest_id()
         .ok_or_else(|| ApiError::InternalError("There is no ingest yet".to_string()))?;
 
+    let entity_type = (&*entity_type).try_into()
+        .map_err(|_| ApiError::InternalError("Entity does not exist".to_string()))?;
+
     let versions_info = conn.run(move |c| {
         let mut state = StateInterface::new(c, ingest_id);
-        state.get_entity_debug(&entity_type, entity_id)
+        state.get_entity_debug(entity_type, entity_id)
     }).await
         .map_err(|e| ApiError::InternalError(anyhow!(e).context("In entity debug json route").to_string()))?;
 

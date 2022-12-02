@@ -118,7 +118,7 @@ fn kmerge_stream(streams: impl Iterator<Item=PinnedObservationStream>) -> impl S
 pub async fn init_chron(ingest: &Ingest, start_at_time: &'static str, start_time_parsed: DateTime<Utc>) {
     let initial_versions: Vec<_> = initial_state(start_at_time).collect().await;
 
-    ingest.run(move |state| {
+    ingest.run(move |mut state| {
         state.add_initial_versions(start_time_parsed, initial_versions.into_iter())
     }).await
         .expect("Failed to save initial versions");

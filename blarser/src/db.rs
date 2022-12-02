@@ -4,6 +4,7 @@ use serde::Serialize;
 
 use rocket_sync_db_pools::diesel::prelude::*;
 use crate::schema::*;
+use crate::state::EntityType;
 
 #[database("blarser")]
 pub struct BlarserDbConn(PgConnection);
@@ -18,7 +19,7 @@ pub struct Ingest {
 pub struct Approval {
     pub id: i32,
 
-    pub entity_type: String,
+    pub entity_type: EntityType,
     pub entity_id: uuid::Uuid,
     pub perceived_at: DateTime<Utc>,
 

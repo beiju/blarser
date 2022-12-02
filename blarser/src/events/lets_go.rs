@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::api::EventuallyEvent;
-use crate::entity::AnyEntity;
+use crate::entity::{AnyEntity, Entity};
 use crate::events::{AnyEvent, Event};
 use crate::events::game_update::GameUpdate;
 
@@ -50,7 +50,7 @@ impl Event for LetsGo {
 
                 game.into()
             }
-            other => panic!("LetsGo event does not apply to {}", other.name())
+            other => panic!("LetsGo event does not apply to {}", other.entity_type())
         }
     }
 

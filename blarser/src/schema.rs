@@ -2,14 +2,21 @@
 
 pub mod sql_types {
     #[derive(diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "entity_type"))]
+    pub struct EntityType;
+
+    #[derive(diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "event_source"))]
     pub struct EventSource;
 }
 
 diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::EntityType;
+
     approvals (id) {
         id -> Int4,
-        entity_type -> Text,
+        entity_type -> EntityType,
         entity_id -> Uuid,
         perceived_at -> Timestamptz,
         message -> Text,
@@ -19,10 +26,13 @@ diesel::table! {
 }
 
 diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::EntityType;
+
     event_effects (id) {
         id -> Int4,
         event_id -> Int4,
-        entity_type -> Text,
+        entity_type -> EntityType,
         entity_id -> Nullable<Uuid>,
         aux_data -> Jsonb,
     }
@@ -57,10 +67,13 @@ diesel::table! {
 }
 
 diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::EntityType;
+
     versions (id) {
         id -> Int4,
         ingest_id -> Int4,
-        entity_type -> Text,
+        entity_type -> EntityType,
         entity_id -> Uuid,
         start_time -> Timestamptz,
         entity -> Jsonb,
@@ -72,10 +85,13 @@ diesel::table! {
 }
 
 diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::EntityType;
+
     versions_with_end (id) {
         id -> Int4,
         ingest_id -> Int4,
-        entity_type -> Text,
+        entity_type -> EntityType,
         entity_id -> Uuid,
         start_time -> Timestamptz,
         end_time -> Nullable<Timestamptz>,

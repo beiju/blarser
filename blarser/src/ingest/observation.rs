@@ -1,35 +1,84 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use std::cmp::Ordering;
 use thiserror::Error;
+use uuid::Uuid;
 
 use crate::api::ChroniclerItem;
-use crate::entity::{AnyEntityRaw, EntityParseError, EntityRaw};
-use crate::with_any_entity_raw;
+use crate::entity::{EntityParseError, EntityRaw};
+use crate::state::EntityType;
 
 
 #[derive(Clone)]
 pub struct Observation {
     // TODO Reorganize so this isn't pub
     pub perceived_at: DateTime<Utc>,
-    pub entity_raw: AnyEntityRaw,
+    pub entity_type: EntityType,
+    pub entity_id: Uuid,
+    pub entity_json: serde_json::Value,
 }
 
 impl Observation {
-    pub fn from_chron(entity_type: &str, item: ChroniclerItem) -> Result<Self, EntityParseError> {
-        let entity_raw = AnyEntityRaw::from_json(entity_type, item.data)?;
+    pub fn from_chron(entity_type: &'static str, item: ChroniclerItem) -> Result<Self, EntityParseError> {
+        let entity_type = entity_type.try_into()
+            .map_err(|()| EntityParseError::UnknownEntity(entity_type.to_string()))?;
 
         Ok(Observation {
-            entity_raw,
             perceived_at: item.valid_from,
+            entity_type,
+            entity_id: item.entity_id,
+            entity_json: item.data,
         })
     }
 
     pub fn earliest_time(&self) -> DateTime<Utc> {
-        with_any_entity_raw!(&self.entity_raw, inner => inner.earliest_time(self.perceived_at))
+        match self.entity_type {
+            EntityType::Sim => { self.perceived_at }
+            EntityType::Player => { self.perceived_at - Duration::minutes(6) }
+            EntityType::Team => { self.perceived_at }
+            EntityType::Game => {
+                // If there's a lastUpdateFull, we know exactly when it was from
+                // if let Some(luf) = &self.last_update_full {
+                //     if let Some(event) = luf.first() {
+                //         return event.created;
+                //     }
+                // }
+
+                // Otherwise, games are timestamped from after the fetch
+                self.perceived_at - Duration::minutes(1)
+
+            }
+            EntityType::Standings => {
+                // It's definitely timestamped after when it's extracted from streamData, but it may also be
+                // polled and timestamped before in that case
+                self.perceived_at - Duration::minutes(1)
+            }
+            EntityType::Season => {
+                self.perceived_at - Duration::minutes(1)
+            }
+        }
     }
 
     pub fn latest_time(&self) -> DateTime<Utc> {
-        with_any_entity_raw!(&self.entity_raw, inner => inner.latest_time(self.perceived_at))
+        match self.entity_type {
+            EntityType::Sim => { self.perceived_at + Duration::minutes(1) }
+            // Players are timestamped before the fetch, but there seems to be some caching
+            EntityType::Player => { self.perceived_at + Duration::minutes(1) }
+            EntityType::Team => { self.perceived_at + Duration::minutes(1) }
+            EntityType::Game => {
+                // If there's a lastUpdateFull, we know exactly when it was from
+                // if let Some(luf) = &self.last_update_full {
+                //     if let Some(event) = luf.first() {
+                //         return event.created;
+                //     }
+                // }
+
+                // Otherwise, games are timestamped from after the fetch
+                self.perceived_at
+
+            }
+            EntityType::Standings => { self.perceived_at + Duration::minutes(1) }
+            EntityType::Season => { self.perceived_at + Duration::minutes(1)}
+        }
     }
 
     // pub fn do_ingest(self, ingest: &mut ChronIngest) {

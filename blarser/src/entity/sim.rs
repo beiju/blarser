@@ -82,31 +82,9 @@ impl EntityRaw for <Sim as PartialInformationCompare>::Raw {
     //         todo!()
     //     }
     // }
-
-    // Sim seems to be timestamped before the fetch? not sure
-    fn earliest_time(&self, valid_from: DateTime<Utc>) -> DateTime<Utc> { valid_from }
-
-    fn latest_time(&self, valid_from: DateTime<Utc>) -> DateTime<Utc> { valid_from + Duration::minutes(1) }
-}
-
-impl Into<AnyEntity> for Sim {
-    fn into(self) -> AnyEntity {
-        AnyEntity::Sim(self)
-    }
-}
-
-impl TryFrom<AnyEntity> for Sim {
-    type Error = WrongEntityError;
-
-    fn try_from(value: AnyEntity) -> Result<Self, Self::Error> {
-        match value {
-            AnyEntity::Sim(value) => { Ok(value) }
-            other => Err(WrongEntityError { expected: "sin", found: other.name() })
-        }
-    }
 }
 
 impl Entity for Sim {
-    fn name() -> &'static str { "sim" }
+    fn entity_type(self) -> &'static str { "sim" }
     fn id(&self) -> Uuid { Uuid::nil() }
 }

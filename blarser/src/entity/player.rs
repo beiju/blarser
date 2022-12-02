@@ -123,36 +123,10 @@ impl EntityRaw for <Player as PartialInformationCompare>::Raw {
     fn name() -> &'static str { "player" }
     fn id(&self) -> Uuid { self.id }
 
-    // Players are timestamped before the fetch, but there seems to be some caching
-    // TODO Try to reduce the cache duration
-    fn earliest_time(&self, valid_from: DateTime<Utc>) -> DateTime<Utc> {
-        valid_from - Duration::minutes(6)
-    }
-
-    fn latest_time(&self, valid_from: DateTime<Utc>) -> DateTime<Utc> {
-        valid_from + Duration::minutes(1)
-    }
-}
-
-impl Into<AnyEntity> for Player {
-    fn into(self) -> AnyEntity {
-        AnyEntity::Player(self)
-    }
-}
-
-impl TryFrom<AnyEntity> for Player {
-    type Error = WrongEntityError;
-
-    fn try_from(value: AnyEntity) -> Result<Self, Self::Error> {
-        match value {
-            AnyEntity::Player(value) => { Ok(value) }
-            other => Err(WrongEntityError { expected: "player", found: other.name() })
-        }
-    }
 }
 
 impl Entity for Player {
-    fn name() -> &'static str { "player" }
+    fn entity_type(self) -> &'static str { "player" }
     fn id(&self) -> Uuid { self.id }
 }
 

@@ -13,7 +13,7 @@ use crate::api::EventuallyEvent;
 use crate::db::BlarserDbConn;
 use crate::ingest::chron::{init_chron, run_ingest};
 use crate::schema;
-use crate::state::{ApprovalState, StateInterface};
+use crate::state::{ApprovalState, EntityType, StateInterface};
 
 const BLARSER_START: &str = "2021-12-06T15:00:00Z";
 
@@ -126,7 +126,7 @@ impl Ingest {
         }).await
     }
 
-    pub async fn get_approval(&mut self, entity_type: &'static str, entity_id: Uuid, perceived_at: DateTime<Utc>, message: String) -> QueryResult<bool> {
+    pub async fn get_approval(&mut self, entity_type: EntityType, entity_id: Uuid, perceived_at: DateTime<Utc>, message: String) -> QueryResult<bool> {
         let result = self.run(move |mut state| {
             state.upsert_approval(entity_type, entity_id, perceived_at, &message)
         }).await?;

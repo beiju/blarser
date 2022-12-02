@@ -3,6 +3,7 @@ use diesel_derive_enum::DbEnum;
 use uuid::Uuid;
 
 use crate::schema::*;
+use crate::state::EntityType;
 // use crate::events::AnyEvent;
 
 #[derive(PartialEq, Debug, DbEnum, Clone)]
@@ -38,7 +39,7 @@ pub(crate) struct DbEvent {
 #[table_name = "event_effects"]
 pub(crate) struct NewEventEffect {
     pub(crate) event_id: i32,
-    pub(crate) entity_type: String,
+    pub(crate) entity_type: EntityType,
     pub(crate) entity_id: Option<Uuid>,
     pub(crate) aux_data: serde_json::Value,
 }
@@ -50,7 +51,7 @@ pub struct EventEffect {
     pub id: i32,
     pub event_id: i32,
 
-    pub entity_type: String,
+    pub entity_type: EntityType,
     pub entity_id: Option<Uuid>,
     pub aux_data: serde_json::Value,
 }

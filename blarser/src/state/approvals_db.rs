@@ -2,11 +2,12 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use crate::schema::*;
+use crate::state::EntityType;
 
 #[derive(Insertable)]
 #[table_name = "approvals"]
 pub struct NewApproval<'a> {
-    pub entity_type: &'a str,
+    pub entity_type: EntityType,
     pub entity_id: Uuid,
     pub perceived_at: DateTime<Utc>,
     pub message: &'a str,

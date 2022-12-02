@@ -150,25 +150,8 @@ impl Display for Game {
     }
 }
 
-impl Into<AnyEntity> for Game {
-    fn into(self) -> AnyEntity {
-        AnyEntity::Game(self)
-    }
-}
-
-impl TryFrom<AnyEntity> for Game {
-    type Error = WrongEntityError;
-
-    fn try_from(value: AnyEntity) -> Result<Self, Self::Error> {
-        match value {
-            AnyEntity::Game(value) => { Ok(value) }
-            other => Err(WrongEntityError { expected: "game", found: other.name() })
-        }
-    }
-}
-
 impl Entity for Game {
-    fn name() -> &'static str { "game" }
+    fn entity_type(self) -> &'static str { "game" }
     fn id(&self) -> Uuid { self.id }
 }
 
@@ -178,29 +161,6 @@ impl EntityRaw for <Game as PartialInformationCompare>::Raw {
     fn name() -> &'static str { "game" }
     fn id(&self) -> Uuid { self.id }
 
-    fn earliest_time(&self, valid_from: DateTime<Utc>) -> DateTime<Utc> {
-        // If there's a lastUpdateFull, we know exactly when it was from
-        if let Some(luf) = &self.last_update_full {
-            if let Some(event) = luf.first() {
-                return event.created;
-            }
-        }
-
-        // Otherwise, games are timestamped from after the fetch
-        valid_from - Duration::minutes(1)
-    }
-
-    fn latest_time(&self, valid_from: DateTime<Utc>) -> DateTime<Utc> {
-        // If there's a lastUpdateFull, we know exactly when it was from
-        if let Some(luf) = &self.last_update_full {
-            if let Some(event) = luf.first() {
-                return event.created;
-            }
-        }
-
-        // Otherwise, games are timestamped from after the fetch
-        valid_from
-    }
 }
 
 impl Game {

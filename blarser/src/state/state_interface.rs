@@ -9,11 +9,14 @@ use serde_json::json;
 use partial_information::PartialInformationCompare;
 use std::iter;
 
-use crate::{entity, with_any_entity, with_any_entity_raw};
-use crate::entity::{Entity, AnyEntity, EntityRaw, entity_description};
+use diesel::sql_types;
+
+
+use crate::events::{AnyEvent, Event, Start};
+use crate::entity::{self, Entity, AnyEntity, EntityRaw};
 // use crate::events::{AnyEvent, Start as StartEvent};
 use crate::ingest::Observation;
-use crate::state::{ApprovalState, NewVersion, Version, VersionLink};
+use crate::state::{EntityType, ApprovalState, NewVersion, Version, VersionLink};
 use crate::state::approvals_db::NewApproval;
 use crate::state::events_db::{DbEvent, EventEffect, EventSource, NewEvent, NewEventEffect};
 use crate::state::versions_db::{DbVersionWithEnd, NewVersionLink};
@@ -27,7 +30,7 @@ pub struct StateInterface<'conn> {
 
 #[derive(Serialize)]
 pub struct EntityDescription {
-    entity_type: String,
+    entity_type: EntityType,
     entity_id: Uuid,
     description: String,
 }
@@ -82,9 +85,6 @@ macro_rules! reader_with_nil_id {
         }
     };
 }
-
-use diesel::sql_types;
-use crate::schema::event_effects::dsl::event_effects;
 sql_function! {
     #[aggregate]
     fn array_agg(expr: sql_types::Integer) -> sql_types::Array<sql_types::Integer>;
@@ -94,7 +94,13 @@ sql_function! {
     fn coalesce(x: sql_types::Nullable<sql_types::Array<sql_types::Integer>>, y: sql_types::Array<sql_types::Integer>) -> sql_types::Array<sql_types::Integer>;
 }
 
-pub type Effects = Vec<(String, Option<Uuid>, serde_json::Value)>;
+pub type Effects = Vec<(EntityType, Option<Uuid>, serde_json::Value)>;
+
+fn raw_to_full_json<EntityT: Entity + PartialInformationCompare>(raw_json: serde_json::Value) -> serde_json::Result<serde_json::Value> {
+    let raw: EntityT::Raw = serde_json::from_value(raw_json)?;
+    let full = EntityT::from_raw(raw);
+    serde_json::to_value(full)
+}
 
 impl<'conn> StateInterface<'conn> {
     pub fn new(conn: &'conn mut PgConnection, ingest_id: i32) -> Self {
@@ -317,85 +323,84 @@ impl<'conn> StateInterface<'conn> {
     //     self.save_event(EventSource::Timed, event, effects)
     // }
     //
-    // // This must take an AnyEvent, not generic EventT
-    // fn save_event(&self, source: EventSource, event: AnyEvent, effects: Effects) -> QueryResult<(StoredEvent, Vec<EventEffect>)> {
-    //     use crate::schema::events::dsl as events;
-    //     use crate::schema::event_effects::dsl as event_effects;
-    //
-    //     let stored_event = insert_into(events::events)
-    //         .values(NewEvent {
-    //             ingest_id: self.ingest_id,
-    //             time: event.time(),
-    //             source,
-    //             data: serde_json::to_value(event)
-    //                 .expect("Error serializing Event data"),
-    //         })
-    //         .returning(events::events::all_columns())
-    //         .get_result::<DbEvent>(self.conn)?;
-    //
-    //     let insert_effects: Vec<_> = effects.into_iter()
-    //         .map(|(entity_type, entity_id, aux_data)| {
-    //             NewEventEffect {
-    //                 event_id: stored_event.id,
-    //                 entity_type,
-    //                 entity_id,
-    //                 aux_data,
-    //             }
-    //         })
-    //         .collect();
-    //
-    //     let effects = insert_into(event_effects::event_effects)
-    //         .values(insert_effects)
-    //         .returning(event_effects::event_effects::all_columns())
-    //         .get_results::<EventEffect>(self.conn)?;
-    //
-    //     Ok((stored_event.parse(), effects))
-    // }
-    //
-    // fn version_from_start<EntityRawT: EntityRaw>(&self, entity_raw: EntityRawT, start_time: DateTime<Utc>, from_event: i32) -> (NewVersion, Vec<(AnyEvent, Effects)>) {
-    //     let events = entity_raw.init_events(start_time);
-    //     let version = NewVersion {
-    //         ingest_id: self.ingest_id,
-    //         entity_type: EntityRawT::name(),
-    //         entity_id: entity_raw.id(),
-    //         start_time,
-    //         entity: serde_json::to_value(<EntityRawT::Entity as PartialInformationCompare>::from_raw(entity_raw))
-    //             .expect("Error serializing EntityRaw"),
-    //         from_event,
-    //         event_aux_data: json!(null),
-    //         observations: vec![start_time],
-    //     };
-    //
-    //     (version, events)
-    // }
+    // This must take an AnyEvent, not generic EventT
+    fn save_event(&mut self, source: EventSource, event: AnyEvent, effects: Effects) -> QueryResult<(i32, Vec<EventEffect>)> {
+        use crate::schema::events::dsl as events;
+        use crate::schema::event_effects::dsl as event_effects;
 
-    pub fn add_initial_versions(&self, start_time: DateTime<Utc>, entities: impl Iterator<Item=Observation>) -> QueryResult<usize> {
-        todo!()
-        // let (from_event, _) = self.save_event(EventSource::Start, AnyEvent::Start(StartEvent::new(start_time)), Vec::new())?;
-        //
-        // let chunks = entities
-        //     .map(move |observation| {
-        //         with_any_entity_raw!(observation.entity_raw, raw => self.version_from_start(raw, start_time, from_event.id))
-        //     })
-        //     .chunks(2000); // Diesel can't handle inserting the whole thing in one go
-        //
-        // let mut inserted = 0;
-        // for chunk in &chunks {
-        //     let (chunk_versions, chunk_events): (Vec<_>, Vec<_>) = chunk.unzip();
-        //
-        //     // It's not worth the optimization to save multiple at once (it will literally never be
-        //     // used unless I need to add more init events)
-        //     for (event, effects) in chunk_events.into_iter().flatten() {
-        //         self.save_feed_event(event, effects)?;
-        //     }
-        //     use crate::schema::versions::dsl as versions;
-        //     inserted += insert_into(versions::versions)
-        //         .values(chunk_versions)
-        //         .execute(self.conn)?;
-        //     info!("Inserted {} initial versions", inserted);
-        // }
-        //
-        // Ok::<_, diesel::result::Error>(inserted)
+        let stored_event = insert_into(events::events)
+            .values(NewEvent {
+                ingest_id: self.ingest_id,
+                time: event.time(),
+                source,
+                data: serde_json::to_value(event)
+                    .expect("Error serializing Event data"),
+            })
+            .returning(events::events::all_columns())
+            .get_result::<DbEvent>(self.conn)?;
+
+        let insert_effects: Vec<_> = effects.into_iter()
+            .map(|(entity_type, entity_id, aux_data)| {
+                NewEventEffect {
+                    event_id: stored_event.id,
+                    entity_type,
+                    entity_id,
+                    aux_data,
+                }
+            })
+            .collect();
+
+        let effects = insert_into(event_effects::event_effects)
+            .values(insert_effects)
+            .returning(event_effects::event_effects::all_columns())
+            .get_results::<EventEffect>(self.conn)?;
+
+        Ok((stored_event.id, effects))
+    }
+
+    fn version_from_start(ingest_id: i32, observation: Observation, start_time: DateTime<Utc>, from_event: i32) -> NewVersion {
+        // let events = entity_raw.init_events(start_time);
+        let version = NewVersion {
+            ingest_id,
+            entity_type: observation.entity_type,
+            entity_id: observation.entity_id,
+            start_time,
+            entity: match observation.entity_type {
+                EntityType::Sim => { raw_to_full_json::<entity::Sim>(observation.entity_json) }
+                EntityType::Player => { raw_to_full_json::<entity::Player>(observation.entity_json) }
+                EntityType::Team => { raw_to_full_json::<entity::Team>(observation.entity_json) }
+                EntityType::Game => { raw_to_full_json::<entity::Game>(observation.entity_json) }
+                EntityType::Standings => { raw_to_full_json::<entity::Standings>(observation.entity_json) }
+                EntityType::Season => { raw_to_full_json::<entity::Season>(observation.entity_json) }
+            }.expect("Error round-tripping JSON from raw to full"),
+            from_event,
+            event_aux_data: json!(null),
+            observations: vec![start_time],
+        };
+
+        version
+    }
+
+    pub fn add_initial_versions(&mut self, start_time: DateTime<Utc>, entities: impl Iterator<Item=Observation>) -> QueryResult<usize> {
+        let (from_event, _) = self.save_event(EventSource::Start, Start::new(start_time).into(), Vec::new())?;
+
+        let ingest_id = self.ingest_id;
+        let chunks = entities
+            .map(move |observation| {
+                StateInterface::version_from_start(ingest_id, observation, start_time, from_event)
+            })
+            .chunks(2000); // Diesel can't handle inserting the whole thing in one go
+
+        let mut inserted = 0;
+        for chunk in &chunks {
+            use crate::schema::versions::dsl as versions;
+            inserted += insert_into(versions::versions)
+                .values(chunk.collect::<Vec<_>>())
+                .execute(self.conn)?;
+            info!("Inserted {} initial versions", inserted);
+        }
+
+        Ok::<_, diesel::result::Error>(inserted)
     }
 
     // pub fn save_successors(&self, successors: impl IntoIterator<Item=((AnyEntity, serde_json::Value, Vec<DateTime<Utc>>), Vec<i32>)>, start_time: DateTime<Utc>, from_event: i32) -> QueryResult<Vec<i32>> {
@@ -442,7 +447,7 @@ impl<'conn> StateInterface<'conn> {
     //     })
     // }
 
-    pub fn upsert_approval(&mut self, entity_type: &str, entity_id: Uuid, perceived_at: DateTime<Utc>, message: &str) -> QueryResult<ApprovalState> {
+    pub fn upsert_approval(&mut self, entity_type: EntityType, entity_id: Uuid, perceived_at: DateTime<Utc>, message: &str) -> QueryResult<ApprovalState> {
         use crate::schema::approvals::dsl as approvals;
 
         let (id, approved) = diesel::insert_into(approvals::approvals)
@@ -506,10 +511,11 @@ impl<'conn> StateInterface<'conn> {
             // Get the most recently updated ones
             .order(versions::start_time.desc())
             .limit(limit)
-            .get_results::<(String, Uuid, serde_json::Value)>(self.conn)?
+            .get_results::<(EntityType, Uuid, serde_json::Value)>(self.conn)?
             .into_iter()
             .map(|(entity_type, entity_id, entity_json)| {
-                let description = entity_description(&entity_type, entity_json);
+                // let description = entity_description(&entity_type, entity_json);
+                let description = "TODO".to_string();
 
                 EntityDescription {
                     entity_type,
@@ -522,11 +528,8 @@ impl<'conn> StateInterface<'conn> {
         Ok(result)
     }
 
-    fn query_versions_with_end<'a>(&self, entity_type: &'a str, entity_id: Uuid) ->
-    dsl::FindBy<dsl::FindBy<dsl::FindBy<versions_dsl::versions_with_end,
-        versions_dsl::ingest_id, i32>,
-        versions_dsl::entity_type, &'a str>,
-        versions_dsl::entity_id, Uuid> {
+    fn query_versions_with_end(&self, entity_type: EntityType, entity_id: Uuid) ->
+    dsl::FindBy<dsl::FindBy<dsl::FindBy<versions_dsl::versions_with_end, versions_dsl::ingest_id, i32>, versions_dsl::entity_type, EntityType>, versions_dsl::entity_id, Uuid> {
         use crate::schema::versions_with_end::dsl as versions;
 
         versions::versions_with_end
@@ -538,7 +541,7 @@ impl<'conn> StateInterface<'conn> {
             .filter(versions::entity_id.eq(entity_id))
     }
 
-    pub fn get_entity_debug(&mut self, entity_type: &str, entity_id: Uuid) -> QueryResult<EntityVersionsDebug> {
+    pub fn get_entity_debug(&mut self, entity_type: EntityType, entity_id: Uuid) -> QueryResult<EntityVersionsDebug> {
         use crate::schema::versions_with_end::dsl as versions;
         use crate::schema::events::dsl as events;
         use crate::schema::version_links::dsl as version_links;

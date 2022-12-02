@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use partial_information::MaybeKnown;
 
-use crate::entity::AnyEntity;
+use crate::entity::{AnyEntity, Entity};
 use crate::events::Event;
 
 #[derive(Serialize, Deserialize)]
@@ -43,7 +43,7 @@ impl Event for EarlseasonStart {
                 game.last_update = String::new();
                 game.last_update_full = Some(Vec::new());
             }
-            other => panic!("EarlseasonStart event does not apply to {}", other.name())
+            other => panic!("EarlseasonStart event does not apply to {}", other.entity_type())
         }
 
         entity
