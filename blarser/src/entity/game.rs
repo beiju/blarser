@@ -151,7 +151,7 @@ impl Display for Game {
 }
 
 impl Entity for Game {
-    fn entity_type(self) -> &'static str { "game" }
+    fn entity_type(&self) -> &'static str { "game" }
     fn id(&self) -> Uuid { self.id }
 }
 

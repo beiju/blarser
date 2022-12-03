@@ -1,10 +1,11 @@
-mod feed_event;
+mod feed_event_old;
 mod timed_event;
 mod game_update;
 
 // Events
 mod start;
-// mod earlseason_start;
+mod earlseason_start;
+mod feed_event;
 // mod lets_go;
 // mod play_ball;
 // mod half_inning;
@@ -16,8 +17,10 @@ mod start;
 // mod hit;
 // mod player_reroll;
 
+use std::fmt::{Display, Formatter};
 pub use start::Start;
-// pub use earlseason_start::EarlseasonStart;
+pub use earlseason_start::EarlseasonStart;
+pub use feed_event::FeedEvent;
 // pub use lets_go::LetsGo;
 // pub use play_ball::PlayBall;
 // pub use half_inning::HalfInning;
@@ -30,13 +33,14 @@ pub use start::Start;
 
 use chrono::{DateTime, Utc};
 use enum_dispatch::enum_dispatch;
+use fed::FedEvent;
 use serde::{Deserialize, Serialize};
 
 use crate::entity::AnyEntity;
 use crate::state::Effects;
 
 #[enum_dispatch]
-pub trait Event: Serialize + for<'de> Deserialize<'de> {
+pub trait Event: Serialize + for<'de> Deserialize<'de> + Ord + Display {
     fn time(&self) -> DateTime<Utc>;
 
     fn generate_successors(&self) -> Vec<(AnyEvent, Effects)> {
@@ -47,12 +51,12 @@ pub trait Event: Serialize + for<'de> Deserialize<'de> {
     fn reverse(&self, entity: AnyEntity, aux: serde_json::Value) -> AnyEntity;
 }
 
-
 #[enum_dispatch(Event)]
 #[derive(Serialize, Deserialize)]
 pub enum AnyEvent {
     Start(Start),
-    // EarlseasonStart(EarlseasonStart),
+    EarlseasonStart(EarlseasonStart),
+    FeedEvent(FeedEvent),
     // LetsGo(LetsGo),
     // PlayBall(PlayBall),
     // HalfInning(HalfInning),
@@ -68,3 +72,41 @@ pub enum AnyEvent {
     // HomeRun(HomeRun),
     // Snow(Snow),
 }
+
+impl Display for AnyEvent {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AnyEvent::Start(e) => { e.fmt(f) }
+            AnyEvent::EarlseasonStart(e) => { e.fmt(f) }
+            AnyEvent::FeedEvent(e) => { e.fmt(f) }
+        }
+    }
+}
+
+macro_rules! ord_by_time {
+    ($tn:ty) => {
+        impl Eq for $tn {}
+
+        impl PartialEq<Self> for $tn {
+            fn eq(&self, other: &Self) -> bool {
+                self.time().eq(&other.time())
+            }
+        }
+
+        impl PartialOrd<Self> for $tn {
+            fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+                self.time().partial_cmp(&other.time())
+            }
+        }
+
+        impl Ord for $tn {
+            fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+                self.time().cmp(&other.time())
+            }
+        }
+    }
+}
+
+ord_by_time!(AnyEvent);
+
+pub(crate) use ord_by_time;

@@ -104,7 +104,7 @@ impl EntityRaw for <Team as PartialInformationCompare>::Raw {
 }
 
 impl Entity for Team {
-    fn entity_type(self) -> &'static str { "team" }
+    fn entity_type(&self) -> &'static str { "team" }
     fn id(&self) -> Uuid { self.id }
 }
 

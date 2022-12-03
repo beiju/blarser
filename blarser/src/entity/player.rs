@@ -126,7 +126,7 @@ impl EntityRaw for <Player as PartialInformationCompare>::Raw {
 }
 
 impl Entity for Player {
-    fn entity_type(self) -> &'static str { "player" }
+    fn entity_type(&self) -> &'static str { "player" }
     fn id(&self) -> Uuid { self.id }
 }
 

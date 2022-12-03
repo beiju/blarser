@@ -47,3 +47,6 @@ multimap = "0.8.3"
 fed = { path = "../../fed/fed" }
 trait_enum = "0.5.0"
 uuid = { version = "1.2.2", features = ["serde"] }
+serde_variant = "0.1.1"
+strum = { version = "0.24", features = ["derive"] }
+petgraph = "0.6.2"

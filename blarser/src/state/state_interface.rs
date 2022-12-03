@@ -228,43 +228,43 @@ impl<'conn> StateInterface<'conn> {
     //     Ok(events.zip(effects).collect())
     // }
     //
-    // pub fn get_versions_at_generic<EntityT: Entity>(&mut self, entity_id: Option<Uuid>, at_time: Option<DateTime<Utc>>) -> QueryResult<Vec<Version<EntityT>>> {
-    //     use crate::schema::versions_with_end::dsl as versions;
-    //     let base_query = versions::versions_with_end
-    //         // Is from the right ingest
-    //         .filter(versions::ingest_id.eq(self.ingest_id))
-    //         // Has the right entity type (entity id handled below)
-    //         .filter(versions::entity_type.eq(EntityT::name()))
-    //         // Has not been terminated
-    //         .filter(versions::terminated.is_null())
-    //         // Has the right end date/no end date
-    //         // This ends up being (is null or is null) in the None case but the second is_null is
-    //         // needed for the Some case
-    //         .filter(versions::end_time.eq(at_time).or(versions::end_time.is_null()));
-    //
-    //     let versions = match entity_id {
-    //         Some(entity_id) => {
-    //             base_query
-    //                 // Has the right entity id
-    //                 .filter(versions::entity_id.eq(entity_id))
-    //                 .get_results::<DbVersionWithEnd>(self.conn)?
-    //         }
-    //         None => {
-    //             base_query.get_results::<DbVersionWithEnd>(self.conn)?
-    //         }
-    //     };
-    //
-    //     let versions = versions.into_iter()
-    //         .map(|db_version| db_version.parse::<EntityT>())
-    //         .collect();
-    //
-    //     Ok(versions)
-    // }
-    //
-    // pub fn get_versions_at<EntityT: Entity>(&mut self, entity_id: Option<Uuid>, at_time: DateTime<Utc>) -> QueryResult<Vec<Version<EntityT>>> {
-    //     self.get_versions_at_generic::<EntityT>(entity_id, Some(at_time))
-    // }
-    //
+    pub fn get_versions_at_generic<EntityT: Entity>(&mut self, entity_type: EntityType, entity_id: Option<Uuid>, at_time: Option<DateTime<Utc>>) -> QueryResult<Vec<Version<EntityT>>> {
+        use crate::schema::versions_with_end::dsl as versions;
+        let base_query = versions::versions_with_end
+            // Is from the right ingest
+            .filter(versions::ingest_id.eq(self.ingest_id))
+            // Has the right entity type (entity id handled below)
+            .filter(versions::entity_type.eq(entity_type))
+            // Has not been terminated
+            .filter(versions::terminated.is_null())
+            // Has the right end date/no end date
+            // This ends up being (is null or is null) in the None case but the second is_null is
+            // needed for the Some case
+            .filter(versions::end_time.eq(at_time).or(versions::end_time.is_null()));
+
+        let versions = match entity_id {
+            Some(entity_id) => {
+                base_query
+                    // Has the right entity id
+                    .filter(versions::entity_id.eq(entity_id))
+                    .get_results::<DbVersionWithEnd>(self.conn)?
+            }
+            None => {
+                base_query.get_results::<DbVersionWithEnd>(self.conn)?
+            }
+        };
+
+        let versions = versions.into_iter()
+            .map(|db_version| db_version.parse::<EntityT>())
+            .collect();
+
+        Ok(versions)
+    }
+
+    pub fn get_versions_at<EntityT: Entity>(&mut self, entity_type: EntityType, entity_id: Option<Uuid>, at_time: DateTime<Utc>) -> QueryResult<Vec<Version<EntityT>>> {
+        self.get_versions_at_generic::<EntityT>(entity_type, entity_id, Some(at_time))
+    }
+
     // pub fn get_latest_versions<EntityT: Entity>(&mut self, entity_id: Option<Uuid>) -> QueryResult<Vec<Version<EntityT>>> {
     //     self.get_versions_at_generic::<EntityT>(entity_id, None)
     // }

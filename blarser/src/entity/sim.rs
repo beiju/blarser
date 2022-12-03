@@ -85,6 +85,6 @@ impl EntityRaw for <Sim as PartialInformationCompare>::Raw {
 }
 
 impl Entity for Sim {
-    fn entity_type(self) -> &'static str { "sim" }
+    fn entity_type(&self) -> &'static str { "sim" }
     fn id(&self) -> Uuid { Uuid::nil() }
 }

@@ -41,7 +41,7 @@ impl EntityRaw for <Standings as PartialInformationCompare>::Raw {
 }
 
 impl Entity for Standings {
-    fn entity_type(self) -> &'static str { "standings" }
+    fn entity_type(&self) -> &'static str { "standings" }
     fn id(&self) -> Uuid { self.id }
 }
 // impl Standings {

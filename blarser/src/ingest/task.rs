@@ -6,12 +6,14 @@ use diesel::{ExpressionMethods, OptionalExtension, PgConnection, QueryDsl, Query
 use diesel::result::Error;
 use multimap::MultiMap;
 use rocket::info;
+use core::default::Default;
 use tokio::sync::{watch, oneshot};
 use uuid::Uuid;
 use crate::api::EventuallyEvent;
 
 use crate::db::BlarserDbConn;
-use crate::ingest::chron::{init_chron, run_ingest};
+use crate::ingest::{run_ingest, chron::load_initial_state};
+use crate::ingest::state::StateGraph;
 use crate::schema;
 use crate::state::{ApprovalState, EntityType, StateInterface};
 
@@ -83,9 +85,7 @@ impl IngestTask {
             .expect("Couldn't parse hard-coded Blarser start time")
             .with_timezone(&Utc);
 
-        init_chron(&ingest, BLARSER_START, start_time_parsed).await;
-
-        tokio::spawn(run_ingest(ingest, BLARSER_START, start_time_parsed));
+        tokio::spawn(run_ingest(ingest, start_time_parsed));
 
         IngestTask {
             ingest_id,
@@ -106,6 +106,7 @@ pub struct Ingest {
     pub ingest_id: i32,
     pub db: BlarserDbConn,
     pub pending_approvals: Arc<StdMutex<HashMap<i32, oneshot::Sender<bool>>>>,
+    pub state: Arc<StdMutex<StateGraph>>,
 }
 
 impl Ingest {
@@ -114,6 +115,7 @@ impl Ingest {
             ingest_id,
             db,
             pending_approvals: Arc::new(Mutex::new(Default::default())),
+            state: Arc::new(Mutex::new(Default::default()))
         }
     }
 

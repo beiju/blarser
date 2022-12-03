@@ -1,4 +1,5 @@
 use bincode;
+use chrono::{DateTime, Utc};
 use futures::{Stream, stream, StreamExt};
 use log::info;
 
@@ -76,17 +77,17 @@ pub const ENDPOINT_NAMES: [&str; 43] = [
     // "availablechampionbets",
 ];
 
-pub fn versions(entity_type: &'static str, start: &'static str) -> impl Stream<Item=ChroniclerItem> {
+pub fn versions(entity_type: &'static str, start: DateTime<Utc>) -> impl Stream<Item=ChroniclerItem> {
     chronicler_pages("versions", entity_type, start)
         .flat_map(|vec| stream::iter(vec.into_iter()))
 }
 
-pub fn entities(entity_type: &'static str, start: &'static str) -> impl Stream<Item=ChroniclerItem> {
+pub fn entities(entity_type: &'static str, start: DateTime<Utc>) -> impl Stream<Item=ChroniclerItem> {
     chronicler_pages("entities", entity_type, start)
         .flat_map(|vec| stream::iter(vec.into_iter()))
 }
 
-pub fn game_updates_or_schedule(schedule: bool, start: &'static str) -> impl Stream<Item=ChroniclerItem> {
+pub fn game_updates_or_schedule(schedule: bool, start: DateTime<Utc>) -> impl Stream<Item=ChroniclerItem> {
     game_update_pages(schedule, start)
         .flat_map(|vec| stream::iter(vec.into_iter()))
         .map(|game| {
@@ -99,11 +100,11 @@ pub fn game_updates_or_schedule(schedule: bool, start: &'static str) -> impl Str
         })
 }
 
-pub fn game_updates(start: &'static str) -> impl Stream<Item=ChroniclerItem> {
+pub fn game_updates(start: DateTime<Utc>) -> impl Stream<Item=ChroniclerItem> {
     game_updates_or_schedule(false, start)
 }
 
-pub fn schedule(start: &'static str) -> impl Stream<Item=ChroniclerItem> {
+pub fn schedule(start: DateTime<Utc>) -> impl Stream<Item=ChroniclerItem> {
     game_updates_or_schedule(true, start)
 }
 
@@ -116,7 +117,7 @@ struct ChronState {
 
 fn chronicler_pages(endpoint: &'static str,
                     entity_type: &'static str,
-                    start: &'static str) -> impl Stream<Item=Vec<ChroniclerItem>> {
+                    start: DateTime<Utc>) -> impl Stream<Item=Vec<ChroniclerItem>> {
     let start_state = ChronState {
         page: None,
         stop: false,
@@ -133,7 +134,7 @@ fn chronicler_pages(endpoint: &'static str,
     })
 }
 
-async fn chronicler_page(start: &'static str,
+async fn chronicler_page(start: DateTime<Utc>,
                          endpoint: &'static str,
                          entity_type: &'static str,
                          state: ChronState) -> (Vec<ChroniclerItem>, ChronState) {
@@ -186,7 +187,7 @@ async fn chronicler_page(start: &'static str,
     )
 }
 
-fn game_update_pages(schedule: bool, start: &'static str) -> impl Stream<Item=Vec<ChroniclerGameUpdate>> {
+fn game_update_pages(schedule: bool, start: DateTime<Utc>) -> impl Stream<Item=Vec<ChroniclerGameUpdate>> {
     let request_type = if schedule { "schedule" } else { "updates" };
 
     let start_state = ChronState {
@@ -206,7 +207,7 @@ fn game_update_pages(schedule: bool, start: &'static str) -> impl Stream<Item=Ve
     })
 }
 
-async fn game_update_page(schedule: bool, start: &'static str, state: ChronState) -> (Vec<ChroniclerGameUpdate>, ChronState) {
+async fn game_update_page(schedule: bool, start: DateTime<Utc>, state: ChronState) -> (Vec<ChroniclerGameUpdate>, ChronState) {
     let request_type = if schedule { "schedule" } else { "updates" };
 
     let request = state.client

@@ -3,7 +3,7 @@ use std::collections::BinaryHeap;
 use std::fmt::{Display, Formatter};
 use std::iter;
 use std::pin::Pin;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, SecondsFormat, Utc};
 use diesel::QueryResult;
 use futures::{pin_mut, stream, Stream, StreamExt};
 use itertools::{EitherOrBoth, Itertools};
@@ -12,16 +12,20 @@ use serde_json::Value;
 use thiserror::Error;
 use partial_information::Conflict;
 use fed::FedEvent;
+use futures::stream::Peekable;
+use uuid::Uuid;
 
 use crate::api::{chronicler, ChroniclerItem};
+use crate::{entity, events, ingest};
 use crate::ingest::task::Ingest;
 use crate::entity::{AnyEntity, Entity, EntityParseError, EntityRaw};
+use crate::events::AnyEvent;
 use crate::ingest::observation::Observation;
-use crate::state::{EventEffect, MergedSuccessors, NewVersion, StateInterface, Version, VersionLink};
+use crate::state::{EntityType, EventEffect, MergedSuccessors, NewVersion, StateInterface, Version, VersionLink};
 // use crate::{with_any_entity_raw, with_any_event};
 // use crate::events::Event;
 
-fn initial_state(start_at_time: &'static str) -> impl Stream<Item=Observation> {
+fn initial_state(start_at_time: DateTime<Utc>) -> impl Stream<Item=Observation> {
     type ObservationStream = Pin<Box<dyn Stream<Item=Observation> + Send>>;
     // So much of this is just making the type system happy
     let streams = chronicler::ENDPOINT_NAMES.into_iter()
@@ -51,7 +55,7 @@ fn initial_state(start_at_time: &'static str) -> impl Stream<Item=Observation> {
 
 type PinnedObservationStream = Pin<Box<dyn Stream<Item=Observation> + Send>>;
 
-fn chron_updates(start_at_time: &'static str) -> impl Stream<Item=Observation> {
+pub fn chron_updates(start_at_time: DateTime<Utc>) -> impl Stream<Item=Observation> {
     // So much of this is just making the type system happy
     let streams = chronicler::ENDPOINT_NAMES.into_iter()
         .map(move |entity_type| {
@@ -115,110 +119,40 @@ fn kmerge_stream(streams: impl Iterator<Item=PinnedObservationStream>) -> impl S
     })
 }
 
-pub async fn init_chron(ingest: &Ingest, start_at_time: &'static str, start_time_parsed: DateTime<Utc>) {
+pub async fn load_initial_state(ingest: &Ingest, start_at_time: DateTime<Utc>) -> Vec<Observation> {
     let initial_versions: Vec<_> = initial_state(start_at_time).collect().await;
 
-    ingest.run(move |mut state| {
-        state.add_initial_versions(start_time_parsed, initial_versions.into_iter())
-    }).await
-        .expect("Failed to save initial versions");
-
-    info!("Finished populating initial Chron values");
+    // ingest.run(move |mut state| {
+    //     state.add_initial_versions(start_time_parsed, initial_versions.into_iter())
+    // }).await
+    //     .expect("Failed to save initial versions");
+    initial_versions
 }
 
-struct StreamWithCursor<CursorT: PartialOrd, ItemT> {
-    produce_fn: tokio::sync::mpsc::Receiver<(CursorT, Option<ItemT>)>,
-    next_cursor: CursorT,
+pub(crate) struct ObservationStreamWithCursor<'s, StreamT: Stream<Item=Observation>> {
+    stream: Pin<&'s mut Peekable<StreamT>>,
 }
 
-impl<CursorT: PartialOrd, ItemT> StreamWithCursor<CursorT, ItemT> {
-    pub fn produce_until(&mut self, limit: CursorT) -> impl Stream<Item=ItemT> {
-        stream::unfold((), |()| async {
-            todo!()
-        })
+impl<'s, StreamT: Stream<Item=Observation>> ObservationStreamWithCursor<'s, StreamT> {
+    pub fn new(stream: Pin<&'s mut Peekable<StreamT>>) -> Self {
+        Self { stream }
     }
 
-    pub fn next_cursor(&self) -> &CursorT {
-        &self.next_cursor
-    }
-}
+    pub async fn next_before(&mut self, limit: DateTime<Utc>) -> Option<Observation> {
+        let Some(next_item) = self.stream.as_mut().peek().await else {
+            return None;
+        };
 
-fn get_event_producer(start_at_time: &'static str) -> StreamWithCursor<DateTime<Utc>, FedEvent> {
-    todo!()
-}
-
-fn get_observation_producer(start_at_time: &'static str) -> StreamWithCursor<DateTime<Utc>, ChroniclerItem> {
-    todo!()
-}
-
-pub async fn run_ingest(mut ingest: Ingest, start_at_time: &'static str, start_time: DateTime<Utc>) {
-    info!("Started ingest task");
-
-    let mut event_producer = get_event_producer(start_at_time);
-    let mut observation_producer = get_observation_producer(start_at_time);
-
-    let mut events_processed_until = start_time;
-
-    loop {
-        let new_observations = observation_producer.produce_until(events_processed_until);
-        pin_mut!(new_observations);
-        while let Some(observation) = new_observations.next().await {
-            todo!();
+        if next_item.latest_time() < limit {
+            self.stream.next().await
+        } else {
+            None
         }
-        let new_events = event_producer.produce_until(events_processed_until);
-        pin_mut!(new_events);
-        while let Some(event) = new_events.next().await {
-            todo!();
-        }
-        events_processed_until = *event_producer.next_cursor();
     }
 
-    // let mut prev_observation_time = start_time;
-    //
-    // while let Some(observation) = updates.next().await {
-    //     // Just to ensure observations are processed in latest_time order
-    //     assert!(observation.latest_time() >= prev_observation_time,
-    //             "Observations were not processed in chronological order");
-    //     prev_observation_time = observation.latest_time();
-    //
-    //     ingest.wait_for_feed_ingest(observation.latest_time()).await;
-    //
-    //     let normal_ingest_result = {
-    //         let observation = observation.clone();
-    //         ingest.run_transaction(move |state| {
-    //             with_any_entity_raw!(&observation.entity_raw, raw => {
-    //                 forward_ingest(&state, raw, observation.perceived_at)?;
-    //
-    //                 reverse_ingest(&state, raw, observation.perceived_at)?;
-    //             });
-    //
-    //             Ok::<_, ChronIngestError>(())
-    //         }).await
-    //     };
-    //
-    //     match normal_ingest_result {
-    //         Err(ChronIngestError::Conflicts(conflicts)) => {
-    //             let conflicts_str = conflicts.to_string();
-    //             warn!("Getting approval for conflicts: {}", conflicts_str);
-    //             let approved = ingest.get_approval(observation.entity_raw.name(), observation.entity_raw.id(),
-    //                                                observation.perceived_at, conflicts_str).await
-    //                 .expect("Error in get_approval");
-    //             if !approved {
-    //                 panic!("User rejected conflicts. Nothing to do.");
-    //             } else {
-    //                 ingest.run_transaction(move |state| {
-    //                     with_any_entity_raw!(&observation.entity_raw, raw => {
-    //                         add_manual_event(&state, raw, observation.perceived_at)
-    //                     })
-    //                 }).await
-    //                     .expect("Error adding approved manual event");
-    //             }
-    //         }
-    //         other => other.expect("Error in Chron ingest")
-    //     }
-    // }
-    //
-    // todo!()
+    pub async fn next_cursor(&mut self) -> Option<DateTime<Utc>> {
+        self.stream.as_mut().peek().await.map(|obs| obs.latest_time())
+    }
 }
 
 #[derive(Debug)]
@@ -261,6 +195,12 @@ pub enum ChronIngestError {
 }
 
 pub type ChronIngestResult<T> = Result<T, ChronIngestError>;
+
+pub fn ingest_observation(ingest: &mut Ingest, obs: Observation) -> Vec<AnyEvent> {
+    let mut state = ingest.state.lock().unwrap();
+
+    todo!()
+}
 
 // fn forward_ingest<EntityRawT: EntityRaw>(state: &StateInterface, entity_raw: &EntityRawT, perceived_at: DateTime<Utc>) -> ChronIngestResult<()> {
 //     let earliest_time = entity_raw.earliest_time(perceived_at);

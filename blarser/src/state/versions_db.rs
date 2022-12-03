@@ -12,7 +12,7 @@ use crate::entity::{Entity, };
 // use crate::events::AnyEvent;
 use crate::state::events_db::DbEvent;
 
-#[derive(PartialEq, Debug, DbEnum, Clone, Copy, Serialize, Deserialize)]
+#[derive(PartialEq, Debug, DbEnum, Clone, Copy, Serialize, Deserialize, Eq, Hash)]
 #[DieselTypePath = "crate::schema::sql_types::EntityType"]
 pub enum EntityType {
     Sim,
@@ -84,7 +84,7 @@ pub(crate) struct DbVersion {
     pub id: i32,
     pub ingest_id: i32,
 
-    pub entity_type: String,
+    pub entity_type: EntityType,
     pub entity_id: Uuid,
     pub start_time: DateTime<Utc>,
 
@@ -122,7 +122,7 @@ pub(crate) struct DbVersionWithEnd {
     pub id: i32,
     pub ingest_id: i32,
 
-    pub entity_type: String,
+    pub entity_type: EntityType,
     pub entity_id: Uuid,
     pub start_time: DateTime<Utc>,
     pub end_time: Option<DateTime<Utc>>,
@@ -159,7 +159,7 @@ pub struct Version<EntityT> {
     pub id: i32,
     pub ingest_id: i32,
 
-    pub entity_type: String,
+    pub entity_type: EntityType,
     pub entity_id: Uuid,
     pub start_time: DateTime<Utc>,
 
