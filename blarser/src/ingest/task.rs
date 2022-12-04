@@ -1,23 +1,19 @@
 use std::collections::HashMap;
-use std::convert::Infallible;
 use std::sync::{Arc, Mutex as StdMutex, Mutex};
-use chrono::{DateTime, Duration, Utc};
-use diesel::{ExpressionMethods, OptionalExtension, PgConnection, QueryDsl, QueryResult, RunQueryDsl};
-use diesel::result::Error;
-use multimap::MultiMap;
+use chrono::{DateTime, Utc};
+use diesel::{ExpressionMethods, OptionalExtension, QueryDsl, QueryResult, RunQueryDsl};
 use rocket::info;
 use core::default::Default;
-use tokio::sync::{watch, oneshot};
+use tokio::sync::oneshot;
 use uuid::Uuid;
-use crate::api::EventuallyEvent;
 
 use crate::db::BlarserDbConn;
-use crate::ingest::{run_ingest, chron::load_initial_state};
+use crate::ingest::run_ingest;
 use crate::ingest::state::StateGraph;
 use crate::schema;
 use crate::state::{ApprovalState, EntityType, StateInterface};
 
-const BLARSER_START: &str = "2021-12-06T15:00:00Z";
+const BLARSER_START: &str = "2021-03-01T15:00:00Z";
 
 pub struct IngestTaskHolder {
     pub latest_ingest: Arc<StdMutex<Option<IngestTask>>>,

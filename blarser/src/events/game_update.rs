@@ -95,17 +95,17 @@ impl GameUpdate {
 
         // last_update is all the descriptions of the sibling events, separated by \n, and with an
         // extra \n at the end
-        game.last_update = self.last_update_full.iter()
+        game.last_update = Some(self.last_update_full.iter()
             .map(|e| &e.description)
             // This is a too-clever way of getting the extra \n at the end
             .chain(iter::once(&String::new()))
-            .join("\n");
+            .join("\n"));
 
 
         game.last_update_full = Some(self.last_update_full.clone());
 
-        game.score_update = self.score.as_ref().map(|s| s.score_update.clone()).unwrap_or_default();
-        game.score_ledger = self.score.as_ref().map(|s| s.score_ledger.clone()).unwrap_or_default();
+        game.score_update = Some(self.score.as_ref().map(|s| s.score_update.clone()).unwrap_or_default());
+        game.score_ledger = Some(self.score.as_ref().map(|s| s.score_ledger.clone()).unwrap_or_default());
 
         if let Some(score) = &self.score {
             let home_scored = score.home_score - game.home.score
@@ -140,8 +140,8 @@ impl GamePitch {
     pub fn forward(&self, game: &mut Game) {
         self.0.forward(game);
 
-        if game.weather == (Weather::Snowy as i32) && game.state.snowfall_events.is_none() {
-            game.state.snowfall_events = Some(0);
-        }
+        // if game.weather == (Weather::Snowy as i32) && game.state.map_or(false, |state| state.snowfall_events.is_none()) {
+        //     game.state.snowfall_events = Some(0);
+        // }
     }
 }

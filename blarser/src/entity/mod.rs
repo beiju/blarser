@@ -127,6 +127,14 @@ impl AnyEntity {
             EntityType::Season => { Self::from_raw_json_typed::<Season>(raw_json) }
         }
     }
+
+    pub fn as_sim(&self) -> Option<&Sim> {
+        if let AnyEntityInternal::Sim(sim) = &self.0 {
+            Some(sim)
+        } else {
+            None
+        }
+    }
 }
 
 

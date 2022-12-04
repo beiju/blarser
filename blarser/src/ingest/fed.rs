@@ -57,21 +57,9 @@ pub fn get_fed_event_stream() -> impl Stream<Item=EventStreamItem> {
 }
 
 pub async fn get_timed_event_list(ingest: &mut Ingest, start_time: DateTime<Utc>) -> BinaryHeap<Reverse<AnyEvent>> {
-    // TODO Add other sources of timed events
-    let sim_versions: Vec<Version<entity::Sim>> = ingest.run(move |mut state: StateInterface| {
-        state.get_versions_at::<entity::Sim>(EntityType::Sim, None, start_time)
-    }).await
-        .expect("Failed to read versions to init timed events");
-
-    let events = if let Some((sim_version, )) = sim_versions.into_iter().collect_tuple() {
-        let sim: entity::Sim = sim_version.entity;
-        if sim.phase == 1 && sim.earlseason_date > start_time {
-            vec![AnyEvent::EarlseasonStart(events::EarlseasonStart::new(sim.earlseason_date))]
-        } else {
-            todo!()
-        }
-    } else {
-        panic!("Expected there to be exactly one Sim version")
+    let events = {
+        let state = ingest.state.lock().unwrap();
+        state.get_timed_events(start_time)
     };
 
     BinaryHeap::from(events.into_iter().map(Reverse).collect::<Vec<_>>())

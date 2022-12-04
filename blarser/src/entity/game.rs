@@ -9,6 +9,29 @@ use partial_information_derive::PartialInformationCompare;
 
 use crate::entity::{AnyEntity, Base, Entity, EntityRaw, RunnerAdvancement, WrongEntityError};
 
+// This only existed in Short Circuits
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, PartialInformationCompare)]
+#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
+pub struct Postseason {
+    pub bracket: i32,
+    pub matchup: Uuid,
+    pub playoff_id: Uuid,
+}
+
+// This was only used during the Semicentennial
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, PartialInformationCompare)]
+#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
+pub struct EgoPlayerData {
+    pub hall_player: bool,
+    pub id: Uuid,
+    pub location: Option<i32>,
+    pub team: Option<Uuid>,
+}
+
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
@@ -16,6 +39,9 @@ use crate::entity::{AnyEntity, Base, Entity, EntityRaw, RunnerAdvancement, Wrong
 pub struct GameState {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub snowfall_events: Option<i32>,
+    pub postseason: Option<Postseason>,
+    #[serde(rename = "ego_player_data")] // override rename_all = "camelCase"
+    pub ego_player_data: Option<Vec<EgoPlayerData>>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize, PartialInformationCompare)]
@@ -83,40 +109,40 @@ pub struct GameByTeam {
 pub struct Game {
     pub id: Uuid,
     pub day: i32,
-    pub sim: String,
+    pub sim: Option<String>,
     pub loser: Option<Uuid>,
     pub phase: i32,
-    pub rules: Uuid,
+    pub rules: Option<Uuid>,
     pub shame: bool,
-    pub state: GameState,
+    pub state: Option<GameState>,
     pub inning: i32,
     pub season: i32,
     pub winner: Option<Uuid>,
     pub weather: i32,
-    pub end_phase: i32,
-    pub outcomes: Vec<String>,
-    pub season_id: Uuid,
-    pub finalized: bool,
+    pub end_phase: Option<i32>,
+    pub outcomes: Option<Vec<String>>,
+    pub season_id: Option<Uuid>,
+    pub finalized: Option<bool>,
     pub game_start: bool,
     pub play_count: i64,
     pub stadium_id: Option<Uuid>,
-    pub statsheet: Uuid,
+    pub statsheet: Option<Uuid>,
     pub at_bat_balls: i32,
-    pub last_update: String,
+    pub last_update: Option<String>,
     pub tournament: i32,
     pub base_runners: Vec<Uuid>,
     pub repeat_count: i32,
-    pub score_ledger: String,
-    pub score_update: String,
+    pub score_ledger: Option<String>,
+    pub score_update: Option<String>,
     pub series_index: i32,
-    pub terminology: Uuid,
+    pub terminology: Option<Uuid>,
     pub top_of_inning: bool,
     pub at_bat_strikes: i32,
     pub game_complete: bool,
     pub is_postseason: bool,
     pub is_prize_match: Option<bool>,
     pub is_title_match: bool,
-    pub queued_events: Vec<i32>,
+    pub queued_events: Option<Vec<i32>>,
     pub series_length: i32,
     pub bases_occupied: Vec<i32>,
     pub base_runner_mods: Vec<String>,
@@ -131,7 +157,7 @@ pub struct Game {
     pub tournament_round: Option<i32>,
     pub secret_baserunner: Option<Uuid>,
     pub bottom_inning_score: f32,
-    pub new_half_inning_phase: i32,
+    pub new_half_inning_phase: Option<i32>,
     pub tournament_round_game_index: Option<i32>,
 
     #[serde(flatten, with = "prefix_home")]

@@ -85,6 +85,10 @@ pub struct Team {
     pub secondary_color: String,
     pub tournament_wins: Option<i32>,
     pub underchampionships: Option<i32>,
+
+    #[allow(non_snake_case)] pub eDensity: Option<f32>,
+    #[allow(non_snake_case)] pub eVelocity: Option<f32>,
+    #[allow(non_snake_case)] pub imPosition: Option<f32>,
 }
 
 impl Display for Team {

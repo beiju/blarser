@@ -23,20 +23,18 @@ pub struct Sim {
     pub id: String,
     pub day: i32,
     pub attr: Vec<String>,
-    pub menu: String,
+    pub menu: Option<String>,
     pub rules: Uuid,
-    pub state: SimState,
+    pub state: Option<SimState>,
     pub league: Uuid,
     pub season: i32,
-    pub sim_end: DateTime<Utc>,
+    pub sim_end: Option<DateTime<Utc>>,
     pub era_color: String,
     pub era_title: String,
-    pub playoffs: Option<i32>,
-    // TODO what's the type when it's not null?
-    pub season_id: Uuid,
-    pub sim_start: DateTime<Utc>,
-    pub agitations: i32,
-    // what
+    pub playoffs: Option<Uuid>,
+    pub season_id: Option<Uuid>,
+    pub sim_start: Option<DateTime<Utc>>,
+    pub agitations: i32, // what
     pub tournament: i32,
     pub gods_day_date: DateTime<Utc>,
     pub salutations: i32,
@@ -53,6 +51,7 @@ pub struct Sim {
     pub lateseason_date: DateTime<Utc>,
     pub latesiesta_date: DateTime<Utc>,
     pub tournament_round: i32,
+    pub play_off_round: Option<i32>,
     pub earlpostseason_date: DateTime<Utc>,
     pub latepostseason_date: DateTime<Utc>,
 }
@@ -68,20 +67,6 @@ impl EntityRaw for <Sim as PartialInformationCompare>::Raw {
 
     fn name() -> &'static str { "sim" }
     fn id(&self) -> Uuid { Uuid::nil() }
-
-    // fn init_events(&self, after_time: DateTime<Utc>) -> Vec<(AnyEvent, Vec<(String, Option<Uuid>, serde_json::Value)>)> {
-    //     if self.phase == 1 && self.earlseason_date > after_time {
-    //         vec![(
-    //             AnyEvent::EarlseasonStart(EarlseasonStart::new(self.earlseason_date)),
-    //             vec![
-    //                 ("sim".to_string(), None, serde_json::Value::Null),
-    //                 ("game".to_string(), None, serde_json::Value::Null)
-    //             ]
-    //         )]
-    //     } else {
-    //         todo!()
-    //     }
-    // }
 }
 
 impl Entity for Sim {

@@ -6,43 +6,43 @@ mod observation_event;
 mod fed;
 mod state;
 
-use std::borrow::{Borrow, BorrowMut};
+
 use std::cmp::Reverse;
-use std::collections::BinaryHeap;
+
 pub use task::{IngestTask, IngestTaskHolder};
 pub use observation::Observation;
 pub use observation_event::ChronObservationEvent;
 
 use chrono::{DateTime, Utc};
-use env_logger::init;
+
 use futures::{pin_mut, StreamExt};
 use log::info;
-use rocket::http::ext::IntoCollection;
-use serde_json::de::Read;
-use tokio::sync::Mutex;
 
 use crate::ingest::task::Ingest;
 use crate::ingest::fed::{get_fed_event_stream, get_timed_event_list, ingest_event};
-use crate::ingest::chron::{chron_updates, ingest_observation, load_initial_state, ObservationStreamWithCursor};
-use crate::events::{AnyEvent, Event};
-use crate::ingest::state::StateGraph;
+use crate::ingest::chron::{chron_updates, ingest_observation, load_initial_state};
+use crate::events::Event;
 
 pub async fn run_ingest(mut ingest: Ingest, start_time: DateTime<Utc>) {
-    info!("Loading initial state...");
+    info!("Loading initial state from {start_time}...");
     let initial_observations = load_initial_state(&ingest, start_time).await;
     {
         let mut state = ingest.state.lock().unwrap();
         state.populate(initial_observations);
     }
-    info!("Started ingest task");
+
+    let mut timed_events = get_timed_event_list(&mut ingest, start_time).await;
+    info!("Initial state has {} timed events:", timed_events.len());
+    for evt in &timed_events {
+        info!(" - {}", evt.0);
+    }
 
     let fed_events = get_fed_event_stream().peekable();
     pin_mut!(fed_events);
     let observations = chron_updates(start_time).peekable();
     pin_mut!(observations);
 
-    let mut timed_events = get_timed_event_list(&mut ingest, start_time).await;
-
+    info!("Starting ingest");
     loop {
         let next_fed_event_time = {
             let mut time = fed_events.as_mut().peek().await
