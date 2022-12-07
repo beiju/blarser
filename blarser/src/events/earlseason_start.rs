@@ -4,7 +4,8 @@ use serde::{Deserialize, Serialize};
 use partial_information::MaybeKnown;
 
 use crate::entity::{AnyEntity, Entity};
-use crate::events::{Event, ord_by_time};
+use crate::events::{AffectedEntity, Event, ord_by_time};
+use crate::state::EntityType;
 
 #[derive(Serialize, Deserialize)]
 pub struct EarlseasonStart {
@@ -22,31 +23,35 @@ impl Event for EarlseasonStart {
         self.time
     }
 
-    fn forward(&self, mut entity: AnyEntity, _: serde_json::Value) -> AnyEntity {
-        todo!();
-        // match &mut entity {
-        //     AnyEntity::Sim(sim) => {
-        //         if sim.phase == 1 {
-        //             sim.phase = 2;
-        //             sim.next_phase_time = sim.earlseason_date;
-        //         } else {
-        //             panic!("Tried to apply EarlseasonStart event while not in Preseason phase")
-        //         }
-        //     }
-        //     AnyEntity::Game(game) => {
-        //         for self_by_team in [&mut game.home, &mut game.away] {
-        //             self_by_team.batter_name = Some(String::new());
-        //             self_by_team.odds = Some(MaybeKnown::Unknown);
-        //             self_by_team.pitcher = Some(MaybeKnown::Unknown);
-        //             self_by_team.pitcher_name = Some(MaybeKnown::Unknown);
-        //             self_by_team.score = Some(0.0);
-        //             self_by_team.strikes = Some(3);
-        //         }
-        //         game.last_update = String::new();
-        //         game.last_update_full = Some(Vec::new());
-        //     }
-        //     other => panic!("EarlseasonStart event does not apply to {}", other.entity_type())
-        // }
+    fn affected_entities(&self) -> Vec<AffectedEntity> {
+        vec![
+            AffectedEntity::null_id(EntityType::Sim),
+            AffectedEntity::all_ids(EntityType::Game),
+        ]
+    }
+
+    fn forward(&self, mut entity: &AnyEntity) -> AnyEntity {
+        let mut entity = entity.clone();
+
+        if let Some(sim) = entity.as_sim_mut() {
+            if sim.phase == 1 {
+                sim.phase = 2;
+                sim.next_phase_time = sim.earlseason_date;
+            } else {
+                panic!("Tried to apply EarlseasonStart event while not in Preseason phase")
+            }
+        } else if let Some(game) = entity.as_game_mut() {
+            for self_by_team in [&mut game.home, &mut game.away] {
+                self_by_team.batter_name = Some(String::new());
+                self_by_team.odds = Some(MaybeKnown::Unknown);
+                self_by_team.pitcher = Some(MaybeKnown::Unknown);
+                self_by_team.pitcher_name = Some(MaybeKnown::Unknown);
+                self_by_team.score = Some(0.0);
+                self_by_team.strikes = Some(3);
+            }
+            game.last_update = Some(String::new());
+            game.last_update_full = Some(Vec::new());
+        }
 
         entity
     }

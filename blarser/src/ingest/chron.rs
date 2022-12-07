@@ -199,7 +199,9 @@ pub type ChronIngestResult<T> = Result<T, ChronIngestError>;
 pub fn ingest_observation(ingest: &mut Ingest, obs: Observation) -> Vec<AnyEvent> {
     let mut state = ingest.state.lock().unwrap();
 
-    todo!()
+    info!("Here's where I would ingest {} {} (from {})", obs.entity_type, obs.entity_id, obs.perceived_at);
+
+    Vec::new()
 }
 
 // fn forward_ingest<EntityRawT: EntityRaw>(state: &StateInterface, entity_raw: &EntityRawT, perceived_at: DateTime<Utc>) -> ChronIngestResult<()> {

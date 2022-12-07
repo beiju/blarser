@@ -5,7 +5,7 @@ mod observation;
 mod observation_event;
 mod fed;
 mod state;
-
+mod error;
 
 use std::cmp::Reverse;
 
@@ -14,14 +14,21 @@ pub use observation::Observation;
 pub use observation_event::ChronObservationEvent;
 
 use chrono::{DateTime, Utc};
+use diesel::internal::operators_macro::FieldAliasMapper;
 
 use futures::{pin_mut, StreamExt};
 use log::info;
 
 use crate::ingest::task::Ingest;
-use crate::ingest::fed::{get_fed_event_stream, get_timed_event_list, ingest_event};
+use crate::ingest::fed::{EventStreamItem, get_fed_event_stream, get_timed_event_list, ingest_event};
 use crate::ingest::chron::{chron_updates, ingest_observation, load_initial_state};
 use crate::events::Event;
+
+enum Source {
+    Feed,
+    Timed,
+    Observation,
+}
 
 pub async fn run_ingest(mut ingest: Ingest, start_time: DateTime<Utc>) {
     info!("Loading initial state from {start_time}...");
@@ -42,42 +49,71 @@ pub async fn run_ingest(mut ingest: Ingest, start_time: DateTime<Utc>) {
     let observations = chron_updates(start_time).peekable();
     pin_mut!(observations);
 
+    let mut latest_feed_update = start_time;
+
     info!("Starting ingest");
     loop {
-        let next_fed_event_time = {
-            let mut time = fed_events.as_mut().peek().await
-                .expect("This stream should never terminate")
-                .last_update_time();
-
+        // TODO this always blocks until the next event comes in, defeating the purpose of having
+        //   event-less "latest ingest time" updates
+        let next_fed_event_time = loop {
             // Consume all the empty ingests from fed_events
-            while fed_events.as_mut().peek().await.expect("This stream should never terminate").event().is_none() {
-                let item = fed_events.next().await.unwrap();
-                assert!(item.event().is_none());
-                time = item.last_update_time();
+            let next_item: &EventStreamItem = fed_events.as_mut().peek().await
+                .expect("This stream should never terminate");
+            latest_feed_update = next_item.last_update_time();
+            if let Some(event) = next_item.event() {
+                break event.time()
+            } else {
+                let n: EventStreamItem = fed_events.as_mut().next().await
+                    .expect("This stream should never terminate");
+                assert!(n.event().is_none(),
+                        "This part of the loop should only ever drain items with no event");
             }
-
-            time
         };
 
         let next_timed_event_time = timed_events.peek()
             .map(|event| event.0.time());
 
+        // TODO Allow this to be None if there are currently no observations
         let next_observation_time = observations.as_mut().peek().await
             .expect("This stream should never terminate")
             .latest_time();
 
-        if next_observation_time < next_fed_event_time {
-            let observation = observations.next().await
-                .expect("This stream should never terminate");
-            let new_timed_events = ingest_observation(&mut ingest, observation);
-            timed_events.extend(new_timed_events.into_iter().map(Reverse));
-        } else {
-            let event = fed_events.next().await
-                .expect("This stream should never terminate")
-                .into_event()
-                .expect("Should always have an event at this stage");
-            let new_timed_events = ingest_event(&mut ingest, event);
-            timed_events.extend(new_timed_events.into_iter().map(Reverse));
+        let Some((source, time)) = [
+            Some((Source::Feed, next_fed_event_time)),
+            next_timed_event_time.map(|t| (Source::Timed, t)),
+            Some((Source::Observation, next_observation_time))
+        ].into_iter()
+            .flatten() // Get rid of None options
+            .min_by_key(|(_, time)| *time) else {
+            todo!(); // should this ever happen?
+        };
+
+        if time > latest_feed_update {
+            info!("Caught up with the Feed");
+            continue;
         }
+
+        let new_timed_events = match source {
+            Source::Feed => {
+                let event = fed_events.next().await
+                    .expect("This stream should never terminate")
+                    .into_event()
+                    .expect("If we got here, the source should not be empty");
+                ingest_event(&mut ingest, event).unwrap()
+            }
+            Source::Timed => {
+                let event = timed_events.pop()
+                    .expect("If we got here, the source should not be empty").0;
+                ingest_event(&mut ingest, event).unwrap()
+            }
+            Source::Observation => {
+                let observation = observations.next().await
+                    .expect("This stream should never terminate");
+                ingest_observation(&mut ingest, observation)
+            }
+        };
+
+        timed_events.extend(new_timed_events.into_iter().map(Reverse));
+
     }
 }

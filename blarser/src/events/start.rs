@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::entity::AnyEntity;
-use crate::events::{Event, ord_by_time};
+use crate::events::{AffectedEntity, Event, ord_by_time};
 
 #[derive(Serialize, Deserialize)]
 pub struct Start {
@@ -28,7 +28,11 @@ impl Event for Start {
         self.time
     }
 
-    fn forward(&self, _: AnyEntity, _: serde_json::Value) -> AnyEntity {
+    fn affected_entities(&self) -> Vec<AffectedEntity> {
+        Vec::new()
+    }
+
+    fn forward(&self, _: &AnyEntity) -> AnyEntity {
         panic!("Cannot re-apply a Start event");
     }
 

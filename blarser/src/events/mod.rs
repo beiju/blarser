@@ -5,8 +5,7 @@ mod game_update;
 // Events
 mod start;
 mod earlseason_start;
-mod feed_event;
-// mod lets_go;
+mod lets_go;
 // mod play_ball;
 // mod half_inning;
 // mod storm_warning;
@@ -18,10 +17,10 @@ mod feed_event;
 // mod player_reroll;
 
 use std::fmt::{Display, Formatter};
+pub(crate) use game_update::GameUpdate;
 pub use start::Start;
 pub use earlseason_start::EarlseasonStart;
-pub use feed_event::FeedEvent;
-// pub use lets_go::LetsGo;
+pub use lets_go::LetsGo;
 // pub use play_ball::PlayBall;
 // pub use half_inning::HalfInning;
 // pub use storm_warning::StormWarning;
@@ -33,21 +32,53 @@ pub use feed_event::FeedEvent;
 
 use chrono::{DateTime, Utc};
 use enum_dispatch::enum_dispatch;
-use fed::FedEvent;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use crate::entity::AnyEntity;
-use crate::state::Effects;
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub struct AffectedEntity {
+    ty: EntityType,
+    id: Option<Uuid>
+}
+
+impl AffectedEntity {
+    pub fn one_id(ty: EntityType, id: Uuid) -> Self {
+        Self { ty, id: Some(id) }
+    }
+
+    pub fn all_ids(ty: EntityType) -> Self {
+        Self { ty, id: None }
+    }
+
+    pub fn null_id(ty: EntityType) -> Self {
+        Self { ty, id: Some(Uuid::nil()) }
+    }
+
+    pub fn ty(&self) -> EntityType {
+        self.ty
+    }
+
+    pub fn id(&self) -> Option<Uuid> {
+        self.id
+    }
+}
 
 #[enum_dispatch]
 pub trait Event: Serialize + for<'de> Deserialize<'de> + Ord + Display {
     fn time(&self) -> DateTime<Utc>;
 
-    fn generate_successors(&self) -> Vec<(AnyEvent, Effects)> {
+    // "Successors" are events that are generated when this event occurs. Typically they are timed
+    // events scheduled for some time in the future. This can be used to fill in for known-missing
+    // Feed events.
+    fn generate_successors(&self) -> Vec<AnyEvent> {
         Vec::new()
     }
 
-    fn forward(&self, entity: AnyEntity, aux: serde_json::Value) -> AnyEntity;
+    fn affected_entities(&self) -> Vec<AffectedEntity>;
+
+    fn forward(&self, entity: &AnyEntity) -> AnyEntity;
     fn reverse(&self, entity: AnyEntity, aux: serde_json::Value) -> AnyEntity;
 }
 
@@ -56,8 +87,7 @@ pub trait Event: Serialize + for<'de> Deserialize<'de> + Ord + Display {
 pub enum AnyEvent {
     Start(Start),
     EarlseasonStart(EarlseasonStart),
-    FeedEvent(FeedEvent),
-    // LetsGo(LetsGo),
+    LetsGo(LetsGo),
     // PlayBall(PlayBall),
     // HalfInning(HalfInning),
     // StormWarning(StormWarning),
@@ -78,7 +108,7 @@ impl Display for AnyEvent {
         match self {
             AnyEvent::Start(e) => { e.fmt(f) }
             AnyEvent::EarlseasonStart(e) => { e.fmt(f) }
-            AnyEvent::FeedEvent(e) => { e.fmt(f) }
+            AnyEvent::LetsGo(e) => { e.fmt(f) }
         }
     }
 }
@@ -110,3 +140,4 @@ macro_rules! ord_by_time {
 ord_by_time!(AnyEvent);
 
 pub(crate) use ord_by_time;
+use crate::state::EntityType;

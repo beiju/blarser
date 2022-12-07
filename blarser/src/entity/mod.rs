@@ -135,6 +135,30 @@ impl AnyEntity {
             None
         }
     }
+
+    pub fn as_sim_mut(&mut self) -> Option<&mut Sim> {
+        if let AnyEntityInternal::Sim(sim) = &mut self.0 {
+            Some(sim)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_game(&self) -> Option<&Game> {
+        if let AnyEntityInternal::Game(game) = &self.0 {
+            Some(game)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_game_mut(&mut self) -> Option<&mut Game> {
+        if let AnyEntityInternal::Game(game) = &mut self.0 {
+            Some(game)
+        } else {
+            None
+        }
+    }
 }
 
 
