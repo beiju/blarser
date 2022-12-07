@@ -11,7 +11,7 @@ use serde_json::Value;
 use itertools::{Either, Itertools};
 use log::{info, log};
 use crate::{entity, events};
-use crate::events::{AffectedEntity, AnyEvent, Event, GameUpdate};
+use crate::events::{Effect, AnyEvent, Event, GameUpdate};
 use crate::ingest::error::IngestResult;
 use crate::ingest::task::Ingest;
 use crate::state::{Effects, EntityType, StateInterface, Version};
@@ -72,12 +72,12 @@ pub fn ingest_event(ingest: &mut Ingest, event: AnyEvent) -> IngestResult<Vec<An
     let event = Arc::new(event);
     let mut state = ingest.state.lock().unwrap();
     info!("Ingesting event {event}");
-    let affected_entities: Vec<AffectedEntity> = event.affected_entities();
+    let effects: Vec<Effect> = event.effects();
     let mut new_timed_events = Vec::new();
-    for affected_entity in affected_entities {
-        for id in state.ids_for(affected_entity) {
+    for effect in effects {
+        for id in state.ids_for(&effect) {
             new_timed_events.extend(
-                state.apply_event(event.clone(), affected_entity.ty(), id)?
+                state.apply_event(event.clone(), effect.ty, id, &effect.extrapolated)?
             );
         }
     }
@@ -98,9 +98,37 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
                 },
             }.into()
         }
-        FedEventData::PlayBall { .. } => { todo!() }
-        FedEventData::HalfInningStart { .. } => { todo!() }
-        FedEventData::BatterUp { .. } => { todo!() }
+        FedEventData::PlayBall { game, .. } => {
+            events::PlayBall {
+                time: fed_event.created,
+                game_update: GameUpdate {
+                    game_id: game.game_id,
+                    play_count: game.play,
+                    score: None,
+                },
+            }.into()
+        }
+        FedEventData::HalfInningStart { game, .. } => {
+            events::HalfInning {
+                time: fed_event.created,
+                game_update: GameUpdate {
+                    game_id: game.game_id,
+                    play_count: game.play,
+                    score: None,
+                },
+            }.into()
+        }
+        FedEventData::BatterUp { game, batter_name, ..  } => {
+            events::BatterUp {
+                time: fed_event.created,
+                game_update: GameUpdate {
+                    game_id: game.game_id,
+                    play_count: game.play,
+                    score: None,
+                },
+                batter_name,
+            }.into()
+        }
         FedEventData::SuperyummyGameStart { .. } => { todo!() }
         FedEventData::EchoedSuperyummyGameStart { .. } => { todo!() }
         FedEventData::Ball { .. } => { todo!() }

@@ -1,3 +1,4 @@
+use std::fmt::{Display, Formatter};
 use chrono::{DateTime, Utc};
 use diesel::QueryResult;
 use serde::{Deserialize, Serialize};
@@ -6,33 +7,14 @@ use partial_information::MaybeKnown;
 
 use crate::api::EventuallyEvent;
 use crate::entity::{AnyEntity, Entity};
-use crate::events::{AnyEvent, Event};
+use crate::events::{Effect, AnyEvent, Event, ord_by_time, Extrapolated};
 use crate::events::game_update::GameUpdate;
+use crate::state::EntityType;
 
 #[derive(Serialize, Deserialize)]
 pub struct PlayBall {
-    game_update: GameUpdate,
-    time: DateTime<Utc>,
-}
-
-impl PlayBall {
-    pub fn parse(feed_event: &EventuallyEvent) -> QueryResult<(AnyEvent, Vec<(String, Option<Uuid>, serde_json::Value)>)> {
-        let time = feed_event.created;
-        let game_id = feed_event.game_id().expect("PlayBall event must have a game id");
-
-        let event = Self {
-            game_update: GameUpdate::parse(feed_event),
-            time
-        };
-
-        let effects = vec![(
-            "game".to_string(),
-            Some(game_id),
-            serde_json::Value::Null
-        )];
-
-        Ok((AnyEvent::PlayBall(event), effects))
-    }
+    pub(crate) game_update: GameUpdate,
+    pub(crate) time: DateTime<Utc>,
 }
 
 impl Event for PlayBall {
@@ -40,29 +22,41 @@ impl Event for PlayBall {
         self.time
     }
 
-    fn forward(&self, entity: AnyEntity, _: serde_json::Value) -> AnyEntity {
-        match entity {
-            AnyEntity::Game(mut game) => {
-                self.game_update.forward(&mut game);
+    fn effects(&self) -> Vec<Effect> {
+        vec![
+            Effect::one_id(EntityType::Game, self.game_update.game_id)
+        ]
+    }
 
-                game.game_start_phase = 20;
-                game.inning = -1;
-                game.phase = 2;
-                game.top_of_inning = false;
+    fn forward(&self, entity: &AnyEntity, _: &Box<dyn Extrapolated>) -> AnyEntity {
+        let mut entity = entity.clone();
+        if let Some(game) = entity.as_game_mut() {
+            // self.game_update.forward(&mut game);
 
-                // It unsets pitchers :(
-                game.home.pitcher = None;
-                game.home.pitcher_name = Some(MaybeKnown::Known(String::new()));
-                game.away.pitcher = None;
-                game.away.pitcher_name = Some(MaybeKnown::Known(String::new()));
+            game.game_start_phase = 20;
+            game.inning = -1;
+            game.phase = 2;
+            game.top_of_inning = false;
 
-                game.into()
-            },
-            other => panic!("PlayBall event does not apply to {}", other.entity_type())
+            // It unsets pitchers :(
+            game.home.pitcher = None;
+            game.home.pitcher_name = Some(MaybeKnown::Known(String::new()));
+            game.away.pitcher = None;
+            game.away.pitcher_name = Some(MaybeKnown::Known(String::new()));
         }
+
+        entity
     }
 
     fn reverse(&self, _entity: AnyEntity, _aux: serde_json::Value) -> AnyEntity {
         todo!()
     }
 }
+
+impl Display for PlayBall {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "PlayBall for {} at {}", self.game_update.game_id, self.time)
+    }
+}
+
+ord_by_time!(PlayBall);

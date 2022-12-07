@@ -78,7 +78,7 @@ fn impl_partial_information_compare(ast: DeriveInput) -> Result<TokenStream2> {
                 let field_type = &field.ty;
                 quote! {
                     #(#field_attrs)*
-                    #field_vis #field_name: <#field_type as PartialInformationCompare>::Raw
+                    #field_vis #field_name: <#field_type as ::partial_information::PartialInformationCompare>::Raw
                 }
             });
 
@@ -123,7 +123,7 @@ fn impl_partial_information_compare(ast: DeriveInput) -> Result<TokenStream2> {
                 let field_name = field.ident.as_ref().expect("Unreachable");
                 let field_type = &field.ty;
                 quote! {
-                    #field_vis #field_name: <#field_type as PartialInformationCompare>::Diff<'d>
+                    #field_vis #field_name: <#field_type as ::partial_information::PartialInformationCompare>::Diff<'d>
                 }
             });
         let is_empty_members = fields.named.iter()
@@ -140,7 +140,7 @@ fn impl_partial_information_compare(ast: DeriveInput) -> Result<TokenStream2> {
                 let field_name = field.ident.as_ref().expect("Unreachable");
                 let field_type = &field.ty;
                 quote! {
-                    #field_name: <#field_type as PartialInformationCompare>::from_raw(raw.#field_name)
+                    #field_name: <#field_type as ::partial_information::PartialInformationCompare>::from_raw(raw.#field_name)
                 }
             });
 
@@ -149,7 +149,7 @@ fn impl_partial_information_compare(ast: DeriveInput) -> Result<TokenStream2> {
                 let field_name = field.ident.as_ref().expect("Unreachable");
                 let field_type = &field.ty;
                 quote! {
-                    #field_name: <#field_type as PartialInformationCompare>::raw_approximation(self.#field_name)
+                    #field_name: <#field_type as ::partial_information::PartialInformationCompare>::raw_approximation(self.#field_name)
                 }
             });
 
@@ -158,7 +158,7 @@ fn impl_partial_information_compare(ast: DeriveInput) -> Result<TokenStream2> {
                 type Raw = #raw_name;
                 type Diff<'d> = #diff_name<'d>;
 
-                fn diff<'d>(&'d self, other: &'d Self::Raw, time: DateTime<Utc>) -> Self::Diff<'d> {
+                fn diff<'d>(&'d self, other: &'d Self::Raw, time: ::chrono::DateTime<::chrono::Utc>) -> Self::Diff<'d> {
                     #diff_name {
                         _phantom: ::std::default::Default::default(),
                         #(#diff_method_items),*

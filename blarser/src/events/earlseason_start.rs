@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use partial_information::MaybeKnown;
 
 use crate::entity::{AnyEntity, Entity};
-use crate::events::{AffectedEntity, Event, ord_by_time};
+use crate::events::{Effect, Event, Extrapolated, ord_by_time};
 use crate::state::EntityType;
 
 #[derive(Serialize, Deserialize)]
@@ -23,14 +23,14 @@ impl Event for EarlseasonStart {
         self.time
     }
 
-    fn affected_entities(&self) -> Vec<AffectedEntity> {
+    fn effects(&self) -> Vec<Effect> {
         vec![
-            AffectedEntity::null_id(EntityType::Sim),
-            AffectedEntity::all_ids(EntityType::Game),
+            Effect::null_id(EntityType::Sim),
+            Effect::all_ids(EntityType::Game),
         ]
     }
 
-    fn forward(&self, mut entity: &AnyEntity) -> AnyEntity {
+    fn forward(&self, mut entity: &AnyEntity, _: &Box<dyn Extrapolated>) -> AnyEntity {
         let mut entity = entity.clone();
 
         if let Some(sim) = entity.as_sim_mut() {

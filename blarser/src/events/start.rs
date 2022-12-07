@@ -1,10 +1,9 @@
-use std::cmp::Ordering;
 use std::fmt::{Display, Formatter};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::entity::AnyEntity;
-use crate::events::{AffectedEntity, Event, ord_by_time};
+use crate::events::{Effect, Event, Extrapolated, ord_by_time};
 
 #[derive(Serialize, Deserialize)]
 pub struct Start {
@@ -28,11 +27,11 @@ impl Event for Start {
         self.time
     }
 
-    fn affected_entities(&self) -> Vec<AffectedEntity> {
+    fn effects(&self) -> Vec<Effect> {
         Vec::new()
     }
 
-    fn forward(&self, _: &AnyEntity) -> AnyEntity {
+    fn forward(&self, _: &AnyEntity, _: &Box<dyn Extrapolated>) -> AnyEntity {
         panic!("Cannot re-apply a Start event");
     }
 

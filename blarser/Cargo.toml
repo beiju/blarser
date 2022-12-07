@@ -50,3 +50,4 @@ uuid = { version = "1.2.2", features = ["serde"] }
 serde_variant = "0.1.1"
 strum = { version = "0.24", features = ["derive"] }
 petgraph = "0.6.2"
+downcast-rs = "1.2.0"

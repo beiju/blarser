@@ -1,88 +1,73 @@
+use std::any::TypeId;
+use std::fmt::{Display, Formatter};
 use chrono::{DateTime, Utc};
-use diesel::QueryResult;
-use nom::{bytes::complete::tag, Finish, IResult, Parser};
-use nom_supreme::{error::ErrorTree, ParserExt};
+use log::info;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+use partial_information::MaybeKnown;
+use partial_information_derive::PartialInformationCompare;
 
-use crate::api::EventuallyEvent;
 use crate::entity::AnyEntity;
-use crate::events::{AnyEvent, Event};
+use crate::events::{Effect, Event, Extrapolated, ord_by_time};
 use crate::events::game_update::GameUpdate;
-use crate::events::parse_utils::greedy_text;
+use crate::state::EntityType;
 
-#[derive(Clone, Serialize, Deserialize)]
-pub struct WhichBatter {
-    pub batter_name: String,
-    pub batter_team_nickname: String,
-}
 
 #[derive(Serialize, Deserialize)]
 pub struct BatterUp {
-    game_update: GameUpdate,
-    time: DateTime<Utc>,
-    #[serde(flatten)]
-    which_batter: WhichBatter,
-    batter_id: Uuid,
+    pub(crate) game_update: GameUpdate,
+    pub(crate) time: DateTime<Utc>,
+    pub(crate) batter_name: String,
 }
 
-pub fn parse_which_batter(input: &str) -> IResult<&str, WhichBatter, ErrorTree<&str>> {
-    let (input, batter_name) = greedy_text(tag(" batting for the ")).parse(input)?;
-    let (input, _) = tag(" batting for the ")(input)?;
-    let (input, batter_team_nickname) = greedy_text(tag(".").all_consuming()).parse(input)?;
-    let (input, _) = tag(".").all_consuming().parse(input)?;
-
-    Ok((input, WhichBatter {
-        batter_name: batter_name.to_string(),
-        batter_team_nickname: batter_team_nickname.to_string()
-    }))
+#[derive(Debug, PartialInformationCompare)]
+pub struct BatterUpExtrapolated {
+    pub(crate) batter_id: MaybeKnown<Uuid>,
 }
 
-impl BatterUp {
-    pub fn parse(feed_event: &EventuallyEvent) -> QueryResult<(AnyEvent, Vec<(String, Option<Uuid>, serde_json::Value)>)> {
-        let time = feed_event.created;
-        let game_id = feed_event.game_id().expect("BatterUp event must have a game id");
-        let event = Self {
-            game_update: GameUpdate::parse(feed_event),
-            time,
-            which_batter: parse_which_batter(&feed_event.description).finish()
-                .expect("Error parsing text of BatterUp event").1,
-            batter_id: feed_event.player_id().expect("BatterUp event must have exactly one player id"),
-        };
-
-        let effects = vec![(
-            "game".to_string(),
-            Some(game_id),
-            serde_json::Value::Null
-        )];
-
-        Ok((AnyEvent::BatterUp(event), effects))
-    }
-}
+impl Extrapolated for BatterUpExtrapolated {}
 
 impl Event for BatterUp {
     fn time(&self) -> DateTime<Utc> {
         self.time
     }
 
-    fn forward(&self, entity: AnyEntity, _: serde_json::Value) -> AnyEntity {
-        match entity {
-            AnyEntity::Game(mut game) => {
-                self.game_update.forward(&mut game);
+    fn effects(&self) -> Vec<Effect> {
+        vec![
+            Effect::one_id_with(EntityType::Game, self.game_update.game_id, BatterUpExtrapolated {
+                // TODO: Is this available in state?
+                batter_id: MaybeKnown::Unknown,
+            })
+        ]
+    }
 
-                let prev_batter_count = game.team_at_bat().team_batter_count
-                    .expect("TeamBatterCount must be populated during a game");
-                game.team_at_bat_mut().team_batter_count = Some(prev_batter_count + 1);
-                game.team_at_bat_mut().batter = Some(self.batter_id);
-                game.team_at_bat_mut().batter_name = Some(self.which_batter.batter_name.clone());
+    fn forward(&self, entity: &AnyEntity, extrapolated: &Box<dyn Extrapolated>) -> AnyEntity {
+        // TODO Implement this generically somehow. With macro? Maybe a function-like macro that
+        //   takes a lot of implementations of forward where the arguments have concrete types and
+        //   outputs one big forward that does the appropriate matching and casting
+        let mut entity = entity.clone();
+        if let Some(game) = entity.as_game_mut() {
+            let extrapolated = extrapolated.downcast_ref::<BatterUpExtrapolated>().unwrap();
+            // self.game_update.forward(&mut game);
 
-                game.into()
-            }
-            other => panic!("BatterUp event does not apply to {}", other.name())
+            let prev_batter_count = game.team_at_bat().team_batter_count
+                .expect("TeamBatterCount must be populated during a game");
+            game.team_at_bat_mut().team_batter_count = Some(prev_batter_count + 1);
+            game.team_at_bat_mut().batter = Some(extrapolated.batter_id.clone());
+            game.team_at_bat_mut().batter_name = Some(self.batter_name.clone());
         }
+        entity
     }
 
     fn reverse(&self, _entity: AnyEntity, _aux: serde_json::Value) -> AnyEntity {
         todo!()
     }
 }
+
+impl Display for BatterUp {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "BatterUp for {} at {}", self.game_update.game_id, self.time)
+    }
+}
+
+ord_by_time!(BatterUp);

@@ -3,7 +3,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::entity::AnyEntity;
-use crate::events::{AffectedEntity, Event, ord_by_time};
+use crate::events::{Effect, Event, Extrapolated, ord_by_time};
 use crate::events::game_update::GameUpdate;
 use crate::state::EntityType;
 
@@ -13,26 +13,18 @@ pub struct LetsGo {
     pub(crate) time: DateTime<Utc>,
 }
 
-ord_by_time!(LetsGo);
-
-impl Display for LetsGo {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "LetsGo for {} at {}", self.game_update.game_id, self.time)
-    }
-}
-
 impl Event for LetsGo {
     fn time(&self) -> DateTime<Utc> {
         self.time
     }
 
-    fn affected_entities(&self) -> Vec<AffectedEntity> {
+    fn effects(&self) -> Vec<Effect> {
         vec![
-            AffectedEntity::one_id(EntityType::Game, self.game_update.game_id),
+            Effect::one_id(EntityType::Game, self.game_update.game_id),
         ]
     }
 
-    fn forward(&self, entity: &AnyEntity) -> AnyEntity {
+    fn forward(&self, entity: &AnyEntity, _: &Box<dyn Extrapolated>) -> AnyEntity {
         let mut entity = entity.clone();
         if let Some(game) = entity.as_game_mut() {
             self.game_update.forward(game);
@@ -49,3 +41,11 @@ impl Event for LetsGo {
         todo!()
     }
 }
+
+impl Display for LetsGo {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "LetsGo for {} at {}", self.game_update.game_id, self.time)
+    }
+}
+
+ord_by_time!(LetsGo);

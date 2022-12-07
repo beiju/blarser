@@ -2,13 +2,13 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use itertools::Itertools;
-use log::error;
+use log::{error, info};
 use petgraph::stable_graph::{StableGraph, NodeIndex};
 use uuid::Uuid;
 use partial_information::PartialInformationCompare;
 
 use crate::entity::{AnyEntity, Entity};
-use crate::events::{AffectedEntity, AnyEvent, EarlseasonStart, Event};
+use crate::events::{Effect, AnyEvent, EarlseasonStart, Event, Extrapolated};
 use crate::ingest::error::{IngestError, IngestResult};
 use crate::ingest::Observation;
 use crate::state::EntityType;
@@ -62,24 +62,25 @@ impl StateGraph {
         }
     }
 
-    pub fn ids_for(&self, affected_entity: AffectedEntity) -> Vec<Uuid> {
-        if let Some(id) = affected_entity.id() {
+    pub fn ids_for(&self, effect: &Effect) -> Vec<Uuid> {
+        if let Some(id) = effect.id {
             vec![id]
-        } else if let Some(d) = self.ids_for_type.get(&affected_entity.ty()) {
+        } else if let Some(d) = self.ids_for_type.get(&effect.ty) {
             d.clone()
         } else {
             Vec::new()
         }
     }
 
-    pub fn apply_event(&mut self, event: Arc<AnyEvent>, ty: EntityType, id: Uuid) -> IngestResult<Vec<AnyEvent>> {
+    pub fn apply_event(&mut self, event: Arc<AnyEvent>, ty: EntityType, id: Uuid, extrapolated: &Box<dyn Extrapolated>) -> IngestResult<Vec<AnyEvent>> {
         let entity_indices = self.leafs.get(&(ty, id))
             .ok_or_else(|| IngestError::EntityDoesNotExist { ty, id })?
             .clone();
 
+        info!("Applying {event} to {ty} {id} with {extrapolated:?}");
         let new_leafs = entity_indices.into_iter()
             .map(|entity_idx| {
-                self.apply_event_to_entity(event.clone(), entity_idx)
+                self.apply_event_to_entity(event.clone(), entity_idx, extrapolated)
             })
             .collect();
 
@@ -90,17 +91,24 @@ impl StateGraph {
         Ok(Vec::new()) // TODO
     }
 
-    fn apply_event_to_entity(&mut self, event: Arc<AnyEvent>, entity_idx: NodeIndex) -> NodeIndex {
+    fn apply_event_to_entity(&mut self, event: Arc<AnyEvent>, entity_idx: NodeIndex, extrapolated: &Box<dyn Extrapolated>) -> NodeIndex {
         let entity = self.graph.node_weight(entity_idx)
             .expect("Indices in State.leafs should always be valid");
 
         let new_entity = match event.as_ref() {
-            AnyEvent::Start(e) => { e.forward(entity) }
-            AnyEvent::EarlseasonStart(e) => { e.forward(entity) }
-            AnyEvent::LetsGo(e) => { e.forward(entity) }
+            AnyEvent::Start(e) => { e.forward(entity, extrapolated) }
+            AnyEvent::EarlseasonStart(e) => { e.forward(entity, extrapolated) }
+            AnyEvent::LetsGo(e) => { e.forward(entity, extrapolated) }
+            AnyEvent::PlayBall(e) => { e.forward(entity, extrapolated) }
+            AnyEvent::HalfInning(e) => { e.forward(entity, extrapolated) }
+            AnyEvent::StormWarning(e) => { e.forward(entity, extrapolated) }
+            AnyEvent::BatterUp(e) => { e.forward(entity, extrapolated) }
         };
 
         let new_entity_idx = self.graph.add_node(new_entity);
+        // TODO Change edge to store extrapolated as well. Not sure how to handle multiple entities
+        //   with the same `extrapolated` object, maybe just disallow that (multiple entities from
+        //   the same effect is rare anyway and I probably don't need it)
         self.graph.add_edge(entity_idx, new_entity_idx, event);
 
         new_entity_idx
