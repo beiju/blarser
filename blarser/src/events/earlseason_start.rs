@@ -6,6 +6,7 @@ use partial_information::MaybeKnown;
 
 use crate::entity::{AnyEntity, Entity};
 use crate::events::{AnyExtrapolated, Effect, Event, Extrapolated, ord_by_time};
+use crate::ingest::StateGraph;
 use crate::state::EntityType;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -24,7 +25,7 @@ impl Event for EarlseasonStart {
         self.time
     }
 
-    fn effects(&self) -> Vec<Effect> {
+    fn effects(&self, _: &StateGraph) -> Vec<Effect> {
         vec![
             Effect::null_id(EntityType::Sim),
             Effect::all_ids(EntityType::Game),

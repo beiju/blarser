@@ -9,6 +9,7 @@ use crate::api::EventuallyEvent;
 use crate::entity::AnyEntity;
 use crate::events::{Effect, AnyEvent, Event, ord_by_time, Extrapolated, AnyExtrapolated};
 use crate::events::game_update::GameUpdate;
+use crate::ingest::StateGraph;
 use crate::state::EntityType;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -22,7 +23,7 @@ impl Event for StormWarning {
         self.time
     }
 
-    fn effects(&self) -> Vec<Effect> {
+    fn effects(&self, _: &StateGraph) -> Vec<Effect> {
         vec![
             Effect::one_id(EntityType::Game, self.game_update.game_id)
         ]

@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::entity::AnyEntity;
 use crate::events::{AnyExtrapolated, Effect, Event, Extrapolated, ord_by_time};
 use crate::events::game_update::GameUpdate;
+use crate::ingest::StateGraph;
 use crate::state::EntityType;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -19,7 +20,7 @@ impl Event for LetsGo {
         self.time
     }
 
-    fn effects(&self) -> Vec<Effect> {
+    fn effects(&self, _: &StateGraph) -> Vec<Effect> {
         vec![
             Effect::one_id(EntityType::Game, self.game_update.game_id),
         ]

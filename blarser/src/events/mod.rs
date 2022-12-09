@@ -2,6 +2,7 @@ mod feed_event_old;
 mod timed_event;
 mod game_update;
 mod effects;
+mod event_util;
 
 // Events
 mod start;
@@ -9,12 +10,12 @@ mod earlseason_start;
 mod lets_go;
 mod play_ball;
 mod half_inning;
+mod toggle_performing;
 mod storm_warning;
 mod batter_up;
-// mod parse_utils;
-// mod count_events;
-// mod fielding_outs;
-// mod hit;
+mod count_events;
+mod out;
+mod hit;
 // mod player_reroll;
 
 pub(crate) use game_update::GameUpdate;
@@ -23,20 +24,20 @@ pub use start::Start;
 pub use earlseason_start::EarlseasonStart;
 pub use lets_go::LetsGo;
 pub use play_ball::PlayBall;
+pub use toggle_performing::TogglePerforming;
 pub use half_inning::HalfInning;
 pub use storm_warning::StormWarning;
 pub use batter_up::BatterUp;
-// pub use count_events::{Strike, Ball, FoulBall, Strikeout};
-// pub use fielding_outs::{parse as parse_fielding_out, GroundOut, Flyout};
-// pub use hit::{Hit, HomeRun};
-// pub use player_reroll::{parse as parse_player_reroll, Snow};
+pub use count_events::{Strike, Ball, FoulBall};
+pub use out::Out;
+pub use hit::{Hit, HomeRun};
 
-use std::sync::Arc;
 use std::fmt::{Display, Formatter};
 use chrono::{DateTime, Utc};
 use enum_dispatch::enum_dispatch;
 use serde::{Deserialize, Serialize};
 use crate::entity::AnyEntity;
+use crate::ingest::StateGraph;
 
 #[enum_dispatch]
 pub trait Event: Serialize + for<'de> Deserialize<'de> + Ord + Display {
@@ -49,7 +50,7 @@ pub trait Event: Serialize + for<'de> Deserialize<'de> + Ord + Display {
         Vec::new()
     }
 
-    fn effects(&self) -> Vec<Effect>;
+    fn effects(&self, state: &StateGraph) -> Vec<Effect>;
 
     fn forward(&self, entity: &AnyEntity, extrapolated: &AnyExtrapolated) -> AnyEntity;
     fn reverse(&self, entity: AnyEntity, aux: serde_json::Value) -> AnyEntity;
@@ -62,18 +63,16 @@ pub enum AnyEvent {
     EarlseasonStart(EarlseasonStart),
     LetsGo(LetsGo),
     PlayBall(PlayBall),
+    TogglePerforming(TogglePerforming),
     HalfInning(HalfInning),
     StormWarning(StormWarning),
     BatterUp(BatterUp),
-    // Strike(Strike),
-    // Ball(Ball),
-    // FoulBall(FoulBall),
-    // Strikeout(Strikeout),
-    // GroundOut(GroundOut),
-    // Flyout(Flyout),
-    // Hit(Hit),
-    // HomeRun(HomeRun),
-    // Snow(Snow),
+    Strike(Strike),
+    Ball(Ball),
+    FoulBall(FoulBall),
+    Out(Out),
+    Hit(Hit),
+    HomeRun(HomeRun),
 }
 
 impl Display for AnyEvent {
@@ -83,9 +82,16 @@ impl Display for AnyEvent {
             AnyEvent::EarlseasonStart(e) => { e.fmt(f) }
             AnyEvent::LetsGo(e) => { e.fmt(f) }
             AnyEvent::PlayBall(e) => { e.fmt(f) }
+            AnyEvent::TogglePerforming(e) => { e.fmt(f) }
             AnyEvent::HalfInning(e) => { e.fmt(f) }
             AnyEvent::StormWarning(e) => { e.fmt(f) }
             AnyEvent::BatterUp(e) => { e.fmt(f) }
+            AnyEvent::Strike(e) => { e.fmt(f) }
+            AnyEvent::Ball(e) => { e.fmt(f) }
+            AnyEvent::FoulBall(e) => { e.fmt(f) }
+            AnyEvent::Out(e) => { e.fmt(f) }
+            AnyEvent::Hit(e) => { e.fmt(f) }
+            AnyEvent::HomeRun(e) => { e.fmt(f) }
         }
     }
 }

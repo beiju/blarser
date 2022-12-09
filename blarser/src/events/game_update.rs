@@ -2,6 +2,7 @@ use std::iter;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+use partial_information::MaybeKnown;
 use crate::api::{EventType, EventuallyEvent, Weather};
 use crate::entity::{Game, UpdateFull};
 
@@ -19,6 +20,7 @@ pub struct GameUpdate {
     pub(crate) play_count: i64,
     // pub(crate) last_update_full: Vec<UpdateFull>,
     pub(crate) score: Option<Score>,
+    pub(crate) description: String,
 }
 
 impl GameUpdate {
@@ -95,14 +97,7 @@ impl GameUpdate {
     pub fn forward(&self, game: &mut Game) {
         game.play_count = self.play_count;
 
-        // last_update is all the descriptions of the sibling events, separated by \n, and with an
-        // extra \n at the end
-        // game.last_update = Some(self.last_update_full.iter()
-        //     .map(|e| &e.description)
-        //     // This is a too-clever way of getting the extra \n at the end
-        //     .chain(iter::once(&String::new()))
-        //     .join("\n"));
-
+        game.last_update = Some(self.description.clone());
 
         game.last_update_full = None;
 

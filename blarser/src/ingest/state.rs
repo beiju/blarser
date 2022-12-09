@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::fmt::Debug;
 use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use itertools::Itertools;
@@ -9,7 +10,7 @@ use diesel::PgJsonbExpressionMethods;
 use uuid::Uuid;
 use partial_information::PartialInformationCompare;
 
-use crate::entity::{AnyEntity, Entity};
+use crate::entity::{self, AnyEntity, Entity};
 use crate::events::{Effect, AnyEvent, EarlseasonStart, Event, AnyExtrapolated, Start};
 use crate::ingest::error::{IngestError, IngestResult};
 use crate::ingest::Observation;
@@ -56,9 +57,9 @@ impl StateGraph {
             .expect("Error: Missing sim leaf")
             .into_iter().exactly_one()
             .expect("There must be exactly one sim node when calling get_timed_events");
-        let sim = self.graph.node_weight(*sim_idx)
-            .expect("Sim was not found in graph").0
-            .as_sim()
+        let (entity, _) = self.graph.node_weight(*sim_idx)
+            .expect("Sim was not found in graph");
+        let sim: &entity::Sim = entity.try_into()
             .expect("Sim object was not Sim type");
 
         if sim.phase == 1 && sim.earlseason_date > after {
@@ -101,16 +102,21 @@ impl StateGraph {
         let (entity, _) = self.graph.node_weight(entity_idx)
             .expect("Indices in State.leafs should always be valid");
 
-        dbg!(&extrapolated);
-
         let new_entity = match event.as_ref() {
             AnyEvent::Start(e) => { e.forward(entity, extrapolated) }
             AnyEvent::EarlseasonStart(e) => { e.forward(entity, extrapolated) }
             AnyEvent::LetsGo(e) => { e.forward(entity, extrapolated) }
             AnyEvent::PlayBall(e) => { e.forward(entity, extrapolated) }
+            AnyEvent::TogglePerforming(e) => { e.forward(entity, extrapolated) }
             AnyEvent::HalfInning(e) => { e.forward(entity, extrapolated) }
             AnyEvent::StormWarning(e) => { e.forward(entity, extrapolated) }
             AnyEvent::BatterUp(e) => { e.forward(entity, extrapolated) }
+            AnyEvent::Strike(e) => { e.forward(entity, extrapolated) }
+            AnyEvent::Ball(e) => { e.forward(entity, extrapolated) }
+            AnyEvent::FoulBall(e) => { e.forward(entity, extrapolated) }
+            AnyEvent::Out(e) => { e.forward(entity, extrapolated) }
+            AnyEvent::Hit(e) => { e.forward(entity, extrapolated) }
+            AnyEvent::HomeRun(e) => { e.forward(entity, extrapolated) }
         };
 
         let new_entity_idx = self.graph.add_node((new_entity, event));
@@ -163,5 +169,39 @@ impl StateGraph {
 
     pub fn version(&self, version_idx: NodeIndex) -> Option<&(AnyEntity, Arc<AnyEvent>)> {
         self.graph.node_weight(version_idx)
+    }
+
+    fn query_entity_unique<EntityT: Entity, F, T>(&self, leaf_id: &(EntityType, Uuid), accessor: F) -> T
+        where F: Fn(&EntityT) -> T,
+              T: Debug + Eq,
+              for<'a> &'a AnyEntity: TryInto<&'a EntityT>,
+              for<'a> <&'a AnyEntity as TryInto<&'a EntityT>>::Error: Debug {
+        let leafs = self.leafs.get(leaf_id)
+            .expect("Entity not found. TODO: Make this a Result type");
+        let mut result = None;
+        for leaf in leafs {
+            let (entity, _) = self.graph.node_weight(*leaf)
+                .expect("Leafs should never have an invalid index");
+            let entity: &EntityT = entity.try_into()
+                .expect("Corrupt graph: Leaf was not the expected type");
+            let new_result = accessor(entity);
+            if let Some(old_result) = &result {
+                assert_eq!(old_result, &new_result,
+                           "Got different results when querying entity. TODO: Make this a Result type");
+            }
+            result = Some(new_result)
+        }
+
+        result.expect("Leafs array for entity is empty")
+    }
+
+    pub fn query_game_unique<F, T>(&self, id: Uuid, accessor: F) -> T
+        where F: Fn(&entity::Game) -> T, T: Debug + Eq {
+        self.query_entity_unique::<entity::Game, _, _>(&(EntityType::Game, id), accessor)
+    }
+
+    pub fn query_team_unique<F, T>(&self, id: Uuid, accessor: F) -> T
+        where F: Fn(&entity::Team) -> T, T: Debug + Eq {
+        self.query_entity_unique::<entity::Team, _, _>(&(EntityType::Team, id), accessor)
     }
 }

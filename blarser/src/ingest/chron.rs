@@ -211,8 +211,8 @@ pub fn ingest_observation(ingest: &mut Ingest, obs: Observation) -> Vec<AnyEvent
             dbg!(&version);
             dbg!(&event);
 
-            if let Some(sim) = version.as_sim() {
-                ingest_for_version(sim, &obs)?;
+            if let Ok(sim) = version.try_into() {
+                ingest_for_version::<entity::Sim>(sim, &obs)?;
             }
 
             Ok::<_, Vec<Conflict>>(())

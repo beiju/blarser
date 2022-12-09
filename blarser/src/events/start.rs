@@ -5,6 +5,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::entity::AnyEntity;
 use crate::events::{AnyExtrapolated, Effect, Event, Extrapolated, ord_by_time};
+use crate::ingest::StateGraph;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Start {
@@ -28,7 +29,7 @@ impl Event for Start {
         self.time
     }
 
-    fn effects(&self) -> Vec<Effect> {
+    fn effects(&self, _: &StateGraph) -> Vec<Effect> {
         Vec::new()
     }
 

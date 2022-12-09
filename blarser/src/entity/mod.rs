@@ -10,6 +10,7 @@ mod common;
 use std::fmt::{Display, Formatter};
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
+use derive_more::{From, TryInto, Unwrap};
 use enum_dispatch::enum_dispatch;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -22,7 +23,6 @@ pub use sim::Sim;
 pub use player::Player;
 pub use team::Team;
 pub use game::{Game, GameByTeam, UpdateFull, UpdateFullMetadata};
-use partial_information_derive::PartialInformationCompare;
 pub use standings::Standings;
 pub use season::Season;
 use crate::state::EntityType;
@@ -45,9 +45,9 @@ impl Display for WrongEntityError {
     }
 }
 
-#[enum_dispatch(Entity)]
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
-enum AnyEntityInternal {
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, From, TryInto, Unwrap)]
+#[try_into(owned, ref, ref_mut)]
+pub enum AnyEntity {
     Sim(Sim),
     Player(Player),
     Team(Team),
@@ -56,65 +56,62 @@ enum AnyEntityInternal {
     Season(Season),
 }
 
-impl Display for AnyEntityInternal {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            AnyEntityInternal::Sim(e) => { e.fmt(f) }
-            AnyEntityInternal::Player(e) => { e.fmt(f) }
-            AnyEntityInternal::Team(e) => { e.fmt(f) }
-            AnyEntityInternal::Game(e) => { e.fmt(f) }
-            AnyEntityInternal::Standings(e) => { e.fmt(f) }
-            AnyEntityInternal::Season(e) => { e.fmt(f) }
+macro_rules! impl_match {
+    ($any_entity_var:expr, $pattern_var:ident => $pattern_block:block) => {
+        match $any_entity_var {
+            AnyEntity::Sim($pattern_var) => $pattern_block
+            AnyEntity::Player($pattern_var) => $pattern_block
+            AnyEntity::Team($pattern_var) => $pattern_block
+            AnyEntity::Game($pattern_var) => $pattern_block
+            AnyEntity::Standings($pattern_var) => $pattern_block
+            AnyEntity::Season($pattern_var) => $pattern_block
         }
-    }
-}
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct AnyEntity(AnyEntityInternal);
+    };
+}
 
 impl Display for AnyEntity {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match &self.0 {
-            AnyEntityInternal::Sim(e) => { e.fmt(f) }
-            AnyEntityInternal::Player(e) => { e.fmt(f) }
-            AnyEntityInternal::Team(e) => { e.fmt(f) }
-            AnyEntityInternal::Game(e) => { e.fmt(f) }
-            AnyEntityInternal::Standings(e) => { e.fmt(f) }
-            AnyEntityInternal::Season(e) => { e.fmt(f) }
-        }
+        impl_match!(self, e => { e.fmt(f) })
     }
 }
 
 impl Entity for AnyEntity {
     fn entity_type(&self) -> &'static str {
-        match &self.0 {
-            AnyEntityInternal::Sim(e) => { e.entity_type() }
-            AnyEntityInternal::Player(e) => { e.entity_type() }
-            AnyEntityInternal::Team(e) => { e.entity_type() }
-            AnyEntityInternal::Game(e) => { e.entity_type() }
-            AnyEntityInternal::Standings(e) => { e.entity_type() }
-            AnyEntityInternal::Season(e) => { e.entity_type() }
-        }
+        impl_match!(&self, e => { e.entity_type() })
     }
 
     fn id(&self) -> Uuid {
-        match &self.0 {
-            AnyEntityInternal::Sim(e) => { e.id() }
-            AnyEntityInternal::Player(e) => { e.id() }
-            AnyEntityInternal::Team(e) => { e.id() }
-            AnyEntityInternal::Game(e) => { e.id() }
-            AnyEntityInternal::Standings(e) => { e.id() }
-            AnyEntityInternal::Season(e) => { e.id() }
-        }
+        impl_match!(&self, e => { e.id() })
     }
+}
+
+macro_rules! impl_as_ref {
+    ($entity_type:ty, $entity_variant:path, $ref_name:ident, $mut_name:ident) => {
+        pub fn $ref_name(&self) -> Option<&$entity_type> {
+            if let $entity_variant(e) = self {
+                Some(e)
+            } else {
+                None
+            }
+        }
+
+        pub fn $mut_name(&mut self) -> Option<&mut $entity_type> {
+            if let $entity_variant(e) = self {
+                Some(e)
+            } else {
+                None
+            }
+        }
+    };
 }
 
 impl AnyEntity {
     fn from_raw_json_typed<EntityT>(raw_json: serde_json::Value) -> serde_json::Result<Self>
-        where EntityT: Entity + PartialInformationCompare, AnyEntityInternal: From<EntityT> {
+        where EntityT: Entity + PartialInformationCompare, AnyEntity: From<EntityT> {
         let raw: EntityT::Raw = serde_json::from_value(raw_json)?;
         let entity = EntityT::from_raw(raw);
-        Ok(AnyEntity(AnyEntityInternal::from(entity)))
+        Ok(AnyEntity::from(entity))
     }
 
     pub fn from_raw_json(entity_type: EntityType, raw_json: serde_json::Value) -> serde_json::Result<Self> {
@@ -128,37 +125,10 @@ impl AnyEntity {
         }
     }
 
-    pub fn as_sim(&self) -> Option<&Sim> {
-        if let AnyEntityInternal::Sim(sim) = &self.0 {
-            Some(sim)
-        } else {
-            None
-        }
-    }
-
-    pub fn as_sim_mut(&mut self) -> Option<&mut Sim> {
-        if let AnyEntityInternal::Sim(sim) = &mut self.0 {
-            Some(sim)
-        } else {
-            None
-        }
-    }
-
-    pub fn as_game(&self) -> Option<&Game> {
-        if let AnyEntityInternal::Game(game) = &self.0 {
-            Some(game)
-        } else {
-            None
-        }
-    }
-
-    pub fn as_game_mut(&mut self) -> Option<&mut Game> {
-        if let AnyEntityInternal::Game(game) = &mut self.0 {
-            Some(game)
-        } else {
-            None
-        }
-    }
+    impl_as_ref!(Sim, AnyEntity::Sim, as_sim, as_sim_mut);
+    impl_as_ref!(Game, AnyEntity::Game, as_game, as_game_mut);
+    impl_as_ref!(Team, AnyEntity::Team, as_team, as_team_mut);
+    impl_as_ref!(Player, AnyEntity::Player, as_player, as_player_mut);
 }
 
 
@@ -167,11 +137,6 @@ pub trait EntityRaw: Serialize + for<'de> Deserialize<'de> {
 
     fn name() -> &'static str;
     fn id(&self) -> Uuid;
-
-    // By default an entity doesn't have any init events
-    // fn init_events(&self, _after_time: DateTime<Utc>) -> Vec<(AnyEvent, Vec<(String, Option<Uuid>, serde_json::Value)>)> {
-    //     Vec::new()
-    // }
 }
 
 #[derive(Debug, Error)]

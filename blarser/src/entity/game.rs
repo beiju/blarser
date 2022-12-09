@@ -86,7 +86,7 @@ pub struct GameByTeam {
     pub balls: i32,
     pub bases: i32,
     pub score: Option<f32>,
-    pub batter: Option<MaybeKnown<Uuid>>,
+    pub batter: Option<Uuid>,
     pub pitcher: Option<MaybeKnown<Uuid>>,
     pub strikes: Option<i32>,
     pub team_name: String,

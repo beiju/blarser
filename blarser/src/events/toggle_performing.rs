@@ -1,28 +1,29 @@
 use std::fmt::{Display, Formatter};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use partial_information::MaybeKnown;
 
 use crate::entity::AnyEntity;
-use crate::events::{Effect, Event, ord_by_time, AnyExtrapolated};
+use crate::events::{AnyExtrapolated, Effect, Event, ord_by_time};
 use crate::events::game_update::GameUpdate;
 use crate::ingest::StateGraph;
 use crate::state::EntityType;
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct PlayBall {
+pub struct TogglePerforming {
     pub(crate) game_update: GameUpdate,
     pub(crate) time: DateTime<Utc>,
+    pub(crate) which_mod: String,
 }
 
-impl Event for PlayBall {
+impl Event for TogglePerforming {
     fn time(&self) -> DateTime<Utc> {
         self.time
     }
 
     fn effects(&self, _: &StateGraph) -> Vec<Effect> {
         vec![
-            Effect::one_id(EntityType::Game, self.game_update.game_id)
+            Effect::one_id(EntityType::Game, self.game_update.game_id),
+            // TODO player effect
         ]
     }
 
@@ -31,18 +32,11 @@ impl Event for PlayBall {
         if let Some(game) = entity.as_game_mut() {
             self.game_update.forward(game);
 
-            game.game_start_phase = 20;
-            game.inning = -1;
-            game.phase = 2;
-            game.top_of_inning = false;
-
-            // It unsets pitchers :(
-            game.home.pitcher = None;
-            game.home.pitcher_name = Some(MaybeKnown::Known(String::new()));
-            game.away.pitcher = None;
-            game.away.pitcher_name = Some(MaybeKnown::Known(String::new()));
+            game.game_start = true;
+            game.game_start_phase = -1;
+            game.home.team_batter_count = Some(-1);
+            game.away.team_batter_count = Some(-1);
         }
-
         entity
     }
 
@@ -51,10 +45,10 @@ impl Event for PlayBall {
     }
 }
 
-impl Display for PlayBall {
+impl Display for TogglePerforming {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "PlayBall for {} at {}", self.game_update.game_id, self.time)
+        write!(f, "TogglePerforming for {} at {}", self.game_update.game_id, self.time)
     }
 }
 
-ord_by_time!(PlayBall);
+ord_by_time!(TogglePerforming);

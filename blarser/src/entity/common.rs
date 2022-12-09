@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Copy, Clone, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 #[repr(i64)]
 pub enum Base {
     First = 0,
@@ -37,6 +37,20 @@ impl Base {
             "Triple" => Base::Third,
             "Quadruple" => Base::Fourth,
             _ => panic!("Invalid hit type {}", hit_name)
+        }
+    }
+}
+
+impl TryFrom<i32> for Base {
+    type Error = i32;
+
+    fn try_from(value: i32) -> Result<Self, Self::Error> {
+        match value {
+            1 => { Ok(Self::First) }
+            2 => { Ok(Self::Second) }
+            3 => { Ok(Self::Third) }
+            4 => { Ok(Self::Fourth) }
+            x => Err(x)
         }
     }
 }

@@ -52,3 +52,4 @@ petgraph = "0.6"
 as-any = "0.3.0"
 daggy = { version = "0.8.0", features = ["serde-1", "stable_dag"] }
 stream-kmerge = "0.2.0"
+derive_more = "0.99.17"

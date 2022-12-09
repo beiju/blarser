@@ -1,20 +1,17 @@
-use std::cmp::{Ordering, Reverse};
+use std::cmp::Reverse;
 use std::collections::BinaryHeap;
-use std::rc::Rc;
 use std::sync::Arc;
 use chrono::{DateTime, Utc};
-use futures::{Stream, StreamExt, stream, pin_mut};
+use futures::{Stream, stream};
 use fed::{FedEvent, FedEventData};
-use futures::stream::Peekable;
-use uuid::Uuid;
-use serde_json::Value;
-use itertools::{Either, Itertools};
 use log::{info, log};
-use crate::{entity, events};
+use partial_information::MaybeKnown;
+use crate::entity::Base;
+
+use crate::events;
 use crate::events::{Effect, AnyEvent, Event, GameUpdate};
 use crate::ingest::error::IngestResult;
 use crate::ingest::task::Ingest;
-use crate::state::{Effects, EntityType, StateInterface, Version};
 
 pub struct EventStreamItem {
     last_update_time: DateTime<Utc>,
@@ -72,7 +69,7 @@ pub fn ingest_event(ingest: &mut Ingest, event: AnyEvent) -> IngestResult<Vec<An
     let event = Arc::new(event);
     let mut state = ingest.state.lock().unwrap();
     info!("Ingesting event {event}");
-    let effects: Vec<Effect> = event.effects();
+    let effects: Vec<Effect> = event.effects(&state);
     let mut new_timed_events = Vec::new();
     for effect in effects {
         for id in state.ids_for(&effect) {
@@ -86,6 +83,8 @@ pub fn ingest_event(ingest: &mut Ingest, event: AnyEvent) -> IngestResult<Vec<An
 }
 
 fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
+    // TODO Make a function to just get description
+    let description = fed_event.clone().into_feed_event().description;
     Some(match fed_event.data {
         FedEventData::BeingSpeech { .. } => { return None; }
         FedEventData::LetsGo { game, .. } => {
@@ -95,6 +94,7 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
                     game_id: game.game_id,
                     play_count: game.play,
                     score: None,
+                    description,
                 },
             }.into()
         }
@@ -105,6 +105,7 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
                     game_id: game.game_id,
                     play_count: game.play,
                     score: None,
+                    description,
                 },
             }.into()
         }
@@ -115,6 +116,7 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
                     game_id: game.game_id,
                     play_count: game.play,
                     score: None,
+                    description,
                 },
             }.into()
         }
@@ -125,27 +127,101 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
                     game_id: game.game_id,
                     play_count: game.play,
                     score: None,
+                    description,
                 },
-                batter_name,
+                batter_name: batter_name.clone(),
             }.into()
         }
-        FedEventData::SuperyummyGameStart { .. } => { todo!() }
+        FedEventData::SuperyummyGameStart { game, .. } => {
+            events::TogglePerforming {
+                time: fed_event.created,
+                game_update: GameUpdate {
+                    game_id: game.game_id,
+                    play_count: game.play,
+                    score: None,
+                    description,
+                },
+                which_mod: "SUPERYUMMY".to_string(),
+            }.into()
+        }
         FedEventData::EchoedSuperyummyGameStart { .. } => { todo!() }
-        FedEventData::Ball { .. } => { todo!() }
-        FedEventData::FoulBall { .. } => { todo!() }
-        FedEventData::StrikeSwinging { .. } => { todo!() }
-        FedEventData::StrikeLooking { .. } => { todo!() }
-        FedEventData::StrikeFlinching { .. } => { todo!() }
-        FedEventData::Flyout { .. } => { todo!() }
-        FedEventData::GroundOut { .. } => { todo!() }
+        FedEventData::Ball { game, .. } => {
+            events::Ball {
+                game_update: GameUpdate {
+                    game_id: game.game_id,
+                    play_count: game.play,
+                    score: None,
+                    description,
+                },
+                time: fed_event.created,
+            }.into()
+        }
+        FedEventData::FoulBall { game, .. } => {
+            events::FoulBall {
+                game_update: GameUpdate {
+                    game_id: game.game_id,
+                    play_count: game.play,
+                    score: None,
+                    description,
+                },
+                time: fed_event.created,
+            }.into()
+        }
+        FedEventData::StrikeSwinging { game, .. } |
+        FedEventData::StrikeLooking { game, .. } |
+        FedEventData::StrikeFlinching { game, .. }=> {
+            events::Strike {
+                game_update: GameUpdate {
+                    game_id: game.game_id,
+                    play_count: game.play,
+                    score: None,
+                    description,
+                },
+                time: fed_event.created,
+            }.into()
+        }
+        FedEventData::StrikeoutLooking { game, .. } |
+        FedEventData::StrikeoutSwinging { game, .. } |
+        FedEventData::Flyout { game, .. } |
+        FedEventData::GroundOut { game, .. } => {
+            events::Out {
+                game_update: GameUpdate {
+                    game_id: game.game_id,
+                    play_count: game.play,
+                    score: None,
+                    description,
+                },
+                time: fed_event.created,
+            }.into()
+        }
         FedEventData::FieldersChoice { .. } => { todo!() }
         FedEventData::DoublePlay { .. } => { todo!() }
-        FedEventData::Hit { .. } => { todo!() }
-        FedEventData::HomeRun { .. } => { todo!() }
+        FedEventData::Hit { game, num_bases, .. } => {
+            events::Hit {
+                game_update: GameUpdate {
+                    game_id: game.game_id,
+                    play_count: game.play,
+                    score: None,
+                    description,
+                },
+                time: fed_event.created,
+                to_base: Base::try_from(num_bases)
+                    .expect("Invalid num_bases in Hit event"),
+            }.into()
+        }
+        FedEventData::HomeRun { game, .. } => {
+            events::HomeRun {
+                game_update: GameUpdate {
+                    game_id: game.game_id,
+                    play_count: game.play,
+                    score: None,
+                    description,
+                },
+                time: fed_event.created,
+            }.into()
+        }
         FedEventData::StolenBase { .. } => { todo!() }
         FedEventData::CaughtStealing { .. } => { todo!() }
-        FedEventData::StrikeoutSwinging { .. } => { todo!() }
-        FedEventData::StrikeoutLooking { .. } => { todo!() }
         FedEventData::Walk { .. } => { todo!() }
         FedEventData::InningEnd { .. } => { todo!() }
         FedEventData::CharmStrikeout { .. } => { todo!() }

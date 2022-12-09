@@ -12,6 +12,7 @@ use std::cmp::Reverse;
 pub use task::{IngestTask, IngestTaskHolder};
 pub use observation::Observation;
 pub use observation_event::ChronObservationEvent;
+pub use state::StateGraph;
 
 use chrono::{DateTime, Utc};
 use diesel::internal::operators_macro::FieldAliasMapper;

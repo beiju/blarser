@@ -1,12 +1,11 @@
 use std::fmt::{Display, Formatter};
-use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use partial_information::MaybeKnown;
 
 use crate::entity::AnyEntity;
-use crate::events::{AnyExtrapolated, Effect, Event, Extrapolated, ord_by_time};
+use crate::events::{AnyExtrapolated, Effect, Event, ord_by_time};
 use crate::events::game_update::GameUpdate;
+use crate::ingest::StateGraph;
 use crate::state::EntityType;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -38,7 +37,7 @@ impl Event for HalfInning {
         self.time
     }
 
-    fn effects(&self) -> Vec<Effect> {
+    fn effects(&self, _: &StateGraph) -> Vec<Effect> {
         vec![
             Effect::one_id(EntityType::Game, self.game_update.game_id)
         ]
@@ -47,7 +46,7 @@ impl Event for HalfInning {
     fn forward(&self, entity: &AnyEntity, _: &AnyExtrapolated) -> AnyEntity {
         let mut entity = entity.clone();
         if let Some(game) = entity.as_game_mut() {
-            // self.game_update.forward(&mut game);
+            self.game_update.forward(game);
 
             game.top_of_inning = !game.top_of_inning;
             if game.top_of_inning {
