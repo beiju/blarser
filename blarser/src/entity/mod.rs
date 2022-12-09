@@ -69,7 +69,7 @@ impl Display for AnyEntityInternal {
     }
 }
 
-#[derive(Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct AnyEntity(AnyEntityInternal);
 
 impl Display for AnyEntity {

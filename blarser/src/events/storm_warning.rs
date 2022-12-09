@@ -1,4 +1,5 @@
 use std::fmt::{Display, Formatter};
+use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use diesel::QueryResult;
 use serde::{Deserialize, Serialize};
@@ -6,11 +7,11 @@ use uuid::Uuid;
 
 use crate::api::EventuallyEvent;
 use crate::entity::AnyEntity;
-use crate::events::{Effect, AnyEvent, Event, ord_by_time, Extrapolated};
+use crate::events::{Effect, AnyEvent, Event, ord_by_time, Extrapolated, AnyExtrapolated};
 use crate::events::game_update::GameUpdate;
 use crate::state::EntityType;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct StormWarning {
     pub(crate) game_update: GameUpdate,
     pub(crate) time: DateTime<Utc>,
@@ -27,7 +28,7 @@ impl Event for StormWarning {
         ]
     }
 
-    fn forward(&self, entity: &AnyEntity, _: &Box<dyn Extrapolated>) -> AnyEntity {
+    fn forward(&self, entity: &AnyEntity, _: &AnyExtrapolated) -> AnyEntity {
         todo!()
     }
 

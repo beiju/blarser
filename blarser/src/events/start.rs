@@ -1,11 +1,12 @@
 use std::fmt::{Display, Formatter};
+use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::entity::AnyEntity;
-use crate::events::{Effect, Event, Extrapolated, ord_by_time};
+use crate::events::{AnyExtrapolated, Effect, Event, Extrapolated, ord_by_time};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Start {
     time: DateTime<Utc>,
 }
@@ -31,7 +32,7 @@ impl Event for Start {
         Vec::new()
     }
 
-    fn forward(&self, _: &AnyEntity, _: &Box<dyn Extrapolated>) -> AnyEntity {
+    fn forward(&self, _: &AnyEntity, _: &AnyExtrapolated) -> AnyEntity {
         panic!("Cannot re-apply a Start event");
     }
 

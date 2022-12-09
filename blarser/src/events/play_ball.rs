@@ -1,17 +1,14 @@
 use std::fmt::{Display, Formatter};
 use chrono::{DateTime, Utc};
-use diesel::QueryResult;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 use partial_information::MaybeKnown;
 
-use crate::api::EventuallyEvent;
-use crate::entity::{AnyEntity, Entity};
-use crate::events::{Effect, AnyEvent, Event, ord_by_time, Extrapolated};
+use crate::entity::AnyEntity;
+use crate::events::{Effect, Event, ord_by_time, AnyExtrapolated};
 use crate::events::game_update::GameUpdate;
 use crate::state::EntityType;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct PlayBall {
     pub(crate) game_update: GameUpdate,
     pub(crate) time: DateTime<Utc>,
@@ -28,7 +25,7 @@ impl Event for PlayBall {
         ]
     }
 
-    fn forward(&self, entity: &AnyEntity, _: &Box<dyn Extrapolated>) -> AnyEntity {
+    fn forward(&self, entity: &AnyEntity, _: &AnyExtrapolated) -> AnyEntity {
         let mut entity = entity.clone();
         if let Some(game) = entity.as_game_mut() {
             // self.game_update.forward(&mut game);

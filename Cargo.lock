@@ -39,6 +39,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8da52d66c7071e2e3fa2a1e5c6d088fec47b593032b254f5e980de8ea54454d6"
 
 [[package]]
+name = "as-any"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8c3419eecc9f5967e6f0f29a0c3fefe22bda6ea34b15798f3c452cb81f2c3fa7"
+
+[[package]]
 name = "async-recursion"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -114,6 +120,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9e1b586273c5702936fe7b7d6896644d8be71e6314cfe09d3167c95f712589e8"
 
 [[package]]
+name = "binary-heap-plus"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f068638f8ff9e118a9361e66a411eff410e7fb3ecaa23bf9272324f8fc606d7"
+dependencies = [
+ "compare",
+]
+
+[[package]]
 name = "binascii"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -135,34 +150,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
 
 [[package]]
-name = "bitmaps"
-version = "2.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "031043d04099746d8db04daf1fa424b2bc8bd69d92b25962dcde24da39ab64a2"
-dependencies = [
- "typenum",
-]
-
-[[package]]
 name = "blarser"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "as-any",
  "async-recursion",
  "async-trait",
  "base64",
  "bincode",
  "byteorder",
  "chrono",
+ "daggy",
  "dialoguer",
  "diesel",
  "diesel-derive-enum",
- "downcast-rs",
  "enum_dispatch",
  "env_logger",
  "fed",
  "futures",
- "im",
  "indenter",
  "itertools",
  "log",
@@ -183,6 +189,7 @@ dependencies = [
  "serde_variant",
  "serde_with",
  "sled",
+ "stream-kmerge",
  "strum",
  "tap",
  "text-diff",
@@ -272,6 +279,12 @@ dependencies = [
  "termcolor",
  "unicode-width",
 ]
+
+[[package]]
+name = "compare"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "120133d4db2ec47efe2e26502ee984747630c67f51974fca0b6c1340cf2368d3"
 
 [[package]]
 name = "console"
@@ -406,6 +419,16 @@ dependencies = [
  "proc-macro2 1.0.47",
  "quote 1.0.21",
  "syn 1.0.105",
+]
+
+[[package]]
+name = "daggy"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "91a9304e55e9d601a39ae4deaba85406d5c0980e106f65afcf0460e9af1e7602"
+dependencies = [
+ "petgraph",
+ "serde",
 ]
 
 [[package]]
@@ -617,12 +640,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "downcast-rs"
-version = "1.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9ea835d29036a4087793836fa931b08837ad5e957da9e23886b29586fb9b6650"
-
-[[package]]
 name = "dyn-clone"
 version = "1.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -689,6 +706,7 @@ dependencies = [
 [[package]]
 name = "eventually_api"
 version = "0.1.0"
+source = "git+https://github.com/beiju/fed.git#963d9fcfa07e0260e7ed25b6fcd32f61fde28231"
 dependencies = [
  "chrono",
  "derive_builder",
@@ -718,6 +736,7 @@ dependencies = [
 [[package]]
 name = "fed"
 version = "0.1.0"
+source = "git+https://github.com/beiju/fed.git#963d9fcfa07e0260e7ed25b6fcd32f61fde28231"
 dependencies = [
  "chrono",
  "derive_builder",
@@ -1177,20 +1196,6 @@ checksum = "e14ddfc70884202db2244c223200c204c2bda1bc6e0998d11b5e024d657209e6"
 dependencies = [
  "unicode-bidi",
  "unicode-normalization",
-]
-
-[[package]]
-name = "im"
-version = "15.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d0acd33ff0285af998aaf9b57342af478078f53492322fafc47450e09397e0e9"
-dependencies = [
- "bitmaps",
- "rand_core",
- "rand_xoshiro",
- "sized-chunks",
- "typenum",
- "version_check",
 ]
 
 [[package]]
@@ -1851,6 +1856,8 @@ checksum = "e6d5014253a1331579ce62aa67443b4a658c5e7dd03d4bc6d302b94474888143"
 dependencies = [
  "fixedbitset",
  "indexmap",
+ "serde",
+ "serde_derive",
 ]
 
 [[package]]
@@ -2023,15 +2030,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
 dependencies = [
  "getrandom",
-]
-
-[[package]]
-name = "rand_xoshiro"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6f97cdb2a36ed4183de61b2f824cc45c9f1037f28afe0a322e9fff4c108b5aaa"
-dependencies = [
- "rand_core",
 ]
 
 [[package]]
@@ -2485,16 +2483,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sized-chunks"
-version = "0.6.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "16d69225bde7a69b235da73377861095455d298f2b970996eec25ddbb42b3d1e"
-dependencies = [
- "bitmaps",
- "typenum",
-]
-
-[[package]]
 name = "slab"
 version = "0.4.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2563,6 +2551,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dbe866e1e51e8260c9eed836a042a5e7f6726bb2b411dffeaa712e19c388f23b"
 dependencies = [
  "loom",
+]
+
+[[package]]
+name = "stream-kmerge"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "047bf5adb71b588d07fa077819b84f276a33a41c75b52772be7c2dba5921188d"
+dependencies = [
+ "binary-heap-plus",
+ "compare",
+ "futures",
+ "pin-project-lite",
 ]
 
 [[package]]
@@ -3347,6 +3347,7 @@ dependencies = [
 [[package]]
 name = "with_structure"
 version = "0.1.0"
+source = "git+https://github.com/beiju/fed.git#963d9fcfa07e0260e7ed25b6fcd32f61fde28231"
 dependencies = [
  "chrono",
  "uuid",
@@ -3355,6 +3356,7 @@ dependencies = [
 [[package]]
 name = "with_structure_derive"
 version = "0.1.0"
+source = "git+https://github.com/beiju/fed.git#963d9fcfa07e0260e7ed25b6fcd32f61fde28231"
 dependencies = [
  "proc-macro2 1.0.47",
  "quote 1.0.21",

@@ -35,7 +35,7 @@ pub async fn run_ingest(mut ingest: Ingest, start_time: DateTime<Utc>) {
     let initial_observations = load_initial_state(&ingest, start_time).await;
     {
         let mut state = ingest.state.lock().unwrap();
-        state.populate(initial_observations);
+        state.populate(initial_observations, start_time);
     }
 
     let mut timed_events = get_timed_event_list(&mut ingest, start_time).await;
@@ -44,9 +44,12 @@ pub async fn run_ingest(mut ingest: Ingest, start_time: DateTime<Utc>) {
         info!(" - {}", evt.0);
     }
 
+    info!("Getting fed events stream");
     let fed_events = get_fed_event_stream().peekable();
     pin_mut!(fed_events);
+    info!("Getting updates stream");
     let observations = chron_updates(start_time).peekable();
+    info!("Got updates stream");
     pin_mut!(observations);
 
     let mut latest_feed_update = start_time;
@@ -55,6 +58,7 @@ pub async fn run_ingest(mut ingest: Ingest, start_time: DateTime<Utc>) {
     loop {
         // TODO this always blocks until the next event comes in, defeating the purpose of having
         //   event-less "latest ingest time" updates
+        info!("Finding next feed event time");
         let next_fed_event_time = loop {
             // Consume all the empty ingests from fed_events
             let next_item: &EventStreamItem = fed_events.as_mut().peek().await
@@ -63,6 +67,7 @@ pub async fn run_ingest(mut ingest: Ingest, start_time: DateTime<Utc>) {
             if let Some(event) = next_item.event() {
                 break event.time()
             } else {
+                info!("Skipping empty event");
                 let n: EventStreamItem = fed_events.as_mut().next().await
                     .expect("This stream should never terminate");
                 assert!(n.event().is_none(),
@@ -70,14 +75,17 @@ pub async fn run_ingest(mut ingest: Ingest, start_time: DateTime<Utc>) {
             }
         };
 
+        info!("Getting next timed event time");
         let next_timed_event_time = timed_events.peek()
             .map(|event| event.0.time());
 
         // TODO Allow this to be None if there are currently no observations
+        info!("Getting next observation time");
         let next_observation_time = observations.as_mut().peek().await
             .expect("This stream should never terminate")
             .latest_time();
 
+        info!("Selecting source");
         let Some((source, time)) = [
             Some((Source::Feed, next_fed_event_time)),
             next_timed_event_time.map(|t| (Source::Timed, t)),

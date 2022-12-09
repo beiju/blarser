@@ -18,7 +18,7 @@ mod batter_up;
 // mod player_reroll;
 
 pub(crate) use game_update::GameUpdate;
-pub use effects::{Extrapolated, Effect};
+pub use effects::{Extrapolated, AnyExtrapolated, Effect};
 pub use start::Start;
 pub use earlseason_start::EarlseasonStart;
 pub use lets_go::LetsGo;
@@ -31,6 +31,7 @@ pub use batter_up::BatterUp;
 // pub use hit::{Hit, HomeRun};
 // pub use player_reroll::{parse as parse_player_reroll, Snow};
 
+use std::sync::Arc;
 use std::fmt::{Display, Formatter};
 use chrono::{DateTime, Utc};
 use enum_dispatch::enum_dispatch;
@@ -50,12 +51,12 @@ pub trait Event: Serialize + for<'de> Deserialize<'de> + Ord + Display {
 
     fn effects(&self) -> Vec<Effect>;
 
-    fn forward(&self, entity: &AnyEntity, extrapolated: &Box<dyn Extrapolated>) -> AnyEntity;
+    fn forward(&self, entity: &AnyEntity, extrapolated: &AnyExtrapolated) -> AnyEntity;
     fn reverse(&self, entity: AnyEntity, aux: serde_json::Value) -> AnyEntity;
 }
 
 #[enum_dispatch(Event)]
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum AnyEvent {
     Start(Start),
     EarlseasonStart(EarlseasonStart),

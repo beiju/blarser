@@ -8,7 +8,7 @@ use crate::entity::{EntityParseError, EntityRaw};
 use crate::state::EntityType;
 
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Observation {
     // TODO Reorganize so this isn't pub
     pub perceived_at: DateTime<Utc>,

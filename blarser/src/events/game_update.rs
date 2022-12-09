@@ -5,7 +5,7 @@ use uuid::Uuid;
 use crate::api::{EventType, EventuallyEvent, Weather};
 use crate::entity::{Game, UpdateFull};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Score {
     score_update: String,
     score_ledger: String,
@@ -13,7 +13,7 @@ pub struct Score {
     away_score: f32,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct GameUpdate {
     pub(crate) game_id: Uuid,
     pub(crate) play_count: i64,

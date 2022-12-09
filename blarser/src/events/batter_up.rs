@@ -1,19 +1,22 @@
-use std::any::TypeId;
+use std::any::{Any, TypeId};
 use std::fmt::{Display, Formatter};
+use std::ops::Deref;
+use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use log::info;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use partial_information::MaybeKnown;
 use partial_information_derive::PartialInformationCompare;
+use as_any::Downcast;
 
 use crate::entity::AnyEntity;
-use crate::events::{Effect, Event, Extrapolated, ord_by_time};
+use crate::events::{AnyExtrapolated, Effect, Event, Extrapolated, ord_by_time};
 use crate::events::game_update::GameUpdate;
 use crate::state::EntityType;
 
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct BatterUp {
     pub(crate) game_update: GameUpdate,
     pub(crate) time: DateTime<Utc>,
@@ -41,12 +44,16 @@ impl Event for BatterUp {
         ]
     }
 
-    fn forward(&self, entity: &AnyEntity, extrapolated: &Box<dyn Extrapolated>) -> AnyEntity {
+    fn forward(&self, entity: &AnyEntity, extrapolated: &AnyExtrapolated) -> AnyEntity {
         // TODO Implement this generically somehow. With macro? Maybe a function-like macro that
         //   takes a lot of implementations of forward where the arguments have concrete types and
         //   outputs one big forward that does the appropriate matching and casting
         let mut entity = entity.clone();
         if let Some(game) = entity.as_game_mut() {
+            dbg!(extrapolated);
+            dbg!(extrapolated.type_id());
+            dbg!(TypeId::of::<BatterUpExtrapolated>());
+            dbg!(TypeId::of::<&BatterUpExtrapolated>());
             let extrapolated = extrapolated.downcast_ref::<BatterUpExtrapolated>().unwrap();
             // self.game_update.forward(&mut game);
 

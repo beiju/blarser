@@ -13,7 +13,9 @@ use crate::ingest::state::StateGraph;
 use crate::schema;
 use crate::state::{ApprovalState, EntityType, StateInterface};
 
-const BLARSER_START: &str = "2021-03-01T15:00:00Z";
+// Doing 15:31 to skip a trivial change that just changes the milliseconds of every date in `sim`,
+// I'm guessing due to a sim restart or something
+const BLARSER_START: &str = "2021-03-01T15:31:00Z";
 
 pub struct IngestTaskHolder {
     pub latest_ingest: Arc<StdMutex<Option<IngestTask>>>,
@@ -74,12 +76,12 @@ impl IngestTask {
         }).await
             .expect("Failed to create new ingest record");
 
-        let approvals = Arc::new(StdMutex::new(HashMap::new()));
-        let ingest = Ingest::new(ingest_id, conn);
-
         let start_time_parsed = DateTime::parse_from_rfc3339(BLARSER_START)
             .expect("Couldn't parse hard-coded Blarser start time")
             .with_timezone(&Utc);
+
+        let approvals = Arc::new(StdMutex::new(HashMap::new()));
+        let ingest = Ingest::new(ingest_id, conn);
 
         tokio::spawn(run_ingest(ingest, start_time_parsed));
 
@@ -111,7 +113,7 @@ impl Ingest {
             ingest_id,
             db,
             pending_approvals: Arc::new(Mutex::new(Default::default())),
-            state: Arc::new(Mutex::new(Default::default()))
+            state: Arc::new(Mutex::new(StateGraph::new()))
         }
     }
 

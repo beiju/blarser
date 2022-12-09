@@ -1,14 +1,15 @@
 use std::fmt::{Display, Formatter};
+use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use partial_information::MaybeKnown;
 
 use crate::entity::AnyEntity;
-use crate::events::{Effect, Event, Extrapolated, ord_by_time};
+use crate::events::{AnyExtrapolated, Effect, Event, Extrapolated, ord_by_time};
 use crate::events::game_update::GameUpdate;
 use crate::state::EntityType;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct HalfInning {
     pub(crate) game_update: GameUpdate,
     pub(crate) time: DateTime<Utc>,
@@ -43,7 +44,7 @@ impl Event for HalfInning {
         ]
     }
 
-    fn forward(&self, entity: &AnyEntity, _: &Box<dyn Extrapolated>) -> AnyEntity {
+    fn forward(&self, entity: &AnyEntity, _: &AnyExtrapolated) -> AnyEntity {
         let mut entity = entity.clone();
         if let Some(game) = entity.as_game_mut() {
             // self.game_update.forward(&mut game);

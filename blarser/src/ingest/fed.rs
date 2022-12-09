@@ -247,5 +247,6 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
         FedEventData::EnterSecretBase { .. } => { todo!() }
         FedEventData::ExitSecretBase { .. } => { todo!() }
         FedEventData::EchoChamber { .. } => { todo!() }
+        FedEventData::Roam { .. } => { todo!() }
     })
 }

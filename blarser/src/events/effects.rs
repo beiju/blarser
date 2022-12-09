@@ -1,16 +1,14 @@
-use std::any::Any;
 use std::fmt::Debug;
-use downcast_rs::{Downcast, impl_downcast};
-use enum_dispatch::enum_dispatch;
+use std::sync::Arc;
+use as_any::{AsAny, Downcast};
 use uuid::Uuid;
 use partial_information::PartialInformationCompare;
 use partial_information_derive::PartialInformationCompare;
 use crate::state::EntityType;
 
-#[enum_dispatch]
-pub trait Extrapolated: Debug + Downcast {}
+pub trait Extrapolated: Debug + AsAny {}
 
-impl_downcast!(Extrapolated);
+pub type AnyExtrapolated = Arc<dyn Extrapolated + Send + Sync>;
 
 #[derive(Debug, PartialInformationCompare)]
 struct NullExtrapolated {}
@@ -22,7 +20,7 @@ impl Extrapolated for NullExtrapolated {}
 pub struct Effect {
     pub ty: EntityType,
     pub id: Option<Uuid>,
-    pub extrapolated: Box<dyn Extrapolated>,
+    pub extrapolated: AnyExtrapolated,
 }
 
 impl Effect {
@@ -38,15 +36,15 @@ impl Effect {
         Self::one_id(ty, Uuid::nil())
     }
 
-    pub fn one_id_with<T: Extrapolated>(ty: EntityType, id: Uuid, extrapolated: T) -> Self {
-        Self { ty, id: Some(id), extrapolated: Box::new(extrapolated) }
+    pub fn one_id_with<T: Extrapolated + Send + Sync>(ty: EntityType, id: Uuid, extrapolated: T) -> Self {
+        Self { ty, id: Some(id), extrapolated: Arc::new(extrapolated) }
     }
 
-    pub fn all_ids_with<T: Extrapolated>(ty: EntityType, extrapolated: T) -> Self {
-        Self { ty, id: None, extrapolated: Box::new(extrapolated) }
+    pub fn all_ids_with<T: Extrapolated + Send + Sync>(ty: EntityType, extrapolated: T) -> Self {
+        Self { ty, id: None, extrapolated: Arc::new(extrapolated) }
     }
 
-    pub fn null_id_with<T: Extrapolated>(ty: EntityType, extrapolated: T) -> Self {
+    pub fn null_id_with<T: Extrapolated + Send + Sync>(ty: EntityType, extrapolated: T) -> Self {
         Self::one_id_with(ty, Uuid::nil(), extrapolated)
     }
 }

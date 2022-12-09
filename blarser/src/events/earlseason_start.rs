@@ -1,13 +1,14 @@
 use std::fmt::{Display, Formatter};
+use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use partial_information::MaybeKnown;
 
 use crate::entity::{AnyEntity, Entity};
-use crate::events::{Effect, Event, Extrapolated, ord_by_time};
+use crate::events::{AnyExtrapolated, Effect, Event, Extrapolated, ord_by_time};
 use crate::state::EntityType;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct EarlseasonStart {
     time: DateTime<Utc>,
 }
@@ -30,7 +31,7 @@ impl Event for EarlseasonStart {
         ]
     }
 
-    fn forward(&self, mut entity: &AnyEntity, _: &Box<dyn Extrapolated>) -> AnyEntity {
+    fn forward(&self, mut entity: &AnyEntity, _: &AnyExtrapolated) -> AnyEntity {
         let mut entity = entity.clone();
 
         if let Some(sim) = entity.as_sim_mut() {

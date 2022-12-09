@@ -1,17 +1,13 @@
-use rocket::{State, error};
+use rocket::State;
 use uuid::Uuid;
 use serde_json::{Value, json};
-use text_diff::Difference;
 use rocket_dyn_templates::Template;
-use blarser::entity;
-use itertools::Itertools;
 use serde::Serialize;
 use anyhow::anyhow;
-use im::HashMap;
 
 use blarser::db::BlarserDbConn;
 use blarser::ingest::IngestTaskHolder;
-use blarser::state::{VersionLink, Version, StateInterface, EntityDescription};
+use blarser::state::{StateInterface, EntityDescription};
 use crate::routes::ApiError;
 
 #[rocket::get("/debug")]
