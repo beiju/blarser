@@ -14,14 +14,15 @@ use partial_information::{Conflict, PartialInformationCompare};
 use fed::FedEvent;
 use futures::future::join_all;
 use futures::stream::Peekable;
+use petgraph::stable_graph::NodeIndex;
 use stream_kmerge::kmerge_by_key;
 use uuid::Uuid;
 
 use crate::api::{chronicler, ChroniclerItem};
 use crate::ingest::task::Ingest;
-use crate::entity::{self, Entity, EntityParseError, EntityRaw};
+use crate::entity::{self, AnyEntity, Entity, EntityParseError, EntityRaw};
 use crate::events::{self, AnyEvent};
-use crate::ingest::{self, observation::Observation};
+use crate::ingest::{self, observation::Observation, StateGraph};
 use crate::state::{EntityType, EventEffect, MergedSuccessors, NewVersion, StateInterface, Version, VersionLink};
 // use crate::{with_any_entity_raw, with_any_event};
 // use crate::events::Event;
@@ -203,7 +204,7 @@ pub fn ingest_observation(ingest: &mut Ingest, obs: Observation) -> Vec<AnyEvent
         .expect("Asked for versions for entity that does not exist");
     dbg!(&versions);
 
-    let (successes, failures): (Vec<_>, Vec<_>) = versions.into_iter()
+    let (successes, _failures): (Vec<_>, Vec<_>) = versions.into_iter()
         .map(|version_idx| {
             let (version, event) = state.version(version_idx)
                 .expect("Expected node index from get_versions_between to be valid");
@@ -211,29 +212,60 @@ pub fn ingest_observation(ingest: &mut Ingest, obs: Observation) -> Vec<AnyEvent
             dbg!(&version);
             dbg!(&event);
 
-            if let Ok(sim) = version.try_into() {
-                ingest_for_version::<entity::Sim>(sim, &obs)?;
+            match version {
+                AnyEntity::Sim(e) => { ingest_for_version::<entity::Sim>(&mut state, version_idx, e, &obs) }
+                AnyEntity::Player(e) => { ingest_for_version::<entity::Player>(&mut state, version_idx, e, &obs) }
+                AnyEntity::Team(e) => { ingest_for_version::<entity::Team>(&mut state, version_idx, e, &obs) }
+                AnyEntity::Game(e) => { ingest_for_version::<entity::Game>(&mut state, version_idx, e, &obs) }
+                AnyEntity::Standings(e) => { ingest_for_version::<entity::Standings>(&mut state, version_idx, e, &obs) }
+                AnyEntity::Season(e) => { ingest_for_version::<entity::Season>(&mut state, version_idx, e, &obs) }
             }
-
-            Ok::<_, Vec<Conflict>>(())
         })
         .partition_result();
 
+    assert!(!successes.is_empty(), "TODO Report failures");
+}
+
+struct Strand {
+    original: AnyEntity,
+    // Goes in reverse chronological order, so newest -> oldest
+    backwards: Vec<AnyEntity>,
+    // Goes in chronological order, so oldest -> newest
+    forwards: Vec<AnyEntity>,
+}
+
+impl Strand {
+    pub fn new(entity: AnyEntity) -> Self {
+        Self {
+            original: entity,
+            backwards: Default::default(),
+            forwards: Default::default(),
+        }
+    }
+}
+
+fn backwards_pass<EntityT>(state: &mut StateGraph, entity_idx: NodeIndex, mut current_entity: EntityT) -> Vec<AnyEntity>
+    where EntityT: Entity + PartialInformationCompare {
     todo!()
 }
 
-fn ingest_for_version<EntityT>(entity: &EntityT, obs: &Observation) -> Result<(), Vec<Conflict>>
+fn ingest_for_version<EntityT>(state: &mut StateGraph, entity_idx: NodeIndex, entity: &EntityT, obs: &Observation) -> Result<Strand, Vec<Conflict>>
     where EntityT: Entity + PartialInformationCompare {
-    let mut entity = entity.clone();
-    // TODO: Shouldn't have to do this again for every candidate version
+    let mut new_entity = entity.clone();
     let raw: EntityT::Raw = serde_json::from_value(obs.entity_json.clone())
         .expect("TODO: use Result to report this error");
-    let conflicts = entity.observe(&raw);
+    let conflicts = new_entity.observe(&raw);
     if !conflicts.is_empty() {
-        Err(conflicts)
-    } else {
-        todo!()
+        return Err(conflicts);
     }
+
+    let backwards = if new_entity != entity {
+        backwards_pass(state, entity_idx, new_entity)
+    } else {
+        Vec::new()
+    };
+
+    todo!()
 }
 
 // fn forward_ingest<EntityRawT: EntityRaw>(state: &StateInterface, entity_raw: &EntityRawT, perceived_at: DateTime<Utc>) -> ChronIngestResult<()> {

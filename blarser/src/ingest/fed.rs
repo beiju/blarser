@@ -5,7 +5,6 @@ use chrono::{DateTime, Utc};
 use futures::{Stream, stream};
 use fed::{FedEvent, FedEventData};
 use log::{info, log};
-use partial_information::MaybeKnown;
 use crate::entity::Base;
 
 use crate::events;
@@ -220,7 +219,19 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
                 time: fed_event.created,
             }.into()
         }
-        FedEventData::StolenBase { .. } => { todo!() }
+        FedEventData::StolenBase { game, base_stolen, .. } => {
+            events::StolenBase {
+                game_update: GameUpdate {
+                    game_id: game.game_id,
+                    play_count: game.play,
+                    score: None,
+                    description,
+                },
+                time: fed_event.created,
+                to_base: Base::try_from(base_stolen)
+                    .expect("Invalid base_stolen in StolenBase event"),
+            }.into()
+        }
         FedEventData::CaughtStealing { .. } => { todo!() }
         FedEventData::Walk { .. } => { todo!() }
         FedEventData::InningEnd { .. } => { todo!() }

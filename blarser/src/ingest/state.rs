@@ -4,7 +4,7 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use itertools::Itertools;
 use log::{error, info};
-use daggy::stable_dag::{StableDag, NodeIndex, EdgeIndex};
+use daggy::stable_dag::{StableDag, NodeIndex};
 use petgraph::visit::Walker;
 use diesel::PgJsonbExpressionMethods;
 use uuid::Uuid;
@@ -117,6 +117,7 @@ impl StateGraph {
             AnyEvent::Out(e) => { e.forward(entity, extrapolated) }
             AnyEvent::Hit(e) => { e.forward(entity, extrapolated) }
             AnyEvent::HomeRun(e) => { e.forward(entity, extrapolated) }
+            AnyEvent::StolenBase(e) => { e.forward(entity, extrapolated) }
         };
 
         let new_entity_idx = self.graph.add_node((new_entity, event));

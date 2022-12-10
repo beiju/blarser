@@ -25,6 +25,7 @@ use crate::ingest::fed::{EventStreamItem, get_fed_event_stream, get_timed_event_
 use crate::ingest::chron::{chron_updates, ingest_observation, load_initial_state};
 use crate::events::Event;
 
+#[derive(Debug)]
 enum Source {
     Feed,
     Timed,
@@ -55,7 +56,6 @@ pub async fn run_ingest(mut ingest: Ingest, start_time: DateTime<Utc>) {
 
     let mut latest_feed_update = start_time;
 
-    info!("Starting ingest");
     loop {
         // TODO this always blocks until the next event comes in, defeating the purpose of having
         //   event-less "latest ingest time" updates
@@ -75,16 +75,23 @@ pub async fn run_ingest(mut ingest: Ingest, start_time: DateTime<Utc>) {
                         "This part of the loop should only ever drain items with no event");
             }
         };
+        info!("Next feed event is at {next_fed_event_time}");
 
         info!("Getting next timed event time");
         let next_timed_event_time = timed_events.peek()
             .map(|event| event.0.time());
+        if let Some(t) = next_timed_event_time {
+            info!("Next timed event is at {t}");
+        } else {
+            info!("No next time events");
+        }
 
         // TODO Allow this to be None if there are currently no observations
         info!("Getting next observation time");
         let next_observation_time = observations.as_mut().peek().await
             .expect("This stream should never terminate")
             .latest_time();
+        info!("Next observation is at {next_observation_time}");
 
         info!("Selecting source");
         let Some((source, time)) = [
@@ -96,6 +103,7 @@ pub async fn run_ingest(mut ingest: Ingest, start_time: DateTime<Utc>) {
             .min_by_key(|(_, time)| *time) else {
             todo!(); // should this ever happen?
         };
+        info!("Selected {source:?}");
 
         if time > latest_feed_update {
             info!("Caught up with the Feed");
@@ -125,4 +133,5 @@ pub async fn run_ingest(mut ingest: Ingest, start_time: DateTime<Utc>) {
         timed_events.extend(new_timed_events.into_iter().map(Reverse));
 
     }
+    info!("Starting ingest");
 }
