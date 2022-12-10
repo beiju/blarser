@@ -11,7 +11,7 @@ use crate::entity::Base;
 use crate::events;
 use crate::events::{Effect, AnyEvent, Event, GameUpdate};
 use crate::ingest::error::IngestResult;
-use crate::ingest::task::{DebugHistoryItem, Ingest};
+use crate::ingest::task::{DebugHistoryItem, DebugHistoryVersion, Ingest};
 
 pub struct EventStreamItem {
     last_update_time: DateTime<Utc>,
@@ -74,12 +74,11 @@ pub async fn ingest_event(ingest: &mut Ingest, event: AnyEvent) -> IngestResult<
     let mut new_timed_events = Vec::new();
     for effect in effects {
         for id in state.ids_for(&effect) {
-            let (human_name, new_events) = state.apply_event(event.clone(), effect.ty, id, &effect.extrapolated)?;
+            let new_events = state.apply_event(event.clone(), effect.ty, id, &effect.extrapolated)?;
             new_timed_events.extend(new_events);
-            history.insert((effect.ty, id), DebugHistoryItem {
-                entity_human_name: human_name,
-                time: event.time(),
-                value: json!({}),
+            history.get_mut(&(effect.ty, id)).unwrap().versions.push(DebugHistoryVersion {
+                event_human_name: event.to_string(),
+                value: Default::default(),
             });
         }
     }

@@ -103,10 +103,15 @@ impl IngestTask {
     }
 }
 
+pub struct DebugHistoryVersion {
+    pub event_human_name: String,
+    pub value: serde_json::Value,
+}
+
 pub struct DebugHistoryItem {
     pub entity_human_name: String,
     pub time: DateTime<Utc>,
-    pub value:  serde_json::Value,
+    pub versions: Vec<DebugHistoryVersion>,
 }
 
 pub type GraphDebugHistory = HashMap<(EntityType, Uuid), DebugHistoryItem>;

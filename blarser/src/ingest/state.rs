@@ -13,7 +13,9 @@ use partial_information::PartialInformationCompare;
 use crate::entity::{self, AnyEntity, Entity};
 use crate::events::{Effect, AnyEvent, EarlseasonStart, Event, AnyExtrapolated, Start};
 use crate::ingest::error::{IngestError, IngestResult};
-use crate::ingest::Observation;
+use crate::ingest::{GraphDebugHistory, Observation};
+use crate::ingest::task::DebugHistoryItem;
+use crate::schema::events::star;
 use crate::state::EntityType;
 
 #[derive(Default)]
@@ -34,7 +36,7 @@ fn insert_from_observation<EntityT: Entity + PartialInformationCompare>(vec: &mu
 impl StateGraph {
     pub fn new() -> Self { Default::default() }
 
-    pub fn populate(&mut self, obses: Vec<Observation>, start_time: DateTime<Utc>) {
+    pub fn populate(&mut self, obses: Vec<Observation>, start_time: DateTime<Utc>, history: &mut GraphDebugHistory) {
         let start_event: Arc<AnyEvent> = Arc::new(Start::new(start_time).into());
         for obs in obses {
             let entity = AnyEntity::from_raw_json(obs.entity_type, obs.entity_json.clone()) // remove the clone after finished debugging
@@ -43,10 +45,16 @@ impl StateGraph {
                     e
                 })
                 .expect("JSON parsing failed");
+            let entity_human_name = entity.to_string();
             let idx = self.graph.add_node((entity, start_event.clone()));
             self.leafs.insert((obs.entity_type, obs.entity_id), vec![idx]);
             self.roots.insert(idx);
             self.ids_for_type.entry(obs.entity_type).or_default().push(obs.entity_id);
+            history.insert((obs.entity_type, obs.entity_id), DebugHistoryItem {
+                entity_human_name,
+                time: start_time,
+                versions: vec![],
+            });
         }
     }
 
@@ -79,22 +87,14 @@ impl StateGraph {
         }
     }
 
-    pub fn apply_event(&mut self, event: Arc<AnyEvent>, ty: EntityType, id: Uuid, extrapolated: &AnyExtrapolated) -> IngestResult<(String, Vec<AnyEvent>)> {
+    pub fn apply_event(&mut self, event: Arc<AnyEvent>, ty: EntityType, id: Uuid, extrapolated: &AnyExtrapolated) -> IngestResult<Vec<AnyEvent>> {
         let entity_indices = self.leafs.get(&(ty, id))
             .ok_or_else(|| IngestError::EntityDoesNotExist { ty, id })?
             .clone();
 
         info!("Applying {event} to {ty} {id} with {extrapolated:?}");
-        let mut desc = None;
         let new_leafs = entity_indices.into_iter()
             .map(|entity_idx| {
-                let (entity, _) = self.graph.node_weight(entity_idx).unwrap();
-                let new_desc = entity.to_string();
-                if let Some(desc) = &desc {
-                    assert_eq!(desc, &new_desc);
-                } else {
-                    desc = Some(new_desc)
-                }
                 self.apply_event_to_entity(event.clone(), entity_idx, extrapolated)
             })
             .collect();
@@ -103,7 +103,7 @@ impl StateGraph {
         assert!(old_leafs.is_some(),
                 "This insert call should only ever replace existing leafs");
 
-        Ok((desc.expect("Expected at least one leaf"), Vec::new())) // TODO
+        Ok(Vec::new()) // TODO
     }
 
     fn apply_event_to_entity(&mut self, event: Arc<AnyEvent>, entity_idx: NodeIndex, extrapolated: &AnyExtrapolated) -> NodeIndex {

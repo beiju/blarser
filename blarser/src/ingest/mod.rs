@@ -8,6 +8,7 @@ mod state;
 mod error;
 
 use std::cmp::Reverse;
+use std::ops::Deref;
 
 pub use task::{IngestTask, IngestTaskHolder};
 pub use observation::Observation;
@@ -36,8 +37,10 @@ pub async fn run_ingest(mut ingest: Ingest, start_time: DateTime<Utc>) {
     info!("Loading initial state from {start_time}...");
     let initial_observations = load_initial_state(&ingest, start_time).await;
     {
+        let mut history = ingest.debug_history.lock().await;
         let mut state = ingest.state.lock().unwrap();
-        state.populate(initial_observations, start_time);
+
+        state.populate(initial_observations, start_time, &mut *history);
     }
 
     let mut timed_events = get_timed_event_list(&mut ingest, start_time).await;
