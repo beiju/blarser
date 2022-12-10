@@ -31,6 +31,8 @@ use crate::state::EntityType;
 pub trait Entity: Serialize + for<'de> Deserialize<'de> + PartialEq + Clone + Display {
     fn entity_type(&self) -> &'static str;
     fn id(&self) -> Uuid;
+
+    fn description(&self) -> String;
 }
 
 #[derive(Debug)]
@@ -84,6 +86,10 @@ impl Entity for AnyEntity {
     fn id(&self) -> Uuid {
         impl_match!(&self, e => { e.id() })
     }
+
+    fn description(&self) -> String {
+        impl_match!(&self, e => { e.description() })
+    }
 }
 
 macro_rules! impl_as_ref {
@@ -123,6 +129,10 @@ impl AnyEntity {
             EntityType::Standings => { Self::from_raw_json_typed::<Standings>(raw_json) }
             EntityType::Season => { Self::from_raw_json_typed::<Season>(raw_json) }
         }
+    }
+
+    pub fn to_json(&self) -> serde_json::Value {
+        impl_match!(&self, e => { serde_json::to_value(e).unwrap() })
     }
 
     impl_as_ref!(Sim, AnyEntity::Sim, as_sim, as_sim_mut);

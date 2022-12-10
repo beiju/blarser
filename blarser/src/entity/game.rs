@@ -1,4 +1,4 @@
-use std::fmt::{Display, Formatter};
+use std::fmt::{Display, format, Formatter};
 use chrono::{DateTime, Duration, Utc};
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
@@ -179,6 +179,12 @@ impl Display for Game {
 impl Entity for Game {
     fn entity_type(&self) -> &'static str { "game" }
     fn id(&self) -> Uuid { self.id }
+
+    fn description(&self) -> String {
+        format!("{} @ {}: {}", self.away.team_nickname, self.home.team_nickname,
+                // ew
+                self.last_update.as_ref().map_or("", String::as_str))
+    }
 }
 
 impl EntityRaw for <Game as PartialInformationCompare>::Raw {

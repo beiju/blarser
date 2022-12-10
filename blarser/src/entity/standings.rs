@@ -43,6 +43,10 @@ impl EntityRaw for <Standings as PartialInformationCompare>::Raw {
 impl Entity for Standings {
     fn entity_type(&self) -> &'static str { "standings" }
     fn id(&self) -> Uuid { self.id }
+
+    fn description(&self) -> String {
+        format!("Standings {}", self.id)
+    }
 }
 // impl Standings {
 //     fn apply_feed_event(&mut self, event: &EventuallyEvent, state: &StateInterface) -> FeedEventChangeResult {

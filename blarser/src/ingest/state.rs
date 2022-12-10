@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
+use std::iter;
 use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use itertools::Itertools;
@@ -7,6 +8,8 @@ use log::{error, info};
 use daggy::stable_dag::{StableDag, NodeIndex};
 use petgraph::visit::Walker;
 use diesel::PgJsonbExpressionMethods;
+use petgraph::data::DataMap;
+use serde_json::json;
 use uuid::Uuid;
 use partial_information::PartialInformationCompare;
 
@@ -14,15 +17,15 @@ use crate::entity::{self, AnyEntity, Entity};
 use crate::events::{Effect, AnyEvent, EarlseasonStart, Event, AnyExtrapolated, Start};
 use crate::ingest::error::{IngestError, IngestResult};
 use crate::ingest::{GraphDebugHistory, Observation};
-use crate::ingest::task::DebugHistoryItem;
+use crate::ingest::task::{DebugHistoryItem, DebugHistoryVersion, DebugSubtree};
 use crate::schema::events::star;
 use crate::state::EntityType;
 
 #[derive(Default)]
 pub struct StateGraph {
     graph: StableDag<(AnyEntity, Arc<AnyEvent>), AnyExtrapolated>,
+    roots: HashMap<(EntityType, Uuid), Vec<NodeIndex>>,
     leafs: HashMap<(EntityType, Uuid), Vec<NodeIndex>>,
-    roots: HashSet<NodeIndex>,
     ids_for_type: HashMap<EntityType, Vec<Uuid>>,
 }
 
@@ -46,14 +49,22 @@ impl StateGraph {
                 })
                 .expect("JSON parsing failed");
             let entity_human_name = entity.to_string();
+            let entity_json = entity.to_json();
             let idx = self.graph.add_node((entity, start_event.clone()));
             self.leafs.insert((obs.entity_type, obs.entity_id), vec![idx]);
-            self.roots.insert(idx);
+            self.roots.insert((obs.entity_type, obs.entity_id), vec![idx]);
             self.ids_for_type.entry(obs.entity_type).or_default().push(obs.entity_id);
             history.insert((obs.entity_type, obs.entity_id), DebugHistoryItem {
                 entity_human_name,
-                time: start_time,
-                versions: vec![],
+                versions: vec![DebugHistoryVersion {
+                    event_human_name: "Start".to_string(),
+                    time: start_time,
+                    value: DebugSubtree {
+                        generations: vec![iter::once(idx).collect()],
+                        edges: Default::default(),
+                        data: iter::once((idx, entity_json)).collect(),
+                    },
+                }],
             });
         }
     }
@@ -212,5 +223,41 @@ impl StateGraph {
     pub fn query_team_unique<F, T>(&self, id: Uuid, accessor: F) -> T
         where F: Fn(&entity::Team) -> T, T: Debug + Eq {
         self.query_entity_unique::<entity::Team, _, _>(&(EntityType::Team, id), accessor)
+    }
+
+    pub fn debug_subtree(&self, leaf_key: &(EntityType, Uuid)) -> DebugSubtree {
+        let mut generations = Vec::new();
+        let mut edges = HashMap::new();
+        let mut data = HashMap::new();
+
+        let mut next_generation: HashSet<_> = self.roots.get(leaf_key)
+            .expect("debug_subtree supplied an invalid entity descriptor")
+            .into_iter()
+            .cloned()
+            .collect();
+
+        while !next_generation.is_empty() {
+            let mut new_next_generation = HashSet::new();
+            for &idx in &next_generation {
+                let (entity, event) = self.graph.node_weight(idx).unwrap();
+                data.insert(idx, json!({
+                    "name": entity.description(),
+                    "object": entity.to_json(),
+                }));
+                let mut child_walker = self.graph.children(idx);
+                while let Some((edge_idx, child_idx)) = child_walker.walk_next( &self.graph) {
+                    edges.entry(idx).or_insert(Vec::new()).push(child_idx);
+                    new_next_generation.insert(child_idx);
+                }
+            }
+            generations.push(next_generation);
+            next_generation = new_next_generation;
+        }
+
+        DebugSubtree {
+            generations,
+            edges,
+            data,
+        }
     }
 }

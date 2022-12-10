@@ -44,4 +44,8 @@ impl EntityRaw for <Season as PartialInformationCompare>::Raw {
 impl Entity for Season {
     fn entity_type(&self) -> &'static str { "season" }
     fn id(&self) -> Uuid { self.id }
+
+    fn description(&self) -> String {
+        format!("Season {}", self.season_number)
+    }
 }

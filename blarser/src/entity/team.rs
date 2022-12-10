@@ -110,6 +110,10 @@ impl EntityRaw for <Team as PartialInformationCompare>::Raw {
 impl Entity for Team {
     fn entity_type(&self) -> &'static str { "team" }
     fn id(&self) -> Uuid { self.id }
+
+    fn description(&self) -> String {
+        self.full_name.to_string()
+    }
 }
 
 impl Team {

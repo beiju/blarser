@@ -77,8 +77,9 @@ pub async fn ingest_event(ingest: &mut Ingest, event: AnyEvent) -> IngestResult<
             let new_events = state.apply_event(event.clone(), effect.ty, id, &effect.extrapolated)?;
             new_timed_events.extend(new_events);
             history.get_mut(&(effect.ty, id)).unwrap().versions.push(DebugHistoryVersion {
-                event_human_name: event.to_string(),
-                value: Default::default(),
+                event_human_name: format!("After applying {event}"),
+                time: event.time(),
+                value: state.debug_subtree(&(effect.ty, id)),
             });
         }
     }

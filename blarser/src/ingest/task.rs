@@ -1,9 +1,12 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex as StdMutex};
 use chrono::{DateTime, Utc};
 use diesel::{ExpressionMethods, OptionalExtension, QueryDsl, QueryResult, RunQueryDsl};
 use rocket::info;
 use core::default::Default;
+use petgraph::graph::Node;
+use petgraph::stable_graph::NodeIndex;
+use serde::Serialize;
 use tokio::sync::{oneshot, Mutex as TokioMutex};
 use uuid::Uuid;
 
@@ -103,14 +106,21 @@ impl IngestTask {
     }
 }
 
+#[derive(Serialize)]
+pub struct DebugSubtree {
+    pub generations: Vec<HashSet<NodeIndex>>,
+    pub edges: HashMap<NodeIndex, Vec<NodeIndex>>,
+    pub data: HashMap<NodeIndex, serde_json::Value>,
+}
+
 pub struct DebugHistoryVersion {
     pub event_human_name: String,
-    pub value: serde_json::Value,
+    pub time: DateTime<Utc>,
+    pub value: DebugSubtree,
 }
 
 pub struct DebugHistoryItem {
     pub entity_human_name: String,
-    pub time: DateTime<Utc>,
     pub versions: Vec<DebugHistoryVersion>,
 }
 
