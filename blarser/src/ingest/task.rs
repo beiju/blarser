@@ -1,10 +1,10 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex as StdMutex, Mutex};
+use std::sync::{Arc, Mutex as StdMutex};
 use chrono::{DateTime, Utc};
 use diesel::{ExpressionMethods, OptionalExtension, QueryDsl, QueryResult, RunQueryDsl};
 use rocket::info;
 use core::default::Default;
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, Mutex as TokioMutex};
 use uuid::Uuid;
 
 use crate::db::BlarserDbConn;
@@ -50,6 +50,7 @@ impl Default for IngestTaskHolder {
 pub struct IngestTask {
     ingest_id: i32,
     pending_approvals: Arc<StdMutex<HashMap<i32, oneshot::Sender<bool>>>>,
+    pub debug_history: GraphDebugHistorySync,
 }
 
 impl IngestTask {
@@ -82,12 +83,14 @@ impl IngestTask {
 
         let approvals = Arc::new(StdMutex::new(HashMap::new()));
         let ingest = Ingest::new(ingest_id, conn);
+        let debug_history = ingest.debug_history.clone();
 
         tokio::spawn(run_ingest(ingest, start_time_parsed));
 
         IngestTask {
             ingest_id,
             pending_approvals: approvals,
+            debug_history,
         }
     }
 
@@ -100,11 +103,21 @@ impl IngestTask {
     }
 }
 
+pub struct DebugHistoryItem {
+    pub entity_human_name: String,
+    pub time: DateTime<Utc>,
+    pub value:  serde_json::Value,
+}
+
+pub type GraphDebugHistory = HashMap<(EntityType, Uuid), DebugHistoryItem>;
+pub type GraphDebugHistorySync = Arc<TokioMutex<GraphDebugHistory>>;
+
 pub struct Ingest {
     pub ingest_id: i32,
     pub db: BlarserDbConn,
     pub pending_approvals: Arc<StdMutex<HashMap<i32, oneshot::Sender<bool>>>>,
     pub state: Arc<StdMutex<StateGraph>>,
+    pub debug_history: GraphDebugHistorySync,
 }
 
 impl Ingest {
@@ -112,8 +125,9 @@ impl Ingest {
         Self {
             ingest_id,
             db,
-            pending_approvals: Arc::new(Mutex::new(Default::default())),
-            state: Arc::new(Mutex::new(StateGraph::new()))
+            pending_approvals: Arc::new(StdMutex::new(Default::default())),
+            state: Arc::new(StdMutex::new(StateGraph::new())),
+            debug_history: Arc::new(TokioMutex::new(Default::default())),
         }
     }
 

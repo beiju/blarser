@@ -20,7 +20,7 @@ use diesel::internal::operators_macro::FieldAliasMapper;
 use futures::{pin_mut, StreamExt};
 use log::info;
 
-use crate::ingest::task::Ingest;
+pub use crate::ingest::task::{Ingest, GraphDebugHistorySync, GraphDebugHistory};
 use crate::ingest::fed::{EventStreamItem, get_fed_event_stream, get_timed_event_list, ingest_event};
 use crate::ingest::chron::{chron_updates, ingest_observation, load_initial_state};
 use crate::events::Event;
@@ -116,12 +116,12 @@ pub async fn run_ingest(mut ingest: Ingest, start_time: DateTime<Utc>) {
                     .expect("This stream should never terminate")
                     .into_event()
                     .expect("If we got here, the source should not be empty");
-                ingest_event(&mut ingest, event).unwrap()
+                ingest_event(&mut ingest, event).await.unwrap()
             }
             Source::Timed => {
                 let event = timed_events.pop()
                     .expect("If we got here, the source should not be empty").0;
-                ingest_event(&mut ingest, event).unwrap()
+                ingest_event(&mut ingest, event).await.unwrap()
             }
             Source::Observation => {
                 let observation = observations.next().await

@@ -79,14 +79,22 @@ impl StateGraph {
         }
     }
 
-    pub fn apply_event(&mut self, event: Arc<AnyEvent>, ty: EntityType, id: Uuid, extrapolated: &AnyExtrapolated) -> IngestResult<Vec<AnyEvent>> {
+    pub fn apply_event(&mut self, event: Arc<AnyEvent>, ty: EntityType, id: Uuid, extrapolated: &AnyExtrapolated) -> IngestResult<(String, Vec<AnyEvent>)> {
         let entity_indices = self.leafs.get(&(ty, id))
             .ok_or_else(|| IngestError::EntityDoesNotExist { ty, id })?
             .clone();
 
         info!("Applying {event} to {ty} {id} with {extrapolated:?}");
+        let mut desc = None;
         let new_leafs = entity_indices.into_iter()
             .map(|entity_idx| {
+                let (entity, _) = self.graph.node_weight(entity_idx).unwrap();
+                let new_desc = entity.to_string();
+                if let Some(desc) = &desc {
+                    assert_eq!(desc, &new_desc);
+                } else {
+                    desc = Some(new_desc)
+                }
                 self.apply_event_to_entity(event.clone(), entity_idx, extrapolated)
             })
             .collect();
@@ -95,7 +103,7 @@ impl StateGraph {
         assert!(old_leafs.is_some(),
                 "This insert call should only ever replace existing leafs");
 
-        Ok(Vec::new()) // TODO
+        Ok((desc.expect("Expected at least one leaf"), Vec::new())) // TODO
     }
 
     fn apply_event_to_entity(&mut self, event: Arc<AnyEvent>, entity_idx: NodeIndex, extrapolated: &AnyExtrapolated) -> NodeIndex {

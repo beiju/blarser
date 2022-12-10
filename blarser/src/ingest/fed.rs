@@ -5,12 +5,13 @@ use chrono::{DateTime, Utc};
 use futures::{Stream, stream};
 use fed::{FedEvent, FedEventData};
 use log::{info, log};
+use serde_json::json;
 use crate::entity::Base;
 
 use crate::events;
 use crate::events::{Effect, AnyEvent, Event, GameUpdate};
 use crate::ingest::error::IngestResult;
-use crate::ingest::task::Ingest;
+use crate::ingest::task::{DebugHistoryItem, Ingest};
 
 pub struct EventStreamItem {
     last_update_time: DateTime<Utc>,
@@ -64,7 +65,8 @@ pub async fn get_timed_event_list(ingest: &mut Ingest, start_time: DateTime<Utc>
 }
 
 
-pub fn ingest_event(ingest: &mut Ingest, event: AnyEvent) -> IngestResult<Vec<AnyEvent>> {
+pub async fn ingest_event(ingest: &mut Ingest, event: AnyEvent) -> IngestResult<Vec<AnyEvent>> {
+    let mut history = ingest.debug_history.lock().await;
     let event = Arc::new(event);
     let mut state = ingest.state.lock().unwrap();
     info!("Ingesting event {event}");
@@ -72,9 +74,13 @@ pub fn ingest_event(ingest: &mut Ingest, event: AnyEvent) -> IngestResult<Vec<An
     let mut new_timed_events = Vec::new();
     for effect in effects {
         for id in state.ids_for(&effect) {
-            new_timed_events.extend(
-                state.apply_event(event.clone(), effect.ty, id, &effect.extrapolated)?
-            );
+            let (human_name, new_events) = state.apply_event(event.clone(), effect.ty, id, &effect.extrapolated)?;
+            new_timed_events.extend(new_events);
+            history.insert((effect.ty, id), DebugHistoryItem {
+                entity_human_name: human_name,
+                time: event.time(),
+                value: json!({}),
+            });
         }
     }
 

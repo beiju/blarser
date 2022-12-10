@@ -1,6 +1,6 @@
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
-use std::fmt::{Display, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::iter;
 use std::pin::Pin;
 use chrono::{DateTime, SecondsFormat, Utc};
@@ -212,18 +212,30 @@ pub fn ingest_observation(ingest: &mut Ingest, obs: Observation) -> Vec<AnyEvent
             dbg!(&version);
             dbg!(&event);
 
-            match version {
-                AnyEntity::Sim(e) => { ingest_for_version::<entity::Sim>(&mut state, version_idx, e, &obs) }
-                AnyEntity::Player(e) => { ingest_for_version::<entity::Player>(&mut state, version_idx, e, &obs) }
-                AnyEntity::Team(e) => { ingest_for_version::<entity::Team>(&mut state, version_idx, e, &obs) }
-                AnyEntity::Game(e) => { ingest_for_version::<entity::Game>(&mut state, version_idx, e, &obs) }
-                AnyEntity::Standings(e) => { ingest_for_version::<entity::Standings>(&mut state, version_idx, e, &obs) }
-                AnyEntity::Season(e) => { ingest_for_version::<entity::Season>(&mut state, version_idx, e, &obs) }
+            // Round trip through the version enum to please the borrow checker
+            let entity_type = match version {
+                AnyEntity::Sim(_) => { EntityType::Sim }
+                AnyEntity::Player(_) => { EntityType::Player }
+                AnyEntity::Team(_) => { EntityType::Team }
+                AnyEntity::Game(_) => { EntityType::Game }
+                AnyEntity::Standings(_) => { EntityType::Standings }
+                AnyEntity::Season(_) => { EntityType::Season }
+            };
+
+            match entity_type {
+                EntityType::Sim => { ingest_for_version::<entity::Sim>(&mut state, version_idx, &obs) }
+                EntityType::Player => { ingest_for_version::<entity::Player>(&mut state, version_idx, &obs) }
+                EntityType::Team => { ingest_for_version::<entity::Team>(&mut state, version_idx, &obs) }
+                EntityType::Game => { ingest_for_version::<entity::Game>(&mut state, version_idx, &obs) }
+                EntityType::Standings => { ingest_for_version::<entity::Standings>(&mut state, version_idx, &obs) }
+                EntityType::Season => { ingest_for_version::<entity::Season>(&mut state, version_idx, &obs) }
             }
         })
         .partition_result();
 
     assert!(!successes.is_empty(), "TODO Report failures");
+
+    todo!()
 }
 
 struct Strand {
@@ -249,8 +261,17 @@ fn backwards_pass<EntityT>(state: &mut StateGraph, entity_idx: NodeIndex, mut cu
     todo!()
 }
 
-fn ingest_for_version<EntityT>(state: &mut StateGraph, entity_idx: NodeIndex, entity: &EntityT, obs: &Observation) -> Result<Strand, Vec<Conflict>>
-    where EntityT: Entity + PartialInformationCompare {
+fn ingest_for_version<EntityT>(state: &mut StateGraph, entity_idx: NodeIndex, obs: &Observation) -> Result<Strand, Vec<Conflict>>
+    // Disgustang
+    where EntityT: Entity + PartialInformationCompare, for<'a> &'a AnyEntity: TryInto<&'a EntityT>,
+          for<'a> <&'a AnyEntity as TryInto<&'a EntityT>>::Error: Debug {
+
+    let (entity, _) = state.version(entity_idx)
+        .expect("Expected node index supplied to ingest_for_version to be valid");
+
+    let entity: &EntityT = entity.try_into()
+        .expect("This coercion should always succeed");
+
     let mut new_entity = entity.clone();
     let raw: EntityT::Raw = serde_json::from_value(obs.entity_json.clone())
         .expect("TODO: use Result to report this error");
@@ -259,7 +280,7 @@ fn ingest_for_version<EntityT>(state: &mut StateGraph, entity_idx: NodeIndex, en
         return Err(conflicts);
     }
 
-    let backwards = if new_entity != entity {
+    let backwards = if &new_entity != entity {
         backwards_pass(state, entity_idx, new_entity)
     } else {
         Vec::new()
