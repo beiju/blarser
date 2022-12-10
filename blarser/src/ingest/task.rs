@@ -107,10 +107,17 @@ impl IngestTask {
 }
 
 #[derive(Serialize)]
+pub struct DebugSubtreeNode {
+    pub is_ambiguous: bool,
+    pub is_observed: bool,
+    pub json: serde_json::Value,
+}
+
+#[derive(Serialize)]
 pub struct DebugSubtree {
     pub generations: Vec<HashSet<NodeIndex>>,
     pub edges: HashMap<NodeIndex, Vec<NodeIndex>>,
-    pub data: HashMap<NodeIndex, serde_json::Value>,
+    pub data: HashMap<NodeIndex, DebugSubtreeNode>,
 }
 
 pub struct DebugHistoryVersion {

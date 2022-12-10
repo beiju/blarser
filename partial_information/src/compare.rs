@@ -42,6 +42,7 @@ pub trait PartialInformationCompare: Sized + Debug {
 
     fn diff<'d>(&'d self, observed: &'d Self::Raw, time: DateTime<Utc>) -> Self::Diff<'d>;
     fn observe(&mut self, observed: &Self::Raw) -> Vec<Conflict>;
+    fn is_ambiguous(&self) -> bool;
 
     fn from_raw(raw: Self::Raw) -> Self;
     fn raw_approximation(self) -> Self::Raw;
@@ -115,6 +116,10 @@ impl<K, V> PartialInformationCompare for HashMap<K, V>
         conflicts
     }
 
+    fn is_ambiguous(&self) -> bool {
+        self.iter().any(|(_, v)| v.is_ambiguous())
+    }
+
     fn from_raw(raw: Self::Raw) -> Self {
         raw.into_iter()
             .map(|(key, raw_value)| (key, V::from_raw(raw_value)))
@@ -171,6 +176,10 @@ impl<T> PartialInformationCompare for Option<T>
             }
             (Some(a), Some(b)) => a.observe(b)
         }
+    }
+
+    fn is_ambiguous(&self) -> bool {
+        self.as_ref().map_or(false, |v| v.is_ambiguous())
     }
 
     fn from_raw(raw: Self::Raw) -> Self {
@@ -251,6 +260,10 @@ impl<ItemT> PartialInformationCompare for Vec<ItemT>
         conflicts
     }
 
+    fn is_ambiguous(&self) -> bool {
+        self.iter().any(|v| v.is_ambiguous())
+    }
+
     fn from_raw(raw: Self::Raw) -> Self {
         raw.into_iter()
             .map(|v| ItemT::from_raw(v))
@@ -312,6 +325,7 @@ macro_rules! trivial_compare {
 
             fn from_raw(raw: Self::Raw) -> Self { raw }
             fn raw_approximation(self) -> Self::Raw { self }
+            fn is_ambiguous(&self) -> bool { false }
         })+
     }
 }

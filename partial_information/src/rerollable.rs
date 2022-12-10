@@ -70,6 +70,10 @@ impl PartialInformationCompare for Rerollable {
         }
     }
 
+    fn is_ambiguous(&self) -> bool {
+        self.range.is_some()
+    }
+
     fn from_raw(raw: Self::Raw) -> Self {
         Self { raw, range: None }
     }

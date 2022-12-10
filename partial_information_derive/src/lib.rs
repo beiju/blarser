@@ -153,6 +153,13 @@ fn impl_partial_information_compare(ast: DeriveInput) -> Result<TokenStream2> {
                 }
             });
 
+        let accessors = fields.named.iter()
+            .map(|field| {
+                let field_name = field.ident.as_ref().expect("Unreachable");
+                quote! { self.#field_name }
+            });
+
+
         quote! {
             impl ::partial_information::PartialInformationCompare for #name {
                 type Raw = #raw_name;
@@ -170,6 +177,10 @@ fn impl_partial_information_compare(ast: DeriveInput) -> Result<TokenStream2> {
                     #(#observe_method_items)*
 
                     conflicts
+                }
+
+                fn is_ambiguous(&self) -> bool {
+                    false #(|| #accessors.is_ambiguous())*
                 }
 
                 fn from_raw(raw: Self::Raw) -> Self {

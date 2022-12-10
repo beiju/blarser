@@ -61,6 +61,13 @@ impl<T> PartialInformationCompare for MaybeKnown<T>
         }
     }
 
+    fn is_ambiguous(&self) -> bool {
+        match self {
+            MaybeKnown::Unknown => { true }
+            MaybeKnown::Known(_) => { false }
+        }
+    }
+
     fn from_raw(raw: Self::Raw) -> Self {
         MaybeKnown::Known(T::from_raw(raw))
     }

@@ -63,6 +63,10 @@ impl<T> PartialInformationCompare for Spurious<T>
         }
     }
 
+    fn is_ambiguous(&self) -> bool {
+        self.0.is_ambiguous()
+    }
+
     fn from_raw(raw: Self::Raw) -> Self {
         Self(T::from_raw(raw))
     }

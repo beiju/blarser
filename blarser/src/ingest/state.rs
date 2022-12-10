@@ -17,7 +17,7 @@ use crate::entity::{self, AnyEntity, Entity};
 use crate::events::{Effect, AnyEvent, EarlseasonStart, Event, AnyExtrapolated, Start};
 use crate::ingest::error::{IngestError, IngestResult};
 use crate::ingest::{GraphDebugHistory, Observation};
-use crate::ingest::task::{DebugHistoryItem, DebugHistoryVersion, DebugSubtree};
+use crate::ingest::task::{DebugHistoryItem, DebugHistoryVersion, DebugSubtree, DebugSubtreeNode};
 use crate::schema::events::star;
 use crate::state::EntityType;
 
@@ -62,7 +62,11 @@ impl StateGraph {
                     value: DebugSubtree {
                         generations: vec![iter::once(idx).collect()],
                         edges: Default::default(),
-                        data: iter::once((idx, entity_json)).collect(),
+                        data: iter::once((idx, DebugSubtreeNode {
+                            is_ambiguous: false, // can't be ambiguous at start
+                            is_observed: true, // by definition
+                            json: entity_json
+                        })).collect(),
                     },
                 }],
             });
@@ -240,10 +244,14 @@ impl StateGraph {
             let mut new_next_generation = HashSet::new();
             for &idx in &next_generation {
                 let (entity, event) = self.graph.node_weight(idx).unwrap();
-                data.insert(idx, json!({
-                    "name": entity.description(),
-                    "object": entity.to_json(),
-                }));
+                data.insert(idx, DebugSubtreeNode {
+                    is_ambiguous: entity.is_ambiguous(),
+                    is_observed: false,
+                    json: json!({
+                        "name": entity.description(),
+                        "object": entity.to_json(),
+                    })
+                });
                 let mut child_walker = self.graph.children(idx);
                 while let Some((edge_idx, child_idx)) = child_walker.walk_next( &self.graph) {
                     edges.entry(idx).or_insert(Vec::new()).push(child_idx);

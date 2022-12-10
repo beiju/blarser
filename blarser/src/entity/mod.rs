@@ -135,6 +135,10 @@ impl AnyEntity {
         impl_match!(&self, e => { serde_json::to_value(e).unwrap() })
     }
 
+    pub fn is_ambiguous(&self) -> bool {
+        impl_match!(&self, e => { e.is_ambiguous() })
+    }
+
     impl_as_ref!(Sim, AnyEntity::Sim, as_sim, as_sim_mut);
     impl_as_ref!(Game, AnyEntity::Game, as_game, as_game_mut);
     impl_as_ref!(Team, AnyEntity::Team, as_team, as_team_mut);
