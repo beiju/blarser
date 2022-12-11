@@ -6,6 +6,7 @@ use partial_information::{PartialInformationCompare, DatetimeWithResettingMs};
 use partial_information_derive::PartialInformationCompare;
 
 use crate::entity::{Entity, EntityRaw};
+use crate::state::EntityType;
 // use crate::events::{AnyEvent, EarlseasonStart};
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, PartialInformationCompare)]
@@ -72,7 +73,7 @@ impl EntityRaw for <Sim as PartialInformationCompare>::Raw {
 }
 
 impl Entity for Sim {
-    fn entity_type(&self) -> &'static str { "sim" }
+    fn entity_type(&self) -> EntityType { EntityType::Sim }
     fn id(&self) -> Uuid { Uuid::nil() }
 
     fn description(&self) -> String {

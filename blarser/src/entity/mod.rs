@@ -29,7 +29,7 @@ use crate::state::EntityType;
 
 #[enum_dispatch]
 pub trait Entity: Serialize + for<'de> Deserialize<'de> + PartialEq + Clone + Display {
-    fn entity_type(&self) -> &'static str;
+    fn entity_type(&self) -> EntityType;
     fn id(&self) -> Uuid;
 
     fn description(&self) -> String;
@@ -79,7 +79,7 @@ impl Display for AnyEntity {
 }
 
 impl Entity for AnyEntity {
-    fn entity_type(&self) -> &'static str {
+    fn entity_type(&self) -> EntityType {
         impl_match!(&self, e => { e.entity_type() })
     }
 

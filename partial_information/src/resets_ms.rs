@@ -86,7 +86,7 @@ impl PartialInformationCompare for DatetimeWithResettingMs {
     }
 
     fn is_ambiguous(&self) -> bool {
-        self.ms_known
+        !self.ms_known
     }
 
     fn from_raw(raw: Self::Raw) -> Self {

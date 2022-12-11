@@ -7,6 +7,7 @@ use partial_information::PartialInformationCompare;
 use partial_information_derive::PartialInformationCompare;
 
 use crate::entity::{AnyEntity, Entity, EntityRaw, WrongEntityError};
+use crate::state::EntityType;
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]
@@ -41,7 +42,7 @@ impl EntityRaw for <Standings as PartialInformationCompare>::Raw {
 }
 
 impl Entity for Standings {
-    fn entity_type(&self) -> &'static str { "standings" }
+    fn entity_type(&self) -> EntityType { EntityType::Standings }
     fn id(&self) -> Uuid { self.id }
 
     fn description(&self) -> String {

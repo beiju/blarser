@@ -1,6 +1,7 @@
 use std::fmt::{Debug, Display, Formatter};
 use std::iter;
 use std::pin::Pin;
+use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use futures::{stream, Stream, StreamExt};
 use itertools::Itertools;
@@ -13,7 +14,7 @@ use petgraph::stable_graph::NodeIndex;
 use petgraph::visit::Walker;
 
 use crate::api::chronicler;
-use crate::ingest::task::{DebugHistoryVersion, Ingest};
+use crate::ingest::task::{DebugHistoryVersion, DebugTree, Ingest};
 use crate::entity::{self, AnyEntity, Entity, EntityParseError, EntityRaw};
 use crate::events::{AnyEvent, Event};
 use crate::ingest::GraphDebugHistory;
@@ -186,7 +187,7 @@ pub fn ingest_observation(ingest: &mut Ingest, obs: Observation, debug_history: 
     debug_history.get_mut(&(obs.entity_type, obs.entity_id)).unwrap().versions.push(DebugHistoryVersion {
         event_human_name: format!("Start of ingest at {}", obs.perceived_at),
         time: obs.perceived_at,
-        value: debug_tree,
+        value: debug_tree.clone(),
     });
 
     let (successes, _failures): (Vec<_>, Vec<_>) = versions.into_iter()
@@ -209,19 +210,19 @@ pub fn ingest_observation(ingest: &mut Ingest, obs: Observation, debug_history: 
             };
 
             match entity_type {
-                EntityType::Sim => { ingest_for_version::<entity::Sim>(graph, version_idx, &obs, debug_history) }
-                EntityType::Player => { ingest_for_version::<entity::Player>(graph, version_idx, &obs, debug_history) }
-                EntityType::Team => { ingest_for_version::<entity::Team>(graph, version_idx, &obs, debug_history) }
-                EntityType::Game => { ingest_for_version::<entity::Game>(graph, version_idx, &obs, debug_history) }
-                EntityType::Standings => { ingest_for_version::<entity::Standings>(graph, version_idx, &obs, debug_history) }
-                EntityType::Season => { ingest_for_version::<entity::Season>(graph, version_idx, &obs, debug_history) }
+                EntityType::Sim => { ingest_for_version::<entity::Sim>(graph, version_idx, &obs, debug_history, debug_tree.clone(), obs.perceived_at) }
+                EntityType::Player => { ingest_for_version::<entity::Player>(graph, version_idx, &obs, debug_history, debug_tree.clone(), obs.perceived_at) }
+                EntityType::Team => { ingest_for_version::<entity::Team>(graph, version_idx, &obs, debug_history, debug_tree.clone(), obs.perceived_at) }
+                EntityType::Game => { ingest_for_version::<entity::Game>(graph, version_idx, &obs, debug_history, debug_tree.clone(), obs.perceived_at) }
+                EntityType::Standings => { ingest_for_version::<entity::Standings>(graph, version_idx, &obs, debug_history, debug_tree.clone(), obs.perceived_at) }
+                EntityType::Season => { ingest_for_version::<entity::Season>(graph, version_idx, &obs, debug_history, debug_tree.clone(), obs.clone().perceived_at) }
             }
         })
         .partition_result();
 
     assert!(!successes.is_empty(), "TODO Report failures");
 
-    todo!()
+    Vec::new() // TODO Generate new timed events
 }
 
 struct Strand {
@@ -242,28 +243,77 @@ impl Strand {
     }
 }
 
-fn backwards_pass(graph: &mut EntityStateGraph, event: &AnyEvent, entity_idx: NodeIndex, modified_child: &AnyEntity) -> Vec<AnyEntity> {
-    let mut parent_versions = Vec::new();
-    let mut parent_walker = graph.graph.parents(entity_idx);
+fn ingest_changed_child(
+    graph: &mut EntityStateGraph,
+    event: Arc<AnyEvent>,
+    existing_version_idx: NodeIndex,
+    newly_added_version_idx: NodeIndex,
+    debug_history: &mut GraphDebugHistory,
+    debug_tree: &DebugTree,
+    debug_time: DateTime<Utc>,
+) {
+    // Gather data for debug here, because lifetimes
+    let (modified_child, _) = graph.get_version(newly_added_version_idx)
+        .expect("Come on I literally just added this node");
+
+    let history_key = (modified_child.entity_type(), modified_child.id());
+    let child_desc = modified_child.to_string();
+
+    let mut all_parents_had_conflicts = true; // starts as vacuous truth
+    let mut version_conflicts = Vec::new();
+    let mut parent_walker = graph.graph.parents(existing_version_idx);
     while let Some((edge_idx, parent_idx)) = parent_walker.walk_next(&graph.graph) {
-        let (parent, parent_event) = graph.graph.node_weight(parent_idx)
+        let mut extrapolated = graph.graph.edge_weight(edge_idx)
+            .expect("This should always be a valid edge index")
+            .clone();
+
+        let new_edge_idx = graph.add_edge(parent_idx, newly_added_version_idx, extrapolated.clone());
+        debug_history.get_mut(&history_key)
+            .expect("This entity should already be in debug_history")
+            .versions
+            .push(DebugHistoryVersion {
+                event_human_name: format!("After adding parent {parent_idx:?} for {child_desc}"),
+                time: debug_time,
+                value: graph.get_debug_tree(),
+            });
+
+        let (parent, parent_event) = graph.get_version(parent_idx)
             .expect("This should always be a valid node index");
-        let extrapolated = graph.graph.edge_weight(edge_idx)
-            .expect("This should always be a valid edge index");
         let mut new_parent = parent.clone();
-        let mut new_extrapolated = extrapolated.clone();
-        let conflicts = event.backward(modified_child, &mut new_extrapolated, &mut new_parent);
+        let parent_event = parent_event.clone();
+        let (modified_child, _) = graph.get_version(newly_added_version_idx)
+            .expect("Come on I literally just added this node");
+        let conflicts = event.backward(modified_child, &mut extrapolated, &mut new_parent);
         if !conflicts.is_empty() {
-            todo!("Report conflicts")
+            version_conflicts.push(conflicts);
+        } else {
+            all_parents_had_conflicts = false;
+            if parent != &new_parent {
+                // Then a change was made and we need to save it to the graph and then recurse
+                let new_parent_idx = graph.add_child_disconnected(new_parent.into(), event.clone());
+                // Re-target the child-to-parent link we just added to point to the new parent
+                graph.remove_edge(new_edge_idx);
+                graph.add_edge(new_parent_idx, newly_added_version_idx, extrapolated);
+                // Recurse
+                ingest_changed_child(graph, parent_event, parent_idx, new_parent_idx, debug_history, debug_tree, debug_time);
+            }
         }
-        parent_versions.push(parent);
-        // TODO: Recursive call with event:=parent_event, entity_idx:=parent_idx, modified_child:=new_parent
     }
 
-    todo!()
+    if all_parents_had_conflicts {
+        // oh no!
+        panic!("All parents had conflicts: \n{version_conflicts:?}");
+    }
 }
 
-fn ingest_for_version<EntityT>(graph: &mut EntityStateGraph, entity_idx: NodeIndex, obs: &Observation, debug_history: &mut GraphDebugHistory) -> Result<Strand, Vec<Conflict>>
+fn ingest_for_version<EntityT>(
+    graph: &mut EntityStateGraph,
+    entity_idx: NodeIndex,
+    obs: &Observation,
+    debug_history: &mut GraphDebugHistory,
+    debug_tree: DebugTree,
+    debug_time: DateTime<Utc>
+) -> Result<(), Vec<Conflict>>
 // Disgustang
     where EntityT: Entity + PartialInformationCompare + Into<AnyEntity>,
           for<'a> &'a AnyEntity: TryInto<&'a EntityT>,
@@ -284,18 +334,18 @@ fn ingest_for_version<EntityT>(graph: &mut EntityStateGraph, entity_idx: NodeInd
     }
 
     let entity_was_changed = &new_entity != entity;
-    let new_entity_as_any: AnyEntity = new_entity.into();
-    let backwards = if entity_was_changed {
-        backwards_pass(graph, &event, entity_idx, &new_entity_as_any)
-    } else {
-        Vec::new()
-    };
 
-    Ok(Strand {
-        original: new_entity_as_any,
-        backwards,
-        forwards: todo!(),
-    })
+    if entity_was_changed {
+        // Enter the item in the graph and get a reference to it right back out again
+        let new_entity_idx = graph.add_child_disconnected(new_entity.into(), event.clone());
+        ingest_changed_child(graph, event, entity_idx, new_entity_idx, debug_history, &debug_tree, debug_time);
+    }
+
+    // todo!("Forward pass");
+
+    // todo!("Remove every element that's not part of the new tree, perhaps using some kind of mark-and-sweep-like procedure")
+
+    Ok(())
 }
 
 // fn forward_ingest<EntityRawT: EntityRaw>(state: &StateInterface, entity_raw: &EntityRawT, perceived_at: DateTime<Utc>) -> ChronIngestResult<()> {

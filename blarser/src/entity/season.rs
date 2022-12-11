@@ -6,6 +6,7 @@ use partial_information::PartialInformationCompare;
 use partial_information_derive::PartialInformationCompare;
 
 use crate::entity::{AnyEntity, Entity, EntityRaw, WrongEntityError};
+use crate::state::EntityType;
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, PartialInformationCompare)]
 #[serde(deny_unknown_fields)]
@@ -42,7 +43,7 @@ impl EntityRaw for <Season as PartialInformationCompare>::Raw {
 }
 
 impl Entity for Season {
-    fn entity_type(&self) -> &'static str { "season" }
+    fn entity_type(&self) -> EntityType { EntityType::Season }
     fn id(&self) -> Uuid { self.id }
 
     fn description(&self) -> String {

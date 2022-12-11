@@ -7,6 +7,7 @@ use partial_information::{Rerollable, PartialInformationCompare, MaybeKnown};
 use partial_information_derive::PartialInformationCompare;
 
 use crate::entity::{AnyEntity, Entity, EntityRaw, WrongEntityError};
+use crate::state::EntityType;
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, PartialInformationCompare)]
 pub struct Item {
@@ -128,7 +129,7 @@ impl EntityRaw for <Player as PartialInformationCompare>::Raw {
 }
 
 impl Entity for Player {
-    fn entity_type(&self) -> &'static str { "player" }
+    fn entity_type(&self) -> EntityType { EntityType::Player }
     fn id(&self) -> Uuid { self.id }
 
     fn description(&self) -> String {

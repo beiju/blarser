@@ -8,6 +8,7 @@ use partial_information::{PartialInformationCompare, MaybeKnown};
 use partial_information_derive::PartialInformationCompare;
 
 use crate::entity::{AnyEntity, Base, Entity, EntityRaw, RunnerAdvancement, WrongEntityError};
+use crate::state::EntityType;
 
 // This only existed in Short Circuits
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, PartialInformationCompare)]
@@ -177,7 +178,7 @@ impl Display for Game {
 }
 
 impl Entity for Game {
-    fn entity_type(&self) -> &'static str { "game" }
+    fn entity_type(&self) -> EntityType { EntityType::Game }
     fn id(&self) -> Uuid { self.id }
 
     fn description(&self) -> String {

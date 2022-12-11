@@ -5,7 +5,7 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use itertools::Itertools;
 use log::{error, info};
-use daggy::stable_dag::{StableDag, NodeIndex};
+use daggy::stable_dag::{StableDag, NodeIndex, EdgeIndex};
 use petgraph::visit::Walker;
 use diesel::PgJsonbExpressionMethods;
 use petgraph::data::DataMap;
@@ -65,6 +65,19 @@ impl EntityStateGraph {
         let child_idx = self.graph.add_node((new_entity, event));
         self.graph.add_edge(parent_idx, child_idx, extrapolated.clone()).unwrap();
         child_idx
+    }
+
+    pub fn add_child_disconnected(&mut self, new_entity: AnyEntity, event: Arc<AnyEvent>) -> NodeIndex {
+        self.graph.add_node((new_entity, event))
+    }
+
+    pub fn add_edge(&mut self, from: NodeIndex, to: NodeIndex, weight: AnyExtrapolated) -> EdgeIndex {
+        self.graph.add_edge(from, to, weight)
+            .expect("Adding edge would cycle")
+    }
+
+    pub fn remove_edge(&mut self, idx: EdgeIndex) -> Option<StateGraphEdge> {
+        self.graph.remove_edge(idx)
     }
 
     pub fn get_versions_between(&self, earliest: DateTime<Utc>, latest: DateTime<Utc>) -> HashSet<NodeIndex> {
@@ -154,7 +167,7 @@ impl EntityStateGraph {
         while !next_generation.is_empty() {
             let mut new_next_generation = HashSet::new();
             for &idx in &next_generation {
-                let (entity, event) = self.graph.node_weight(idx).unwrap();
+                let (entity, _) = self.graph.node_weight(idx).unwrap();
                 data.insert(idx, DebugTreeNode {
                     description: entity.description(),
                     is_scheduled_for_update: false,

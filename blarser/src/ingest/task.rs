@@ -106,7 +106,7 @@ impl IngestTask {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct DebugTreeNode {
     pub description: String,
     pub is_scheduled_for_update: bool,
@@ -115,7 +115,7 @@ pub struct DebugTreeNode {
     pub json: serde_json::Value,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct DebugTree {
     pub generations: Vec<HashSet<NodeIndex>>,
     pub edges: HashMap<NodeIndex, Vec<NodeIndex>>,
