@@ -4,9 +4,10 @@ use chrono::{DateTime, Utc};
 use diesel::QueryResult;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+use partial_information::Conflict;
 
 use crate::api::EventuallyEvent;
-use crate::entity::AnyEntity;
+use crate::entity::{AnyEntity, Entity};
 use crate::events::{Effect, AnyEvent, Event, ord_by_time, Extrapolated, AnyExtrapolated};
 use crate::events::game_update::GameUpdate;
 use crate::ingest::StateGraph;
@@ -45,7 +46,7 @@ impl Event for StormWarning {
     //         other => panic!("StormWarning event does not apply to {}", other.name())        }
     // }
 
-    fn reverse(&self, _entity: AnyEntity, _aux: serde_json::Value) -> AnyEntity {
+    fn backward(&self, successor: &AnyEntity, extrapolated: &mut AnyExtrapolated, entity: &mut AnyEntity) -> Vec<Conflict> {
         todo!()
     }
 }

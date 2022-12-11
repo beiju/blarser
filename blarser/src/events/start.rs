@@ -2,8 +2,9 @@ use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use partial_information::Conflict;
 
-use crate::entity::AnyEntity;
+use crate::entity::{AnyEntity, Entity};
 use crate::events::{AnyExtrapolated, Effect, Event, Extrapolated, ord_by_time};
 use crate::ingest::StateGraph;
 
@@ -37,7 +38,7 @@ impl Event for Start {
         panic!("Cannot re-apply a Start event");
     }
 
-    fn reverse(&self, _: AnyEntity, _: serde_json::Value) -> AnyEntity {
+    fn backward(&self, successor: &AnyEntity, extrapolated: &mut AnyExtrapolated, entity: &mut AnyEntity) -> Vec<Conflict> {
         todo!()
     }
 }

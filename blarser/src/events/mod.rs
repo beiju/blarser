@@ -38,8 +38,9 @@ use std::fmt::{Display, Formatter};
 use chrono::{DateTime, Utc};
 use enum_dispatch::enum_dispatch;
 use serde::{Deserialize, Serialize};
-use crate::entity::AnyEntity;
+use crate::entity::{AnyEntity, Entity};
 use crate::ingest::StateGraph;
+use partial_information::Conflict;
 
 #[enum_dispatch]
 pub trait Event: Serialize + for<'de> Deserialize<'de> + Ord + Display {
@@ -55,7 +56,7 @@ pub trait Event: Serialize + for<'de> Deserialize<'de> + Ord + Display {
     fn effects(&self, state: &StateGraph) -> Vec<Effect>;
 
     fn forward(&self, entity: &AnyEntity, extrapolated: &AnyExtrapolated) -> AnyEntity;
-    fn reverse(&self, entity: AnyEntity, aux: serde_json::Value) -> AnyEntity;
+    fn backward(&self, successor: &AnyEntity, extrapolated: &mut AnyExtrapolated, entity: &mut AnyEntity) -> Vec<Conflict>;
 }
 
 #[enum_dispatch(Event)]

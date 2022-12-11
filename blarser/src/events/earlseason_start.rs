@@ -2,7 +2,7 @@ use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use partial_information::MaybeKnown;
+use partial_information::{Conflict, DatetimeWithResettingMs, MaybeKnown};
 
 use crate::entity::{AnyEntity, Entity};
 use crate::events::{AnyExtrapolated, Effect, Event, Extrapolated, ord_by_time};
@@ -38,7 +38,8 @@ impl Event for EarlseasonStart {
         if let Some(sim) = entity.as_sim_mut() {
             if sim.phase == 1 {
                 sim.phase = 2;
-                sim.next_phase_time = sim.earlseason_date;
+                sim.gods_day_date.forget_ms();
+                sim.next_phase_time = DatetimeWithResettingMs::from_without_ms(sim.earlseason_date);
             } else {
                 panic!("Tried to apply EarlseasonStart event while not in Preseason phase")
             }
@@ -58,7 +59,7 @@ impl Event for EarlseasonStart {
         entity
     }
 
-    fn reverse(&self, _: AnyEntity, _: serde_json::Value) -> AnyEntity {
+    fn backward(&self, successor: &AnyEntity, extrapolated: &mut AnyExtrapolated, entity: &mut AnyEntity) -> Vec<Conflict> {
         todo!()
     }
 }

@@ -1,29 +1,24 @@
-use std::cmp::Reverse;
-use std::collections::BinaryHeap;
 use std::fmt::{Debug, Display, Formatter};
 use std::iter;
 use std::pin::Pin;
-use chrono::{DateTime, SecondsFormat, Utc};
-use diesel::QueryResult;
-use futures::{pin_mut, stream, Stream, StreamExt};
-use itertools::{EitherOrBoth, Itertools};
-use rocket::{info, warn};
-use serde_json::Value;
+use chrono::{DateTime, Utc};
+use futures::{stream, Stream, StreamExt};
+use itertools::Itertools;
+use rocket::info;
 use thiserror::Error;
 use partial_information::{Conflict, PartialInformationCompare};
-use fed::FedEvent;
 use futures::future::join_all;
 use futures::stream::Peekable;
 use petgraph::stable_graph::NodeIndex;
-use stream_kmerge::kmerge_by_key;
-use uuid::Uuid;
+use petgraph::visit::Walker;
 
-use crate::api::{chronicler, ChroniclerItem};
+use crate::api::chronicler;
 use crate::ingest::task::Ingest;
 use crate::entity::{self, AnyEntity, Entity, EntityParseError, EntityRaw};
-use crate::events::{self, AnyEvent};
-use crate::ingest::{self, observation::Observation, StateGraph};
-use crate::state::{EntityType, EventEffect, MergedSuccessors, NewVersion, StateInterface, Version, VersionLink};
+use crate::events::{AnyEvent, Event};
+use crate::ingest::observation::Observation;
+use crate::ingest::state::EntityStateGraph;
+use crate::state::EntityType;
 // use crate::{with_any_entity_raw, with_any_event};
 // use crate::events::Event;
 
@@ -173,40 +168,18 @@ pub type ChronIngestResult<T> = Result<T, ChronIngestError>;
 
 pub fn ingest_observation(ingest: &mut Ingest, obs: Observation) -> Vec<AnyEvent> {
     let mut state = ingest.state.lock().unwrap();
+    let mut graph = state.entity_graph_mut(obs.entity_type, obs.entity_id)
+        .expect("Tried to ingest observation for an entity that did not previously exist. \
+        This should work in the future but is not implemented yet.");
 
-    // **OUTDATED** CONCEPT:
-    // 0. Initialize a new graph
-    // 1. Get every stored version of this entity between earliest_time and latest_time
-    // 2. For each version
-    //    a. Try to apply the observation to the entity. If it fails, bail early. Otherwise, the
-    //       entity is now equal to the observation.
-    //    b. For each parent and its associated Effect:
-    //       i. Try to run the backwards pass given the two entity versions and the effect that
-    //          links them. If the application fails, bail. If it succeeds, update the Extrapolated
-    //          if necessary and then add both versions and the connecting event to a new graph. If the success also changed the parent event, get its
-    //       parent and repeat the process until an ancestor doesn't change. This is going to need
-    //       to traverse branches and I haven't thought that out fully yet.
-    //    c. Once you're done with ancestors, re-generate the descendants just using the Effects. No
-    //       need to incorporate the entities here -- they will not have any useful information.
-    //    d. Return the new subtree
-    // 3. If all placements failed, display an error to the user. Otherwise, find the tallest tree
-    //    among all the successful trees. Make each tree equally tall by plucking ancestors directly
-    //    from the state without modifying them.
-    // 4. Merge the subtrees. This involves comparing versions and merging them when they're equal,
-    //    but keeping the edges intact. (I just realized this may end up with multiple edges between
-    //    the same two nodes, which the graph library doesn't support. Uh oh.)
-    // 5. The subtrees should all converge at the same root, because it was unmodified. Graft that
-    //    root back onto the tree, in the same place it came from, replacing what was there before.
-    // 6. Profit
     info!("Ingesting observation for {} {} at {}", obs.entity_type, obs.entity_id, obs.perceived_at);
 
-    let versions = state.get_versions_between(obs.entity_type, obs.entity_id, obs.earliest_time(), obs.latest_time())
-        .expect("Asked for versions for entity that does not exist");
+    let versions = graph.get_versions_between(obs.earliest_time(), obs.latest_time());
     dbg!(&versions);
 
     let (successes, _failures): (Vec<_>, Vec<_>) = versions.into_iter()
         .map(|version_idx| {
-            let (version, event) = state.version(version_idx)
+            let (version, event) = graph.get_version(version_idx)
                 .expect("Expected node index from get_versions_between to be valid");
 
             dbg!(&version);
@@ -223,12 +196,12 @@ pub fn ingest_observation(ingest: &mut Ingest, obs: Observation) -> Vec<AnyEvent
             };
 
             match entity_type {
-                EntityType::Sim => { ingest_for_version::<entity::Sim>(&mut state, version_idx, &obs) }
-                EntityType::Player => { ingest_for_version::<entity::Player>(&mut state, version_idx, &obs) }
-                EntityType::Team => { ingest_for_version::<entity::Team>(&mut state, version_idx, &obs) }
-                EntityType::Game => { ingest_for_version::<entity::Game>(&mut state, version_idx, &obs) }
-                EntityType::Standings => { ingest_for_version::<entity::Standings>(&mut state, version_idx, &obs) }
-                EntityType::Season => { ingest_for_version::<entity::Season>(&mut state, version_idx, &obs) }
+                EntityType::Sim => { ingest_for_version::<entity::Sim>(graph, version_idx, &obs) }
+                EntityType::Player => { ingest_for_version::<entity::Player>(graph, version_idx, &obs) }
+                EntityType::Team => { ingest_for_version::<entity::Team>(graph, version_idx, &obs) }
+                EntityType::Game => { ingest_for_version::<entity::Game>(graph, version_idx, &obs) }
+                EntityType::Standings => { ingest_for_version::<entity::Standings>(graph, version_idx, &obs) }
+                EntityType::Season => { ingest_for_version::<entity::Season>(graph, version_idx, &obs) }
             }
         })
         .partition_result();
@@ -256,17 +229,32 @@ impl Strand {
     }
 }
 
-fn backwards_pass<EntityT>(state: &mut StateGraph, entity_idx: NodeIndex, mut current_entity: EntityT) -> Vec<AnyEntity>
-    where EntityT: Entity + PartialInformationCompare {
+fn backwards_pass(graph: &mut EntityStateGraph, entity_idx: NodeIndex, modified_child: &AnyEntity) -> Vec<AnyEntity> {
+    let mut parent_versions = Vec::new();
+    let mut parent_walker = graph.graph.parents(entity_idx);
+    while let Some((edge_idx, parent_idx)) = parent_walker.walk_next(&graph.graph) {
+        let (parent, event) = graph.graph.node_weight(parent_idx)
+            .expect("This should always be a valid node index");
+        let extrapolated = graph.graph.edge_weight(edge_idx)
+            .expect("This should always be a valid edge index");
+        let mut new_parent = parent.clone();
+        let mut new_extrapolated = extrapolated.clone();
+        let conflicts = event.backward(modified_child, &mut new_extrapolated, &mut new_parent);
+        if !conflicts.is_empty() {
+            todo!("Report conflicts")
+        }
+        parent_versions.push(parent);
+    }
+
     todo!()
 }
 
-fn ingest_for_version<EntityT>(state: &mut StateGraph, entity_idx: NodeIndex, obs: &Observation) -> Result<Strand, Vec<Conflict>>
-    // Disgustang
-    where EntityT: Entity + PartialInformationCompare, for<'a> &'a AnyEntity: TryInto<&'a EntityT>,
+fn ingest_for_version<EntityT>(graph: &mut EntityStateGraph, entity_idx: NodeIndex, obs: &Observation) -> Result<Strand, Vec<Conflict>>
+// Disgustang
+    where EntityT: Entity + PartialInformationCompare + Into<AnyEntity>,
+          for<'a> &'a AnyEntity: TryInto<&'a EntityT>,
           for<'a> <&'a AnyEntity as TryInto<&'a EntityT>>::Error: Debug {
-
-    let (entity, _) = state.version(entity_idx)
+    let (entity, _) = graph.get_version(entity_idx)
         .expect("Expected node index supplied to ingest_for_version to be valid");
 
     let entity: &EntityT = entity.try_into()
@@ -281,12 +269,17 @@ fn ingest_for_version<EntityT>(state: &mut StateGraph, entity_idx: NodeIndex, ob
     }
 
     let backwards = if &new_entity != entity {
-        backwards_pass(state, entity_idx, new_entity)
+        let new_entity_as_any: AnyEntity = new_entity.into();
+        backwards_pass(graph, entity_idx, &new_entity_as_any)
     } else {
         Vec::new()
     };
 
-    todo!()
+    Ok(Strand {
+        original: new_entity.into(),
+        backwards,
+        forwards: todo!(),
+    })
 }
 
 // fn forward_ingest<EntityRawT: EntityRaw>(state: &StateInterface, entity_raw: &EntityRawT, perceived_at: DateTime<Utc>) -> ChronIngestResult<()> {
