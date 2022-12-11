@@ -17,7 +17,7 @@ use crate::entity::{self, AnyEntity, Entity};
 use crate::events::{Effect, AnyEvent, EarlseasonStart, Event, AnyExtrapolated, Start};
 use crate::ingest::error::{IngestError, IngestResult};
 use crate::ingest::{GraphDebugHistory, Observation};
-use crate::ingest::task::{DebugHistoryItem, DebugHistoryVersion, DebugSubtree, DebugSubtreeNode};
+use crate::ingest::task::{DebugHistoryItem, DebugHistoryVersion, DebugTree, DebugTreeNode};
 use crate::state::EntityType;
 
 pub type StateGraphNode = (AnyEntity, Arc<AnyEvent>);
@@ -104,6 +104,80 @@ impl EntityStateGraph {
 
         outputs
     }
+
+    pub fn apply_event(&mut self, event: Arc<AnyEvent>, extrapolated: &AnyExtrapolated) -> IngestResult<Vec<AnyEvent>> {
+        let new_leafs = self.leafs.clone().into_iter()
+            .map(|entity_idx| {
+                self.apply_event_to_entity(event.clone(), entity_idx, extrapolated)
+            })
+            .collect();
+
+        self.leafs = new_leafs;
+
+        Ok(Vec::new()) // TODO
+    }
+
+    fn apply_event_to_entity(&mut self, event: Arc<AnyEvent>, entity_idx: NodeIndex, extrapolated: &AnyExtrapolated) -> NodeIndex {
+        let (entity, _) = self.get_version(entity_idx)
+            .expect("Indices in State.leafs should always be valid");
+
+        let new_entity = match event.as_ref() {
+            AnyEvent::Start(e) => { e.forward(entity, extrapolated) }
+            AnyEvent::EarlseasonStart(e) => { e.forward(entity, extrapolated) }
+            AnyEvent::LetsGo(e) => { e.forward(entity, extrapolated) }
+            AnyEvent::PlayBall(e) => { e.forward(entity, extrapolated) }
+            AnyEvent::TogglePerforming(e) => { e.forward(entity, extrapolated) }
+            AnyEvent::HalfInning(e) => { e.forward(entity, extrapolated) }
+            AnyEvent::StormWarning(e) => { e.forward(entity, extrapolated) }
+            AnyEvent::BatterUp(e) => { e.forward(entity, extrapolated) }
+            AnyEvent::Strike(e) => { e.forward(entity, extrapolated) }
+            AnyEvent::Ball(e) => { e.forward(entity, extrapolated) }
+            AnyEvent::FoulBall(e) => { e.forward(entity, extrapolated) }
+            AnyEvent::Out(e) => { e.forward(entity, extrapolated) }
+            AnyEvent::Hit(e) => { e.forward(entity, extrapolated) }
+            AnyEvent::HomeRun(e) => { e.forward(entity, extrapolated) }
+            AnyEvent::StolenBase(e) => { e.forward(entity, extrapolated) }
+        };
+
+        self.add_child_version(entity_idx, new_entity, event, extrapolated.clone())
+    }
+
+    pub fn get_debug_tree(&self) -> DebugTree {
+        let mut generations = Vec::new();
+        let mut edges = HashMap::new();
+        let mut data = HashMap::new();
+
+        let mut next_generation: HashSet<_> = self.roots.iter()
+            .cloned()
+            .collect();
+
+        while !next_generation.is_empty() {
+            let mut new_next_generation = HashSet::new();
+            for &idx in &next_generation {
+                let (entity, event) = self.graph.node_weight(idx).unwrap();
+                data.insert(idx, DebugTreeNode {
+                    description: entity.description(),
+                    is_ambiguous: entity.is_ambiguous(),
+                    is_observed: false,
+                    json: entity.to_json(),
+                });
+                let mut child_walker = self.graph.children(idx);
+                while let Some((_, child_idx)) = child_walker.walk_next(&self.graph) {
+                    edges.entry(idx).or_insert(Vec::new()).push(child_idx);
+                    new_next_generation.insert(child_idx);
+                }
+            }
+            generations.push(next_generation);
+            next_generation = new_next_generation;
+        }
+
+        DebugTree {
+            generations,
+            edges,
+            data,
+        }
+    }
+
 }
 
 #[derive(Default)]
@@ -135,25 +209,36 @@ impl StateGraph {
             // Unfortunately these assignments all have to be in a specific order that makes it
             // not particularly easy to tell what's going on. Gathering data for the debug view is
             // interleaved with meaningful work.
+            // Debug
             let entity_human_name = entity.to_string();
-            let entity_json = entity.to_json();
+            let description = entity.description();
+            let json = entity.to_json();
+
+            // Real work
             let new_graph = EntityStateGraph::new((entity, start_event.clone()));
+
+            // Debug
             let generations = vec![new_graph.roots().iter().cloned().collect()];
             let idx = *new_graph.roots().iter().exactly_one().unwrap();
+
+            // Real work
             self.graphs.insert((obs.entity_type, obs.entity_id),new_graph);
             self.ids_for_type.entry(obs.entity_type).or_default().push(obs.entity_id);
+
+             // Debug
             history.insert((obs.entity_type, obs.entity_id), DebugHistoryItem {
                 entity_human_name,
                 versions: vec![DebugHistoryVersion {
                     event_human_name: "Start".to_string(),
                     time: start_time,
-                    value: DebugSubtree {
+                    value: DebugTree {
                         generations,
                         edges: Default::default(),
-                        data: iter::once((idx, DebugSubtreeNode {
+                        data: iter::once((idx, DebugTreeNode {
+                            description,
                             is_ambiguous: false, // can't be ambiguous at start
                             is_observed: true, // by definition
-                            json: entity_json,
+                            json,
                         })).collect(),
                     },
                 }],
@@ -199,47 +284,6 @@ impl StateGraph {
         }
     }
 
-    pub fn apply_event(&mut self, event: Arc<AnyEvent>, ty: EntityType, id: Uuid, extrapolated: &AnyExtrapolated) -> IngestResult<Vec<AnyEvent>> {
-        let graph = self.entity_graph_mut(ty, id)
-            .expect("Tried to apply event to entity that does not exist");
-
-        info!("Applying {event} to {ty} {id} with {extrapolated:?}");
-        let new_leafs = graph.leafs().iter()
-            .map(move |&entity_idx| {
-                self.apply_event_to_entity(graph, event.clone(), entity_idx, extrapolated)
-            })
-            .collect();
-
-        graph.set_leafs(new_leafs);
-
-        Ok(Vec::new()) // TODO
-    }
-
-    fn apply_event_to_entity(&mut self, graph: &mut EntityStateGraph, event: Arc<AnyEvent>, entity_idx: NodeIndex, extrapolated: &AnyExtrapolated) -> NodeIndex {
-        let (entity, _) = graph.get_version(entity_idx)
-            .expect("Indices in State.leafs should always be valid");
-
-        let new_entity = match event.as_ref() {
-            AnyEvent::Start(e) => { e.forward(entity, extrapolated) }
-            AnyEvent::EarlseasonStart(e) => { e.forward(entity, extrapolated) }
-            AnyEvent::LetsGo(e) => { e.forward(entity, extrapolated) }
-            AnyEvent::PlayBall(e) => { e.forward(entity, extrapolated) }
-            AnyEvent::TogglePerforming(e) => { e.forward(entity, extrapolated) }
-            AnyEvent::HalfInning(e) => { e.forward(entity, extrapolated) }
-            AnyEvent::StormWarning(e) => { e.forward(entity, extrapolated) }
-            AnyEvent::BatterUp(e) => { e.forward(entity, extrapolated) }
-            AnyEvent::Strike(e) => { e.forward(entity, extrapolated) }
-            AnyEvent::Ball(e) => { e.forward(entity, extrapolated) }
-            AnyEvent::FoulBall(e) => { e.forward(entity, extrapolated) }
-            AnyEvent::Out(e) => { e.forward(entity, extrapolated) }
-            AnyEvent::Hit(e) => { e.forward(entity, extrapolated) }
-            AnyEvent::HomeRun(e) => { e.forward(entity, extrapolated) }
-            AnyEvent::StolenBase(e) => { e.forward(entity, extrapolated) }
-        };
-
-        graph.add_child_version(entity_idx, new_entity, event, extrapolated.clone())
-    }
-
     fn query_entity_unique<EntityT: Entity, F, T>(&self, leaf_id: &(EntityType, Uuid), accessor: F) -> T
         where F: Fn(&EntityT) -> T,
               T: Debug + Eq,
@@ -249,7 +293,7 @@ impl StateGraph {
         let graph = self.entity_graph(leaf_id.0, leaf_id.1)
             .expect("Entity not found. TODO: Make this a Result type");
         let mut result = None;
-        for leaf in graph.leafs {
+        for &leaf in &graph.leafs {
             let (entity, _) = graph.get_version(leaf)
                 .expect("Leafs should never have an invalid index");
             let entity: &EntityT = entity.try_into()
@@ -273,45 +317,5 @@ impl StateGraph {
     pub fn query_team_unique<F, T>(&self, id: Uuid, accessor: F) -> T
         where F: Fn(&entity::Team) -> T, T: Debug + Eq {
         self.query_entity_unique::<entity::Team, _, _>(&(EntityType::Team, id), accessor)
-    }
-
-    pub fn debug_subtree(&self, leaf_key: &(EntityType, Uuid)) -> DebugSubtree {
-        let mut generations = Vec::new();
-        let mut edges = HashMap::new();
-        let mut data = HashMap::new();
-
-        let mut next_generation: HashSet<_> = self.roots.get(leaf_key)
-            .expect("debug_subtree supplied an invalid entity descriptor")
-            .into_iter()
-            .cloned()
-            .collect();
-
-        while !next_generation.is_empty() {
-            let mut new_next_generation = HashSet::new();
-            for &idx in &next_generation {
-                let (entity, event) = self.graph.node_weight(idx).unwrap();
-                data.insert(idx, DebugSubtreeNode {
-                    is_ambiguous: entity.is_ambiguous(),
-                    is_observed: false,
-                    json: json!({
-                        "name": entity.description(),
-                        "object": entity.to_json(),
-                    }),
-                });
-                let mut child_walker = self.graph.children(idx);
-                while let Some((edge_idx, child_idx)) = child_walker.walk_next(&self.graph) {
-                    edges.entry(idx).or_insert(Vec::new()).push(child_idx);
-                    new_next_generation.insert(child_idx);
-                }
-            }
-            generations.push(next_generation);
-            next_generation = new_next_generation;
-        }
-
-        DebugSubtree {
-            generations,
-            edges,
-            data,
-        }
     }
 }

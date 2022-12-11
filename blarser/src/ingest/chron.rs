@@ -268,15 +268,16 @@ fn ingest_for_version<EntityT>(graph: &mut EntityStateGraph, entity_idx: NodeInd
         return Err(conflicts);
     }
 
-    let backwards = if &new_entity != entity {
-        let new_entity_as_any: AnyEntity = new_entity.into();
+    let entity_was_changed = &new_entity != entity;
+    let new_entity_as_any: AnyEntity = new_entity.into();
+    let backwards = if entity_was_changed {
         backwards_pass(graph, entity_idx, &new_entity_as_any)
     } else {
         Vec::new()
     };
 
     Ok(Strand {
-        original: new_entity.into(),
+        original: new_entity_as_any,
         backwards,
         forwards: todo!(),
     })
