@@ -13,9 +13,10 @@ use petgraph::stable_graph::NodeIndex;
 use petgraph::visit::Walker;
 
 use crate::api::chronicler;
-use crate::ingest::task::Ingest;
+use crate::ingest::task::{DebugHistoryVersion, Ingest};
 use crate::entity::{self, AnyEntity, Entity, EntityParseError, EntityRaw};
 use crate::events::{AnyEvent, Event};
+use crate::ingest::GraphDebugHistory;
 use crate::ingest::observation::Observation;
 use crate::ingest::state::EntityStateGraph;
 use crate::state::EntityType;
@@ -166,7 +167,7 @@ pub enum ChronIngestError {
 
 pub type ChronIngestResult<T> = Result<T, ChronIngestError>;
 
-pub fn ingest_observation(ingest: &mut Ingest, obs: Observation) -> Vec<AnyEvent> {
+pub fn ingest_observation(ingest: &mut Ingest, obs: Observation, debug_history: &mut GraphDebugHistory) -> Vec<AnyEvent> {
     let mut state = ingest.state.lock().unwrap();
     let mut graph = state.entity_graph_mut(obs.entity_type, obs.entity_id)
         .expect("Tried to ingest observation for an entity that did not previously exist. \
@@ -177,6 +178,17 @@ pub fn ingest_observation(ingest: &mut Ingest, obs: Observation) -> Vec<AnyEvent
     let versions = graph.get_versions_between(obs.earliest_time(), obs.latest_time());
     dbg!(&versions);
 
+    let mut debug_tree = graph.get_debug_tree();
+    for version in &versions {
+        debug_tree.data.get_mut(version).unwrap().is_scheduled_for_update = true;
+    }
+
+    debug_history.get_mut(&(obs.entity_type, obs.entity_id)).unwrap().versions.push(DebugHistoryVersion {
+        event_human_name: format!("Start of ingest at {}", obs.perceived_at),
+        time: obs.perceived_at,
+        value: debug_tree,
+    });
+
     let (successes, _failures): (Vec<_>, Vec<_>) = versions.into_iter()
         .map(|version_idx| {
             let (version, event) = graph.get_version(version_idx)
@@ -186,6 +198,7 @@ pub fn ingest_observation(ingest: &mut Ingest, obs: Observation) -> Vec<AnyEvent
             dbg!(&event);
 
             // Round trip through the version enum to please the borrow checker
+            // TODO: Is this still required after refactoring?
             let entity_type = match version {
                 AnyEntity::Sim(_) => { EntityType::Sim }
                 AnyEntity::Player(_) => { EntityType::Player }
@@ -196,12 +209,12 @@ pub fn ingest_observation(ingest: &mut Ingest, obs: Observation) -> Vec<AnyEvent
             };
 
             match entity_type {
-                EntityType::Sim => { ingest_for_version::<entity::Sim>(graph, version_idx, &obs) }
-                EntityType::Player => { ingest_for_version::<entity::Player>(graph, version_idx, &obs) }
-                EntityType::Team => { ingest_for_version::<entity::Team>(graph, version_idx, &obs) }
-                EntityType::Game => { ingest_for_version::<entity::Game>(graph, version_idx, &obs) }
-                EntityType::Standings => { ingest_for_version::<entity::Standings>(graph, version_idx, &obs) }
-                EntityType::Season => { ingest_for_version::<entity::Season>(graph, version_idx, &obs) }
+                EntityType::Sim => { ingest_for_version::<entity::Sim>(graph, version_idx, &obs, debug_history) }
+                EntityType::Player => { ingest_for_version::<entity::Player>(graph, version_idx, &obs, debug_history) }
+                EntityType::Team => { ingest_for_version::<entity::Team>(graph, version_idx, &obs, debug_history) }
+                EntityType::Game => { ingest_for_version::<entity::Game>(graph, version_idx, &obs, debug_history) }
+                EntityType::Standings => { ingest_for_version::<entity::Standings>(graph, version_idx, &obs, debug_history) }
+                EntityType::Season => { ingest_for_version::<entity::Season>(graph, version_idx, &obs, debug_history) }
             }
         })
         .partition_result();
@@ -229,11 +242,11 @@ impl Strand {
     }
 }
 
-fn backwards_pass(graph: &mut EntityStateGraph, entity_idx: NodeIndex, modified_child: &AnyEntity) -> Vec<AnyEntity> {
+fn backwards_pass(graph: &mut EntityStateGraph, event: &AnyEvent, entity_idx: NodeIndex, modified_child: &AnyEntity) -> Vec<AnyEntity> {
     let mut parent_versions = Vec::new();
     let mut parent_walker = graph.graph.parents(entity_idx);
     while let Some((edge_idx, parent_idx)) = parent_walker.walk_next(&graph.graph) {
-        let (parent, event) = graph.graph.node_weight(parent_idx)
+        let (parent, parent_event) = graph.graph.node_weight(parent_idx)
             .expect("This should always be a valid node index");
         let extrapolated = graph.graph.edge_weight(edge_idx)
             .expect("This should always be a valid edge index");
@@ -244,18 +257,20 @@ fn backwards_pass(graph: &mut EntityStateGraph, entity_idx: NodeIndex, modified_
             todo!("Report conflicts")
         }
         parent_versions.push(parent);
+        // TODO: Recursive call with event:=parent_event, entity_idx:=parent_idx, modified_child:=new_parent
     }
 
     todo!()
 }
 
-fn ingest_for_version<EntityT>(graph: &mut EntityStateGraph, entity_idx: NodeIndex, obs: &Observation) -> Result<Strand, Vec<Conflict>>
+fn ingest_for_version<EntityT>(graph: &mut EntityStateGraph, entity_idx: NodeIndex, obs: &Observation, debug_history: &mut GraphDebugHistory) -> Result<Strand, Vec<Conflict>>
 // Disgustang
     where EntityT: Entity + PartialInformationCompare + Into<AnyEntity>,
           for<'a> &'a AnyEntity: TryInto<&'a EntityT>,
           for<'a> <&'a AnyEntity as TryInto<&'a EntityT>>::Error: Debug {
-    let (entity, _) = graph.get_version(entity_idx)
+    let (entity, event) = graph.get_version(entity_idx)
         .expect("Expected node index supplied to ingest_for_version to be valid");
+    let event = event.clone();
 
     let entity: &EntityT = entity.try_into()
         .expect("This coercion should always succeed");
@@ -271,7 +286,7 @@ fn ingest_for_version<EntityT>(graph: &mut EntityStateGraph, entity_idx: NodeInd
     let entity_was_changed = &new_entity != entity;
     let new_entity_as_any: AnyEntity = new_entity.into();
     let backwards = if entity_was_changed {
-        backwards_pass(graph, entity_idx, &new_entity_as_any)
+        backwards_pass(graph, &event, entity_idx, &new_entity_as_any)
     } else {
         Vec::new()
     };

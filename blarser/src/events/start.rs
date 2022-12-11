@@ -38,8 +38,8 @@ impl Event for Start {
         panic!("Cannot re-apply a Start event");
     }
 
-    fn backward(&self, successor: &AnyEntity, extrapolated: &mut AnyExtrapolated, entity: &mut AnyEntity) -> Vec<Conflict> {
-        todo!()
+    fn backward(&self, _: &AnyEntity, _: &mut AnyExtrapolated, _: &mut AnyEntity) -> Vec<Conflict> {
+        panic!("Can't backtrack through a Start event");
     }
 }
 

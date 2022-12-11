@@ -157,6 +157,7 @@ impl EntityStateGraph {
                 let (entity, event) = self.graph.node_weight(idx).unwrap();
                 data.insert(idx, DebugTreeNode {
                     description: entity.description(),
+                    is_scheduled_for_update: false,
                     is_ambiguous: entity.is_ambiguous(),
                     is_observed: false,
                     json: entity.to_json(),
@@ -236,6 +237,7 @@ impl StateGraph {
                         edges: Default::default(),
                         data: iter::once((idx, DebugTreeNode {
                             description,
+                            is_scheduled_for_update: false,
                             is_ambiguous: false, // can't be ambiguous at start
                             is_observed: true, // by definition
                             json,

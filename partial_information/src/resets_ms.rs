@@ -15,6 +15,13 @@ impl DatetimeWithResettingMs {
     pub fn date(&self) -> DateTime<Utc> {
         self.date
     }
+    pub fn known_date(&self) -> Option<DateTime<Utc>> {
+        if self.ms_known {
+            Some(self.date)
+        } else {
+            None
+        }
+    }
 
     pub fn from_without_ms(date: DateTime<Utc>) -> Self {
         Self {

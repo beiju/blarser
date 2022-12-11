@@ -129,7 +129,9 @@ pub async fn run_ingest(mut ingest: Ingest, start_time: DateTime<Utc>) {
             Source::Observation => {
                 let observation = observations.next().await
                     .expect("This stream should never terminate");
-                ingest_observation(&mut ingest, observation)
+                let debug_history = ingest.debug_history.clone();
+                let mut debug_history = debug_history.lock().await;
+                ingest_observation(&mut ingest, observation, &mut debug_history)
             }
         };
 
