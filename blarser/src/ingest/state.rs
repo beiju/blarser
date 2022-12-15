@@ -150,6 +150,8 @@ impl EntityStateGraph {
             AnyEvent::Hit(e) => { e.forward(entity, extrapolated) }
             AnyEvent::HomeRun(e) => { e.forward(entity, extrapolated) }
             AnyEvent::StolenBase(e) => { e.forward(entity, extrapolated) }
+            AnyEvent::Walk(e) => { e.forward(entity, extrapolated) }
+            AnyEvent::CaughtStealing(e) => { e.forward(entity, extrapolated) }
         };
 
         self.add_child_version(entity_idx, new_entity, event, extrapolated.clone())

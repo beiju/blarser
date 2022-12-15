@@ -241,8 +241,31 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
                     .expect("Invalid base_stolen in StolenBase event"),
             }.into()
         }
-        FedEventData::CaughtStealing { .. } => { todo!() }
-        FedEventData::Walk { .. } => { todo!() }
+        FedEventData::CaughtStealing { game, base_stolen, .. } => {
+            events::CaughtStealing {
+                game_update: GameUpdate {
+                    game_id: game.game_id,
+                    play_count: game.play,
+                    score: None,
+                    description,
+                },
+                time: fed_event.created,
+                to_base: Base::try_from(base_stolen)
+                    .expect("Invalid base_stolen in StolenBase event"),
+            }.into()
+
+        }
+        FedEventData::Walk { game, .. } => {
+            events::Walk {
+                game_update: GameUpdate {
+                    game_id: game.game_id,
+                    play_count: game.play,
+                    score: None,
+                    description,
+                },
+                time: fed_event.created,
+            }.into()
+        }
         FedEventData::InningEnd { .. } => { todo!() }
         FedEventData::CharmStrikeout { .. } => { todo!() }
         FedEventData::StrikeZapped { .. } => { todo!() }

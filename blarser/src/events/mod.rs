@@ -17,6 +17,7 @@ mod count_events;
 mod out;
 mod hit;
 mod stolen_base;
+mod walk;
 // mod player_reroll;
 
 pub(crate) use game_update::GameUpdate;
@@ -32,7 +33,8 @@ pub use batter_up::BatterUp;
 pub use count_events::{Strike, Ball, FoulBall};
 pub use out::Out;
 pub use hit::{Hit, HomeRun};
-pub use stolen_base::StolenBase;
+pub use stolen_base::{StolenBase, CaughtStealing};
+pub use walk::Walk;
 
 use std::fmt::{Display, Formatter};
 use chrono::{DateTime, Utc};
@@ -77,6 +79,8 @@ pub enum AnyEvent {
     Hit(Hit),
     HomeRun(HomeRun),
     StolenBase(StolenBase),
+    Walk(Walk),
+    CaughtStealing(CaughtStealing),
 }
 
 impl Display for AnyEvent {
@@ -97,6 +101,8 @@ impl Display for AnyEvent {
             AnyEvent::Hit(e) => { e.fmt(f) }
             AnyEvent::HomeRun(e) => { e.fmt(f) }
             AnyEvent::StolenBase(e) => { e.fmt(f) }
+            AnyEvent::Walk(e) => { e.fmt(f) }
+            AnyEvent::CaughtStealing(e) => { e.fmt(f) }
         }
     }
 }
