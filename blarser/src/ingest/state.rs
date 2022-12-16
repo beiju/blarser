@@ -83,7 +83,7 @@ impl EntityStateGraph {
     pub fn get_versions_between(&self, earliest: DateTime<Utc>, latest: DateTime<Utc>) -> HashSet<NodeIndex> {
         // I couldn't figure out how to do what I wanted with the built-in graph traversal helpers
         // so I made my own traversal
-        let mut stack = self.leafs.clone();
+        let mut stack = self.roots.clone();
         let mut visited = HashSet::new();
         let mut outputs = HashSet::new();
         while let Some(node) = stack.pop() {

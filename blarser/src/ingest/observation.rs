@@ -33,7 +33,10 @@ impl Observation {
 
     pub fn earliest_time(&self) -> DateTime<Utc> {
         match self.entity_type {
-            EntityType::Sim => { self.perceived_at }
+            EntityType::Sim => {
+                // This accounts for fuzzy JS timers. I want to find a better way
+                self.perceived_at - Duration::seconds(1)
+            }
             EntityType::Player => { self.perceived_at - Duration::minutes(6) }
             EntityType::Team => { self.perceived_at }
             EntityType::Game => {
@@ -46,7 +49,6 @@ impl Observation {
 
                 // Otherwise, games are timestamped from after the fetch
                 self.perceived_at - Duration::minutes(1)
-
             }
             EntityType::Standings => {
                 // It's definitely timestamped after when it's extracted from streamData, but it may also be
@@ -75,10 +77,9 @@ impl Observation {
 
                 // Otherwise, games are timestamped from after the fetch
                 self.perceived_at
-
             }
             EntityType::Standings => { self.perceived_at + Duration::minutes(1) }
-            EntityType::Season => { self.perceived_at + Duration::minutes(1)}
+            EntityType::Season => { self.perceived_at + Duration::minutes(1) }
         }
     }
 
@@ -156,41 +157,41 @@ impl Observation {
     // fn do_ingest_internal(&self, c: &PgConnection, ingest_id: i32, force: bool) -> Option<Vec<(i32, String)>> {
     //     info!("Placing {} {} between {} and {}", self.entity_raw.entity_type(), self.entity_raw.entity_id(), self.earliest_time(), self.latest_time());
 
-        // let (events, generations) = get_entity_update_tree(c, ingest_id, self.entity_raw.entity_type(), self.entity_raw.entity_id(), self.earliest_time())
-        //     .expect("Error getting events for Chronicler ingest");
-        //
-        // if self.entity_id.to_string() == "781feeac-f948-43af-beee-14fa1328db76" && self.earliest_time.to_string() == "2021-12-06 16:00:10.303 UTC" {
-        //     info!("BREAK");
-        // }
-        //
-        // let mut to_terminate = None;
-        //
-        // let mut prev_generation = Vec::new();
-        // let mut version_conflicts = Some(Vec::new());
-        // for (event, versions) in events.into_iter().zip(generations) {
-        //     let mut new_generation = MergedSuccessors::new();
-        //
-        //     if event.event_time <= self.latest_time {
-        //         to_terminate = Some(versions.iter().map(|(v, _)| v.id).collect());
-        //         observe_generation(&mut new_generation, &mut version_conflicts, versions, &self.entity_raw, self.perceived_at);
-        //     }
-        //
-        //     advance_generation(c, ingest_id, &mut new_generation, event, prev_generation);
-        //
-        //     prev_generation = save_versions(c, new_generation.into_inner())
-        //         .expect("Error saving updated versions");
-        // }
-        //
-        // if let Some(to_terminate) = to_terminate {
-        //     terminate_versions(c, to_terminate, format!("Failed to apply observation at {}", self.perceived_at))
-        //         .expect("Failed to terminate versions");
-        // }
-        //
-        // if version_conflicts.is_some() {
-        //     info!("Conflicts!");
-        // }
-        //
-        // version_conflicts
+    // let (events, generations) = get_entity_update_tree(c, ingest_id, self.entity_raw.entity_type(), self.entity_raw.entity_id(), self.earliest_time())
+    //     .expect("Error getting events for Chronicler ingest");
+    //
+    // if self.entity_id.to_string() == "781feeac-f948-43af-beee-14fa1328db76" && self.earliest_time.to_string() == "2021-12-06 16:00:10.303 UTC" {
+    //     info!("BREAK");
+    // }
+    //
+    // let mut to_terminate = None;
+    //
+    // let mut prev_generation = Vec::new();
+    // let mut version_conflicts = Some(Vec::new());
+    // for (event, versions) in events.into_iter().zip(generations) {
+    //     let mut new_generation = MergedSuccessors::new();
+    //
+    //     if event.event_time <= self.latest_time {
+    //         to_terminate = Some(versions.iter().map(|(v, _)| v.id).collect());
+    //         observe_generation(&mut new_generation, &mut version_conflicts, versions, &self.entity_raw, self.perceived_at);
+    //     }
+    //
+    //     advance_generation(c, ingest_id, &mut new_generation, event, prev_generation);
+    //
+    //     prev_generation = save_versions(c, new_generation.into_inner())
+    //         .expect("Error saving updated versions");
+    // }
+    //
+    // if let Some(to_terminate) = to_terminate {
+    //     terminate_versions(c, to_terminate, format!("Failed to apply observation at {}", self.perceived_at))
+    //         .expect("Failed to terminate versions");
+    // }
+    //
+    // if version_conflicts.is_some() {
+    //     info!("Conflicts!");
+    // }
+    //
+    // version_conflicts
 
     //     todo!()
     // }

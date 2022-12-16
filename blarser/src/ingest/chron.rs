@@ -238,7 +238,8 @@ pub fn ingest_observation(ingest: &mut Ingest, obs: Observation, debug_history: 
         .expect("Tried to ingest observation for an entity that did not previously exist. \
         This should work in the future but is not implemented yet.");
 
-    info!("Ingesting observation for {} {} at {}", obs.entity_type, obs.entity_id, obs.perceived_at);
+    info!("Ingesting observation for {} {} between {} and {}",
+        obs.entity_type, obs.entity_id, obs.earliest_time(), obs.latest_time());
 
     let versions = graph.get_versions_between(obs.earliest_time(), obs.latest_time());
     dbg!(&versions);
