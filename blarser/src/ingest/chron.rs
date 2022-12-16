@@ -1,5 +1,8 @@
 use std::fmt::{Debug, Display, Formatter};
+use std::fs::File;
+use std::io::BufReader;
 use std::iter;
+use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
 use chrono::{DateTime, Utc};
@@ -12,10 +15,12 @@ use futures::future::join_all;
 use futures::stream::Peekable;
 use petgraph::stable_graph::NodeIndex;
 use petgraph::visit::Walker;
+use serde::Deserialize;
+use uuid::Uuid;
 
 use crate::api::chronicler;
 use crate::ingest::task::{DebugHistoryVersion, DebugTree, Ingest};
-use crate::entity::{self, AnyEntity, Entity, EntityParseError, EntityRaw};
+use crate::entity::{self, AnyEntity, AnyEntityRaw, Entity, EntityParseError, EntityRaw};
 use crate::events::{AnyEvent, Event};
 use crate::ingest::GraphDebugHistory;
 use crate::ingest::observation::Observation;
@@ -80,7 +85,7 @@ pub fn chron_updates(start_at_time: DateTime<Utc>) -> impl Stream<Item=Observati
 
     stream::unfold(streams, |mut streams| async {
         let peeks = streams.iter_mut()
-            .map(|mut s| s.as_mut().peek());
+            .map(|s| s.as_mut().peek());
         let (chosen_stream, _) = join_all(peeks).await.into_iter()
             .flatten()
             .enumerate()
@@ -88,6 +93,65 @@ pub fn chron_updates(start_at_time: DateTime<Utc>) -> impl Stream<Item=Observati
             .expect("This should never be None");
 
         Some((streams[chosen_stream].next().await.unwrap(), streams))
+    })
+}
+
+#[derive(Deserialize, Debug)]
+struct CsvRow {
+    pub entity_id: Uuid,
+    pub timestamp: DateTime<Utc>,
+    pub hash: String,
+    pub data: serde_json::Value,
+}
+
+pub fn chron_updates_hardcoded(start_at_time: DateTime<Utc>) -> impl Iterator<Item=Observation> {
+    // So much of this is just making the type system happy
+    let iters = chronicler::ENDPOINT_NAMES.into_iter()
+        .chain(iter::once("game"))
+        .flat_map(move |entity_type| {
+            let path = Path::new("blarser").join("data").join(entity_type.to_owned() + ".csv");
+            let file = File::open(path).ok()?;
+            let rdr = csv::Reader::from_reader(BufReader::new(file));
+
+            let iter = rdr.into_records()
+                .filter_map(move |result| {
+                    let record = result.expect("Reading CSV row failed");
+                    let dt_str = (record.get(1).unwrap().replace(" ", "T") + ":00");
+                    dbg!(&dt_str);
+                    let row = CsvRow {
+                        entity_id: Uuid::try_parse(record.get(0).unwrap()).unwrap(),
+                        timestamp: DateTime::from(DateTime::parse_from_rfc3339(&dt_str).unwrap()),
+                        hash: record.get(2).unwrap().to_string(),
+                        data: serde_json::from_str(&record.get(3).unwrap())
+                            .expect("JSON parse from CSV failed"),
+                    };
+                    if row.timestamp < start_at_time { return None; }
+                    let entity_type = entity_type.try_into().unwrap();
+                    Some(Observation {
+                        perceived_at: row.timestamp,
+                        entity_type,
+                        entity_id: row.entity_id,
+                        entity_raw: AnyEntityRaw::from_json(entity_type, row.data).unwrap(),
+                    })
+                });
+
+            Some(iter.peekable())
+        })
+        .collect_vec();
+
+    info!("Got {} iterators", iters.len());
+
+    itertools::unfold(iters, |iters| {
+        let peeks = iters.iter_mut()
+            .map(|s| s.peek())
+            .collect_vec();
+        let (chosen_stream, _) = peeks.into_iter()
+            .flatten()
+            .enumerate()
+            .min_by_key(|(_, obs)| obs.latest_time())
+            .expect("This should never be None");
+
+        Some(iters[chosen_stream].next().unwrap())
     })
 }
 
@@ -312,12 +376,14 @@ fn ingest_for_version<EntityT>(
     obs: &Observation,
     debug_history: &mut GraphDebugHistory,
     debug_tree: DebugTree,
-    debug_time: DateTime<Utc>
+    debug_time: DateTime<Utc>,
 ) -> Result<(), Vec<Conflict>>
 // Disgustang
     where EntityT: Entity + PartialInformationCompare + Into<AnyEntity>,
           for<'a> &'a AnyEntity: TryInto<&'a EntityT>,
-          for<'a> <&'a AnyEntity as TryInto<&'a EntityT>>::Error: Debug {
+          for<'a> &'a AnyEntityRaw: TryInto<&'a EntityT::Raw>,
+          for<'a> <&'a AnyEntity as TryInto<&'a EntityT>>::Error: Debug,
+          for<'a> <&'a AnyEntityRaw as TryInto<&'a <EntityT as PartialInformationCompare>::Raw>>::Error: Debug {
     let (entity, event) = graph.get_version(entity_idx)
         .expect("Expected node index supplied to ingest_for_version to be valid");
     let event = event.clone();
@@ -326,9 +392,9 @@ fn ingest_for_version<EntityT>(
         .expect("This coercion should always succeed");
 
     let mut new_entity = entity.clone();
-    let raw: EntityT::Raw = serde_json::from_value(obs.entity_json.clone())
+    let raw: &EntityT::Raw = (&obs.entity_raw).try_into()
         .expect("TODO: use Result to report this error");
-    let conflicts = new_entity.observe(&raw);
+    let conflicts = new_entity.observe(raw);
     if !conflicts.is_empty() {
         return Err(conflicts);
     }

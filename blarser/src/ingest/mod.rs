@@ -23,7 +23,7 @@ use log::info;
 
 pub use crate::ingest::task::{Ingest, GraphDebugHistorySync, GraphDebugHistory};
 use crate::ingest::fed::{EventStreamItem, get_fed_event_stream, get_timed_event_list, ingest_event};
-use crate::ingest::chron::{chron_updates, ingest_observation, load_initial_state};
+use crate::ingest::chron::{chron_updates, chron_updates_hardcoded, ingest_observation, load_initial_state};
 use crate::events::Event;
 
 #[derive(Debug)]
@@ -53,7 +53,7 @@ pub async fn run_ingest(mut ingest: Ingest, start_time: DateTime<Utc>) {
     let fed_events = get_fed_event_stream().peekable();
     pin_mut!(fed_events);
     info!("Getting updates stream");
-    let observations = chron_updates(start_time).peekable();
+    let observations = chron_updates_hardcoded(start_time).peekable();
     info!("Got updates stream");
     pin_mut!(observations);
 
@@ -91,7 +91,7 @@ pub async fn run_ingest(mut ingest: Ingest, start_time: DateTime<Utc>) {
 
         // TODO Allow this to be None if there are currently no observations
         info!("Getting next observation time");
-        let next_observation_time = observations.as_mut().peek().await
+        let next_observation_time = observations.as_mut().peek()
             .expect("This stream should never terminate")
             .latest_time();
         info!("Next observation is at {next_observation_time}");
@@ -127,7 +127,7 @@ pub async fn run_ingest(mut ingest: Ingest, start_time: DateTime<Utc>) {
                 ingest_event(&mut ingest, event).await.unwrap()
             }
             Source::Observation => {
-                let observation = observations.next().await
+                let observation = observations.next()
                     .expect("This stream should never terminate");
                 let debug_history = ingest.debug_history.clone();
                 let mut debug_history = debug_history.lock().await;

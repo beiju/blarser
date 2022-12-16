@@ -131,6 +131,17 @@ impl AnyEntity {
         }
     }
 
+    pub fn from_raw(raw: AnyEntityRaw) -> Self {
+        match raw {
+            AnyEntityRaw::SimRaw(r) => { AnyEntity::Sim(Sim::from_raw(r)) }
+            AnyEntityRaw::PlayerRaw(r) => { AnyEntity::Player(Player::from_raw(r)) }
+            AnyEntityRaw::TeamRaw(r) => { AnyEntity::Team(Team::from_raw(r)) }
+            AnyEntityRaw::GameRaw(r) => { AnyEntity::Game(Game::from_raw(r)) }
+            AnyEntityRaw::StandingsRaw(r) => { AnyEntity::Standings(Standings::from_raw(r)) }
+            AnyEntityRaw::SeasonRaw(r) => { AnyEntity::Season(Season::from_raw(r)) }
+        }
+    }
+
     pub fn to_json(&self) -> serde_json::Value {
         impl_match!(&self, e => { serde_json::to_value(e).unwrap() })
     }
@@ -151,6 +162,47 @@ pub trait EntityRaw: Serialize + for<'de> Deserialize<'de> {
 
     fn name() -> &'static str;
     fn id(&self) -> Uuid;
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, From, TryInto, Unwrap)]
+#[try_into(owned, ref, ref_mut)]
+pub enum AnyEntityRaw {
+    SimRaw(<Sim as PartialInformationCompare>::Raw),
+    PlayerRaw(<Player as PartialInformationCompare>::Raw),
+    TeamRaw(<Team as PartialInformationCompare>::Raw),
+    GameRaw(<Game as PartialInformationCompare>::Raw),
+    StandingsRaw(<Standings as PartialInformationCompare>::Raw),
+    SeasonRaw(<Season as PartialInformationCompare>::Raw),
+}
+
+impl AnyEntityRaw {
+    fn from_json_typed<EntityT>(json: serde_json::Value) -> serde_json::Result<Self>
+        where EntityT: Entity + PartialInformationCompare, AnyEntityRaw: From<EntityT::Raw> {
+        let raw: EntityT::Raw = serde_json::from_value(json)?;
+        Ok(raw.into())
+    }
+
+    pub fn from_json(entity_type: EntityType, json: serde_json::Value) -> serde_json::Result<Self> {
+        match entity_type {
+            EntityType::Sim => { Self::from_json_typed::<Sim>(json) }
+            EntityType::Player => { Self::from_json_typed::<Player>(json) }
+            EntityType::Team => { Self::from_json_typed::<Team>(json) }
+            EntityType::Game => { Self::from_json_typed::<Game>(json) }
+            EntityType::Standings => { Self::from_json_typed::<Standings>(json) }
+            EntityType::Season => { Self::from_json_typed::<Season>(json) }
+        }
+    }
+
+    pub fn to_json(self) -> serde_json::Result<serde_json::Value> {
+        match self {
+            AnyEntityRaw::SimRaw(r) => { serde_json::to_value(r) }
+            AnyEntityRaw::PlayerRaw(r) => { serde_json::to_value(r) }
+            AnyEntityRaw::TeamRaw(r) => { serde_json::to_value(r) }
+            AnyEntityRaw::GameRaw(r) => { serde_json::to_value(r) }
+            AnyEntityRaw::StandingsRaw(r) => { serde_json::to_value(r) }
+            AnyEntityRaw::SeasonRaw(r) => { serde_json::to_value(r) }
+        }
+    }
 }
 
 #[derive(Debug, Error)]

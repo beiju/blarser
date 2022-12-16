@@ -365,14 +365,7 @@ impl<'conn> StateInterface<'conn> {
             entity_type: observation.entity_type,
             entity_id: observation.entity_id,
             start_time,
-            entity: match observation.entity_type {
-                EntityType::Sim => { raw_to_full_json::<entity::Sim>(observation.entity_json) }
-                EntityType::Player => { raw_to_full_json::<entity::Player>(observation.entity_json) }
-                EntityType::Team => { raw_to_full_json::<entity::Team>(observation.entity_json) }
-                EntityType::Game => { raw_to_full_json::<entity::Game>(observation.entity_json) }
-                EntityType::Standings => { raw_to_full_json::<entity::Standings>(observation.entity_json) }
-                EntityType::Season => { raw_to_full_json::<entity::Season>(observation.entity_json) }
-            }.expect("Error round-tripping JSON from raw to full"),
+            entity: AnyEntity::from_raw(observation.entity_raw).to_json(),
             from_event,
             event_aux_data: json!(null),
             observations: vec![start_time],

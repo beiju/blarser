@@ -4,7 +4,6 @@ use chrono::{DateTime, Utc};
 use diesel::{ExpressionMethods, OptionalExtension, QueryDsl, QueryResult, RunQueryDsl};
 use rocket::info;
 use core::default::Default;
-use petgraph::graph::Node;
 use petgraph::stable_graph::NodeIndex;
 use serde::Serialize;
 use tokio::sync::{oneshot, Mutex as TokioMutex};

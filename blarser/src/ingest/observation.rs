@@ -4,7 +4,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::api::ChroniclerItem;
-use crate::entity::{EntityParseError, EntityRaw};
+use crate::entity::{AnyEntityRaw, EntityParseError, EntityRaw};
 use crate::state::EntityType;
 
 
@@ -14,7 +14,7 @@ pub struct Observation {
     pub perceived_at: DateTime<Utc>,
     pub entity_type: EntityType,
     pub entity_id: Uuid,
-    pub entity_json: serde_json::Value,
+    pub entity_raw: AnyEntityRaw,
 }
 
 impl Observation {
@@ -22,11 +22,12 @@ impl Observation {
         let entity_type = entity_type.try_into()
             .map_err(|()| EntityParseError::UnknownEntity(entity_type.to_string()))?;
 
+        let entity = AnyEntityRaw::from_json(entity_type, item.data)?;
         Ok(Observation {
             perceived_at: item.valid_from,
             entity_type,
             entity_id: item.entity_id,
-            entity_json: item.data,
+            entity_raw: entity,
         })
     }
 

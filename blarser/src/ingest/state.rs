@@ -215,12 +215,7 @@ impl StateGraph {
     pub fn populate(&mut self, obses: Vec<Observation>, start_time: DateTime<Utc>, history: &mut GraphDebugHistory) {
         let start_event: Arc<AnyEvent> = Arc::new(Start::new(start_time).into());
         for obs in obses {
-            let entity = AnyEntity::from_raw_json(obs.entity_type, obs.entity_json.clone()) // remove the clone after finished debugging
-                .map_err(|e| {
-                    error!("{e} for {} {}: {}", obs.entity_type, obs.entity_id, obs.entity_json);
-                    e
-                })
-                .expect("JSON parsing failed");
+            let entity = AnyEntity::from_raw(obs.entity_raw);
 
             // Unfortunately these assignments all have to be in a specific order that makes it
             // not particularly easy to tell what's going on. Gathering data for the debug view is
