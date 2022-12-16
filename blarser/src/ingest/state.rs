@@ -173,6 +173,7 @@ impl EntityStateGraph {
                 data.insert(idx, DebugTreeNode {
                     description: entity.description(),
                     is_scheduled_for_update: false,
+                    is_updating: false,
                     is_ambiguous: entity.is_ambiguous(),
                     is_observed: false,
                     json: entity.to_json(),
@@ -248,6 +249,7 @@ impl StateGraph {
                         data: iter::once((idx, DebugTreeNode {
                             description,
                             is_scheduled_for_update: false,
+                            is_updating: false,
                             is_ambiguous: false, // can't be ambiguous at start
                             is_observed: true, // by definition
                             json,

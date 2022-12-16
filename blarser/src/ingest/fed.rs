@@ -100,7 +100,7 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
                 time: fed_event.created,
                 game_update: GameUpdate {
                     game_id: game.game_id,
-                    play_count: game.play,
+                    play: game.play,
                     score: None,
                     description,
                 },
@@ -111,7 +111,7 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
                 time: fed_event.created,
                 game_update: GameUpdate {
                     game_id: game.game_id,
-                    play_count: game.play,
+                    play: game.play,
                     score: None,
                     description,
                 },
@@ -122,7 +122,7 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
                 time: fed_event.created,
                 game_update: GameUpdate {
                     game_id: game.game_id,
-                    play_count: game.play,
+                    play: game.play,
                     score: None,
                     description,
                 },
@@ -133,7 +133,7 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
                 time: fed_event.created,
                 game_update: GameUpdate {
                     game_id: game.game_id,
-                    play_count: game.play,
+                    play: game.play,
                     score: None,
                     description,
                 },
@@ -145,7 +145,7 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
                 time: fed_event.created,
                 game_update: GameUpdate {
                     game_id: game.game_id,
-                    play_count: game.play,
+                    play: game.play,
                     score: None,
                     description,
                 },
@@ -157,7 +157,7 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
             events::Ball {
                 game_update: GameUpdate {
                     game_id: game.game_id,
-                    play_count: game.play,
+                    play: game.play,
                     score: None,
                     description,
                 },
@@ -168,7 +168,7 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
             events::FoulBall {
                 game_update: GameUpdate {
                     game_id: game.game_id,
-                    play_count: game.play,
+                    play: game.play,
                     score: None,
                     description,
                 },
@@ -181,7 +181,7 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
             events::Strike {
                 game_update: GameUpdate {
                     game_id: game.game_id,
-                    play_count: game.play,
+                    play: game.play,
                     score: None,
                     description,
                 },
@@ -195,7 +195,7 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
             events::Out {
                 game_update: GameUpdate {
                     game_id: game.game_id,
-                    play_count: game.play,
+                    play: game.play,
                     score: None,
                     description,
                 },
@@ -208,7 +208,7 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
             events::Hit {
                 game_update: GameUpdate {
                     game_id: game.game_id,
-                    play_count: game.play,
+                    play: game.play,
                     score: None,
                     description,
                 },
@@ -221,7 +221,7 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
             events::HomeRun {
                 game_update: GameUpdate {
                     game_id: game.game_id,
-                    play_count: game.play,
+                    play: game.play,
                     score: None,
                     description,
                 },
@@ -232,7 +232,7 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
             events::StolenBase {
                 game_update: GameUpdate {
                     game_id: game.game_id,
-                    play_count: game.play,
+                    play: game.play,
                     score: None,
                     description,
                 },
@@ -245,7 +245,7 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
             events::CaughtStealing {
                 game_update: GameUpdate {
                     game_id: game.game_id,
-                    play_count: game.play,
+                    play: game.play,
                     score: None,
                     description,
                 },
@@ -259,7 +259,7 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
             events::Walk {
                 game_update: GameUpdate {
                     game_id: game.game_id,
-                    play_count: game.play,
+                    play: game.play,
                     score: None,
                     description,
                 },

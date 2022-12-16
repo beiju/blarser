@@ -31,7 +31,7 @@ impl Event for PlayBall {
         if let Some(game) = entity.as_game_mut() {
             self.game_update.forward(game);
 
-            game.game_start_phase = 20;
+            game.game_start_phase = -1; // not sure about this
             game.inning = -1;
             game.phase = 2;
             game.top_of_inning = false;

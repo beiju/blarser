@@ -109,6 +109,7 @@ impl IngestTask {
 pub struct DebugTreeNode {
     pub description: String,
     pub is_scheduled_for_update: bool,
+    pub is_updating: bool,
     pub is_ambiguous: bool,
     pub is_observed: bool,
     pub json: serde_json::Value,

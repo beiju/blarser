@@ -17,7 +17,7 @@ pub struct Score {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GameUpdate {
     pub(crate) game_id: Uuid,
-    pub(crate) play_count: i64,
+    pub(crate) play: i64,
     // pub(crate) last_update_full: Vec<UpdateFull>,
     pub(crate) score: Option<Score>,
     pub(crate) description: String,
@@ -95,7 +95,7 @@ impl GameUpdate {
     // }
 
     pub fn forward(&self, game: &mut Game) {
-        game.play_count = self.play_count;
+        game.play_count = self.play + 1;
 
         game.last_update = Some(self.description.clone());
 

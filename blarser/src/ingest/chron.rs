@@ -275,15 +275,21 @@ pub fn ingest_observation(ingest: &mut Ingest, obs: Observation, debug_history: 
             };
 
             match entity_type {
-                EntityType::Sim => { ingest_for_version::<entity::Sim>(graph, version_idx, &obs, debug_history, debug_tree.clone(), obs.perceived_at) }
-                EntityType::Player => { ingest_for_version::<entity::Player>(graph, version_idx, &obs, debug_history, debug_tree.clone(), obs.perceived_at) }
-                EntityType::Team => { ingest_for_version::<entity::Team>(graph, version_idx, &obs, debug_history, debug_tree.clone(), obs.perceived_at) }
-                EntityType::Game => { ingest_for_version::<entity::Game>(graph, version_idx, &obs, debug_history, debug_tree.clone(), obs.perceived_at) }
-                EntityType::Standings => { ingest_for_version::<entity::Standings>(graph, version_idx, &obs, debug_history, debug_tree.clone(), obs.perceived_at) }
-                EntityType::Season => { ingest_for_version::<entity::Season>(graph, version_idx, &obs, debug_history, debug_tree.clone(), obs.clone().perceived_at) }
+                EntityType::Sim => { ingest_for_version::<entity::Sim>(graph, version_idx, &obs, debug_history, &mut debug_tree, obs.perceived_at) }
+                EntityType::Player => { ingest_for_version::<entity::Player>(graph, version_idx, &obs, debug_history, &mut debug_tree, obs.perceived_at) }
+                EntityType::Team => { ingest_for_version::<entity::Team>(graph, version_idx, &obs, debug_history, &mut debug_tree, obs.perceived_at) }
+                EntityType::Game => { ingest_for_version::<entity::Game>(graph, version_idx, &obs, debug_history, &mut debug_tree, obs.perceived_at) }
+                EntityType::Standings => { ingest_for_version::<entity::Standings>(graph, version_idx, &obs, debug_history, &mut debug_tree, obs.perceived_at) }
+                EntityType::Season => { ingest_for_version::<entity::Season>(graph, version_idx, &obs, debug_history, &mut debug_tree, obs.clone().perceived_at) }
             }
         })
         .partition_result();
+
+    debug_history.get_mut(&(obs.entity_type, obs.entity_id)).unwrap().versions.push(DebugHistoryVersion {
+        event_human_name: format!("End of ingest at {}", obs.perceived_at),
+        time: obs.perceived_at,
+        value: debug_tree.clone(),
+    });
 
     assert!(!successes.is_empty(), "TODO Report failures");
 
@@ -376,7 +382,7 @@ fn ingest_for_version<EntityT>(
     entity_idx: NodeIndex,
     obs: &Observation,
     debug_history: &mut GraphDebugHistory,
-    debug_tree: DebugTree,
+    debug_tree: &mut DebugTree,
     debug_time: DateTime<Utc>,
 ) -> Result<(), Vec<Conflict>>
 // Disgustang
@@ -385,6 +391,17 @@ fn ingest_for_version<EntityT>(
           for<'a> &'a AnyEntityRaw: TryInto<&'a EntityT::Raw>,
           for<'a> <&'a AnyEntity as TryInto<&'a EntityT>>::Error: Debug,
           for<'a> <&'a AnyEntityRaw as TryInto<&'a <EntityT as PartialInformationCompare>::Raw>>::Error: Debug {
+    debug_tree.data.get_mut(&entity_idx).unwrap().is_updating = true;
+
+    debug_history.get_mut(&(obs.entity_type, obs.entity_id)).unwrap().versions.push(DebugHistoryVersion {
+        event_human_name: format!("Updating {:?} during ingest at {}", entity_idx, obs.perceived_at),
+        time: obs.perceived_at,
+        value: debug_tree.clone(),
+    });
+
+    debug_tree.data.get_mut(&entity_idx).unwrap().is_updating = false;
+    debug_tree.data.get_mut(&entity_idx).unwrap().is_scheduled_for_update = false;
+
     let (entity, event) = graph.get_version(entity_idx)
         .expect("Expected node index supplied to ingest_for_version to be valid");
     let event = event.clone();
@@ -399,6 +416,7 @@ fn ingest_for_version<EntityT>(
     if !conflicts.is_empty() {
         return Err(conflicts);
     }
+    debug_tree.data.get_mut(&entity_idx).unwrap().is_observed = true;
 
     let entity_was_changed = &new_entity != entity;
 
