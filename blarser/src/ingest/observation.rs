@@ -48,7 +48,7 @@ impl Observation {
                 // }
 
                 // Otherwise, games are timestamped from after the fetch
-                self.perceived_at - Duration::minutes(1)
+                self.perceived_at - Duration::seconds(15)
             }
             EntityType::Standings => {
                 // It's definitely timestamped after when it's extracted from streamData, but it may also be

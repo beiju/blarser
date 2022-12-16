@@ -117,7 +117,7 @@ pub fn chron_updates_hardcoded(start_at_time: DateTime<Utc>) -> impl Iterator<It
                 .filter_map(move |result| {
                     let record = result.expect("Reading CSV row failed");
                     let dt_str = (record.get(1).unwrap().replace(" ", "T") + ":00");
-                    dbg!(&dt_str);
+                    //dbg!(&dt_str);
                     let row = CsvRow {
                         entity_id: Uuid::try_parse(record.get(0).unwrap()).unwrap(),
                         timestamp: DateTime::from(DateTime::parse_from_rfc3339(&dt_str).unwrap()),
@@ -242,7 +242,7 @@ pub fn ingest_observation(ingest: &mut Ingest, obs: Observation, debug_history: 
         obs.entity_type, obs.entity_id, obs.earliest_time(), obs.latest_time());
 
     let versions = graph.get_versions_between(obs.earliest_time(), obs.latest_time());
-    dbg!(&versions);
+    //dbg!(&versions);
 
     let mut debug_tree = graph.get_debug_tree();
     for version in &versions {
@@ -260,8 +260,8 @@ pub fn ingest_observation(ingest: &mut Ingest, obs: Observation, debug_history: 
             let (version, event) = graph.get_version(version_idx)
                 .expect("Expected node index from get_versions_between to be valid");
 
-            dbg!(&version);
-            dbg!(&event);
+            //dbg!(&version);
+            //dbg!(&event);
 
             // Round trip through the version enum to please the borrow checker
             // TODO: Is this still required after refactoring?
