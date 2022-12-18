@@ -21,7 +21,7 @@ use uuid::Uuid;
 use crate::api::chronicler;
 use crate::ingest::task::{DebugHistoryVersion, DebugTree, Ingest};
 use crate::entity::{self, AnyEntity, AnyEntityRaw, Entity, EntityParseError, EntityRaw};
-use crate::events::{AnyEvent, Event};
+use crate::events::{self, AnyEvent, Event};
 use crate::ingest::GraphDebugHistory;
 use crate::ingest::observation::Observation;
 use crate::ingest::state::EntityStateGraph;
@@ -314,15 +314,15 @@ impl Strand {
     }
 }
 
-fn ingest_changed_child(
+fn ingest_changed_event<EventT>(
     graph: &mut EntityStateGraph,
-    event: Arc<AnyEvent>,
+    event: Arc<EventT>,
     existing_version_idx: NodeIndex,
     newly_added_version_idx: NodeIndex,
     debug_history: &mut GraphDebugHistory,
     debug_tree: &DebugTree,
     debug_time: DateTime<Utc>,
-) {
+) where EventT: Event {
     // Gather data for debug here, because lifetimes
     let (modified_child, _) = graph.get_version(newly_added_version_idx)
         .expect("Come on I literally just added this node");
@@ -334,9 +334,8 @@ fn ingest_changed_child(
     let mut version_conflicts = Vec::new();
     let mut parent_walker = graph.graph.parents(existing_version_idx);
     while let Some((edge_idx, parent_idx)) = parent_walker.walk_next(&graph.graph) {
-        let mut extrapolated = graph.graph.edge_weight(edge_idx)
-            .expect("This should always be a valid edge index")
-            .clone();
+        let old_extrapolated = graph.graph.edge_weight(edge_idx)
+            .expect("This should always be a valid edge index");
 
         let new_edge_idx = graph.add_edge(parent_idx, newly_added_version_idx, extrapolated.clone());
         debug_history.get_mut(&history_key)
@@ -354,7 +353,9 @@ fn ingest_changed_child(
         let parent_event = parent_event.clone();
         let (modified_child, _) = graph.get_version(newly_added_version_idx)
             .expect("Come on I literally just added this node");
-        let conflicts = event.backward(modified_child, &mut extrapolated, &mut new_parent);
+        let new_extrapolated = event.fill_extrapolated(modified_child, &extrapolated);
+        let conflicts = event.forward(modified_child, &mut extrapolated, &mut new_parent);
+
         if !conflicts.is_empty() {
             version_conflicts.push(conflicts);
         } else {
@@ -366,7 +367,7 @@ fn ingest_changed_child(
                 graph.remove_edge(new_edge_idx);
                 graph.add_edge(new_parent_idx, newly_added_version_idx, extrapolated);
                 // Recurse
-                ingest_changed_child(graph, parent_event, parent_idx, new_parent_idx, debug_history, debug_tree, debug_time);
+                ingest_changed_event(graph, parent_event, parent_idx, new_parent_idx, debug_history, debug_tree, debug_time);
             }
         }
     }
@@ -404,10 +405,48 @@ fn ingest_for_version<EntityT>(
 
     let (entity, event) = graph.get_version(entity_idx)
         .expect("Expected node index supplied to ingest_for_version to be valid");
-    let event = event.clone();
 
     let entity: &EntityT = entity.try_into()
         .expect("This coercion should always succeed");
+
+    // TODO Can I do Arc<AnyEvent> => Arc<EventT> for a specific EventT?
+    match event.as_ref() {
+        AnyEvent::Start(e) => ingest_for_event(graph, entity_idx, entity, e, obs, debug_history, debug_tree, debug_time),
+        AnyEvent::EarlseasonStart(e) => ingest_for_event(graph, entity_idx, entity, e, obs, debug_history, debug_tree, debug_time),
+        AnyEvent::LetsGo(e) => ingest_for_event(graph, entity_idx, entity, e, obs, debug_history, debug_tree, debug_time),
+        AnyEvent::PlayBall(e) => ingest_for_event(graph, entity_idx, entity, e, obs, debug_history, debug_tree, debug_time),
+        AnyEvent::TogglePerforming(e) => ingest_for_event(graph, entity_idx, entity, e, obs, debug_history, debug_tree, debug_time),
+        AnyEvent::HalfInning(e) => ingest_for_event(graph, entity_idx, entity, e, obs, debug_history, debug_tree, debug_time),
+        AnyEvent::StormWarning(e) => ingest_for_event(graph, entity_idx, entity, e, obs, debug_history, debug_tree, debug_time),
+        AnyEvent::BatterUp(e) => ingest_for_event(graph, entity_idx, entity, e, obs, debug_history, debug_tree, debug_time),
+        AnyEvent::Strike(e) => ingest_for_event(graph, entity_idx, entity, e, obs, debug_history, debug_tree, debug_time),
+        AnyEvent::Ball(e) => ingest_for_event(graph, entity_idx, entity, e, obs, debug_history, debug_tree, debug_time),
+        AnyEvent::FoulBall(e) => ingest_for_event(graph, entity_idx, entity, e, obs, debug_history, debug_tree, debug_time),
+        AnyEvent::Out(e) => ingest_for_event(graph, entity_idx, entity, e, obs, debug_history, debug_tree, debug_time),
+        AnyEvent::Hit(e) => ingest_for_event(graph, entity_idx, entity, e, obs, debug_history, debug_tree, debug_time),
+        AnyEvent::HomeRun(e) => ingest_for_event(graph, entity_idx, entity, e, obs, debug_history, debug_tree, debug_time),
+        AnyEvent::StolenBase(e) => ingest_for_event(graph, entity_idx, entity, e, obs, debug_history, debug_tree, debug_time),
+        AnyEvent::Walk(e) => ingest_for_event(graph, entity_idx, entity, e, obs, debug_history, debug_tree, debug_time),
+        AnyEvent::CaughtStealing(e) => ingest_for_event(graph, entity_idx, entity, e, obs, debug_history, debug_tree, debug_time),
+    }
+}
+
+fn ingest_for_event<EntityT, EventT>(
+    graph: &mut EntityStateGraph,
+    entity_idx: NodeIndex,
+    entity: &EntityT,
+    event: &Arc<EventT>,
+    obs: &Observation,
+    debug_history: &mut GraphDebugHistory,
+    debug_tree: &mut DebugTree,
+    debug_time: DateTime<Utc>,
+) -> Result<(), Vec<Conflict>>
+// Disgustang
+    where EntityT: Entity + PartialInformationCompare + Into<AnyEntity>,
+          for<'a> &'a AnyEntityRaw: TryInto<&'a EntityT::Raw>,
+          for<'a> <&'a AnyEntityRaw as TryInto<&'a <EntityT as PartialInformationCompare>::Raw>>::Error: Debug,
+          EventT: Event {
+    let event = event.clone();
 
     let mut new_entity = entity.clone();
     let raw: &EntityT::Raw = (&obs.entity_raw).try_into()
@@ -421,9 +460,8 @@ fn ingest_for_version<EntityT>(
     let entity_was_changed = &new_entity != entity;
 
     if entity_was_changed {
-        // Enter the item in the graph and get a reference to it right back out again
         let new_entity_idx = graph.add_child_disconnected(new_entity.into(), event.clone());
-        ingest_changed_child(graph, event, entity_idx, new_entity_idx, debug_history, &debug_tree, debug_time);
+        ingest_changed_event(graph, event, entity_idx, new_entity_idx, debug_history, &debug_tree, debug_time);
     }
 
     // todo!("Forward pass");

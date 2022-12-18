@@ -33,6 +33,12 @@ pub enum AnyExtrapolated {
     Null(NullExtrapolated),
     BatterId(BatterIdExtrapolated),
 }
+#[derive(From, TryInto, Clone, Debug)]
+#[try_into(owned, ref, ref_mut)]
+pub enum AnyExtrapolatedRaw {
+    NullRaw(<NullExtrapolated as PartialInformationCompare>::Raw),
+    BatterIdRaw(<BatterIdExtrapolated as PartialInformationCompare>::Raw),
+}
 
 #[derive(Debug)]
 pub struct Effect {

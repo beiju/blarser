@@ -37,6 +37,7 @@ pub use stolen_base::{StolenBase, CaughtStealing};
 pub use walk::Walk;
 
 use std::fmt::{Display, Formatter};
+use as_any::{AsAny, Downcast};
 use chrono::{DateTime, Utc};
 use enum_dispatch::enum_dispatch;
 use serde::{Deserialize, Serialize};
@@ -58,7 +59,15 @@ pub trait Event: Serialize + for<'de> Deserialize<'de> + Ord + Display {
     fn effects(&self, state: &StateGraph) -> Vec<Effect>;
 
     fn forward(&self, entity: &AnyEntity, extrapolated: &AnyExtrapolated) -> AnyEntity;
+    fn fill_extrapolated(&self, entity: &AnyEntity, extrapolated: &AnyExtrapolated) -> AnyExtrapolated {
+        if let AnyExtrapolated::Null(_) = extrapolated {
+            AnyExtrapolated::Null(NullExtrapolated {})
+        } else {
+            panic!("Cannot use default fill_extrapolated on {}", extrapolated.type_name())
+        }
+    }
     fn backward(&self, successor: &AnyEntity, extrapolated: &mut AnyExtrapolated, entity: &mut AnyEntity) -> Vec<Conflict>;
+
 }
 
 #[enum_dispatch(Event)]
@@ -134,3 +143,4 @@ macro_rules! ord_by_time {
 ord_by_time!(AnyEvent);
 
 pub(crate) use ord_by_time;
+use crate::events::effects::NullExtrapolated;

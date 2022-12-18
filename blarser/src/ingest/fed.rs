@@ -74,7 +74,7 @@ pub async fn ingest_event(ingest: &mut Ingest, event: AnyEvent) -> IngestResult<
     let mut new_timed_events = Vec::new();
     for effect in effects {
         for id in state.ids_for(&effect) {
-            let mut graph = state.entity_graph_mut(effect.ty, id)
+            let graph = state.entity_graph_mut(effect.ty, id)
                 .expect("Tried to apply event to entity that does not exist");
             info!("Applying {event} to {} {id} with {:?}", effect.ty, effect.extrapolated);
             let new_events = graph.apply_event(event.clone(), &effect.extrapolated)?;
