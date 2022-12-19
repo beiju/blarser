@@ -1,10 +1,11 @@
 use std::fmt::{Display, Formatter};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use partial_information::Conflict;
+use partial_information::{Conflict, MaybeKnown, PartialInformationCompare};
 
 use crate::entity::AnyEntity;
 use crate::events::{AnyExtrapolated, Effect, Event, ord_by_time};
+use crate::events::effects::PitchersExtrapolated;
 use crate::events::game_update::GameUpdate;
 use crate::ingest::StateGraph;
 use crate::state::EntityType;
@@ -40,7 +41,7 @@ impl Event for HalfInning {
 
     fn effects(&self, _: &StateGraph) -> Vec<Effect> {
         vec![
-            Effect::one_id(EntityType::Game, self.game_update.game_id)
+            Effect::one_id_with(EntityType::Game, self.game_update.game_id, PitchersExtrapolated::new())
         ]
     }
 
@@ -49,11 +50,19 @@ impl Event for HalfInning {
         if let Some(game) = entity.as_game_mut() {
             self.game_update.forward(game);
 
+            if game.inning == -1 {
+                game.home.pitcher = Some(MaybeKnown::Unknown);
+                game.home.pitcher_name = Some(MaybeKnown::Unknown);
+                game.away.pitcher = Some(MaybeKnown::Unknown);
+                game.away.pitcher_name = Some(MaybeKnown::Unknown);
+            }
+
             game.top_of_inning = !game.top_of_inning;
             if game.top_of_inning {
                 game.inning += 1;
             }
             game.phase = 6;
+            game.game_start_phase = 10;
             game.half_inning_score = 0.0;
         }
 
@@ -61,7 +70,27 @@ impl Event for HalfInning {
     }
 
     fn backward(&self, extrapolated: &AnyExtrapolated, entity: &mut AnyEntity) -> Vec<Conflict> {
-        todo!()
+        let mut conflicts = Vec::new();
+        
+        if let Some(game) = entity.as_game_mut() {
+            let extrapolated: &PitchersExtrapolated = extrapolated.try_into()
+                .expect("Got the wrong Extrapolated type in HalfInning.backward");
+
+            if let MaybeKnown::Known(id) = &extrapolated.away_pitcher_id {
+                conflicts.extend(game.away.pitcher.observe(&Some(*id)));
+            }
+            if let MaybeKnown::Known(name) = &extrapolated.away_pitcher_name {
+                conflicts.extend(game.away.pitcher_name.observe(&Some(name.to_string())));
+            }
+            if let MaybeKnown::Known(id) = &extrapolated.home_pitcher_id {
+                conflicts.extend(game.home.pitcher.observe(&Some(*id)));
+            }
+            if let MaybeKnown::Known(name) = &extrapolated.home_pitcher_name {
+                conflicts.extend(game.home.pitcher_name.observe(&Some(name.to_string())));
+            }
+        }
+
+        conflicts
     }
 }
 

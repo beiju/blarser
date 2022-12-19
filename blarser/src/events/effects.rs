@@ -63,6 +63,17 @@ pub struct PitchersExtrapolated {
     pub home_pitcher_name: MaybeKnown<String>,
 }
 
+impl PitchersExtrapolated {
+    pub fn new() -> Self {
+        Self {
+            away_pitcher_id: MaybeKnown::Unknown,
+            away_pitcher_name: MaybeKnown::Unknown,
+            home_pitcher_id: MaybeKnown::Unknown,
+            home_pitcher_name: MaybeKnown::Unknown,
+        }
+    }
+}
+
 impl Extrapolated for PitchersExtrapolated {
     fn observe_entity(&self, entity: &AnyEntity) -> Self {
         let game = entity.as_game()
@@ -112,6 +123,7 @@ polymorphic_enum! {
         Null(NullExtrapolated),
         Subseconds(SubsecondsExtrapolated),
         BatterId(BatterIdExtrapolated),
+        Pitchers(PitchersExtrapolated),
         Odds(OddsExtrapolated),
     }
 }

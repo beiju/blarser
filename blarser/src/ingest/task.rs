@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use crate::db::BlarserDbConn;
 use crate::ingest::run_ingest;
-use crate::ingest::state::StateGraph;
+use crate::ingest::state::{AddedReason, StateGraph};
 use crate::schema;
 use crate::state::{ApprovalState, EntityType, StateInterface};
 
@@ -105,27 +105,29 @@ impl IngestTask {
     }
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Debug, Serialize, Clone)]
 pub struct DebugTreeNode {
     pub description: String,
-    pub is_scheduled_for_update: bool,
-    pub is_updating: bool,
     pub is_ambiguous: bool,
     pub is_observed: bool,
+    pub added_reason: AddedReason,
     pub json: serde_json::Value,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Debug, Serialize, Clone)]
 pub struct DebugTree {
     pub generations: Vec<HashSet<NodeIndex>>,
     pub edges: HashMap<NodeIndex, Vec<NodeIndex>>,
     pub data: HashMap<NodeIndex, DebugTreeNode>,
 }
 
+#[derive(Debug, Serialize)]
 pub struct DebugHistoryVersion {
     pub event_human_name: String,
     pub time: DateTime<Utc>,
-    pub value: DebugTree,
+    pub tree: DebugTree,
+    pub queued_for_update: Option<HashSet<NodeIndex>>,
+    pub currently_updating: Option<NodeIndex>,
 }
 
 pub struct DebugHistoryItem {

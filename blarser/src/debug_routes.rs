@@ -123,13 +123,12 @@ pub async fn version(task: &State<IngestTaskHolder>, entity_type: String, id: Uu
 }
 
 fn get_history_version(history: &GraphDebugHistory, entity_type: EntityType, id: Uuid, index: usize) -> Result<Value, DebugApiError> {
-    let item = &history.get(&(entity_type, id))
+    let version = history.get(&(entity_type, id))
         .ok_or_else(|| DebugApiError::InvalidEntity { ty: entity_type, id })?
         .versions.get(index)
-        .ok_or_else(|| DebugApiError::InvalidEntityVersion { ty: entity_type, id, index })?
-        .value;
+        .ok_or_else(|| DebugApiError::InvalidEntityVersion { ty: entity_type, id, index })?;
 
-    Ok(serde_json::to_value(item).unwrap())
+    Ok(serde_json::to_value(version).unwrap())
 }
 
 fn get_history(task: &State<IngestTaskHolder>) -> Result<GraphDebugHistorySync, DebugApiError> {

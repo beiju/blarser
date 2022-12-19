@@ -82,7 +82,9 @@ pub async fn ingest_event(ingest: &mut Ingest, event: AnyEvent) -> IngestResult<
             history.get_mut(&(effect.ty, id)).unwrap().versions.push(DebugHistoryVersion {
                 event_human_name: format!("After applying {event}"),
                 time: event.time(),
-                value: graph.get_debug_tree(),
+                tree: graph.get_debug_tree(),
+                queued_for_update: None,
+                currently_updating: None,
             });
         }
     }
