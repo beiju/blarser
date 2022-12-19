@@ -138,5 +138,4 @@ pub async fn run_ingest(mut ingest: Ingest, start_time: DateTime<Utc>) {
         timed_events.extend(new_timed_events.into_iter().map(Reverse));
 
     }
-    info!("Starting ingest");
 }

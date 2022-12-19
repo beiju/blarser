@@ -85,6 +85,7 @@ pub async fn ingest_event(ingest: &mut Ingest, event: AnyEvent) -> IngestResult<
                 tree: graph.get_debug_tree(),
                 queued_for_update: None,
                 currently_updating: None,
+                queued_for_delete: None,
             });
         }
     }

@@ -25,6 +25,7 @@ use crate::events::{self, AnyEvent, Event};
 use crate::ingest::GraphDebugHistory;
 use crate::ingest::observation::Observation;
 use crate::ingest::state::{AddedReason, EntityStateGraph};
+use crate::schema::version_links::child_id;
 use crate::state::EntityType;
 // use crate::{with_any_entity_raw, with_any_event};
 // use crate::events::Event;
@@ -221,17 +222,6 @@ impl Display for GenerationConflicts {
     }
 }
 
-#[derive(Error, Debug)]
-pub enum ChronIngestError {
-    #[error("Observation could not be applied without conflicts")]
-    Conflicts(GenerationConflicts),
-
-    #[error(transparent)]
-    DbError(#[from] diesel::result::Error),
-}
-
-pub type ChronIngestResult<T> = Result<T, ChronIngestError>;
-
 pub fn ingest_observation(ingest: &mut Ingest, obs: Observation, debug_history: &mut GraphDebugHistory) -> Vec<AnyEvent> {
     let mut state = ingest.state.lock().unwrap();
     let graph = state.entity_graph_mut(obs.entity_type, obs.entity_id)
@@ -242,6 +232,7 @@ pub fn ingest_observation(ingest: &mut Ingest, obs: Observation, debug_history: 
         obs.entity_type, obs.entity_id, obs.earliest_time(), obs.latest_time());
 
     let versions = graph.get_candidate_placements(obs.earliest_time(), obs.latest_time());
+    let mut versions_to_delete = versions.clone();
     //dbg!(&versions);
     let mut queued_for_update = versions.clone();
 
@@ -251,6 +242,7 @@ pub fn ingest_observation(ingest: &mut Ingest, obs: Observation, debug_history: 
         tree: graph.get_debug_tree(),
         queued_for_update: Some(queued_for_update.clone()),
         currently_updating: None,
+        queued_for_delete: None,
     });
 
     let (successes, _failures): (Vec<_>, Vec<_>) = versions.into_iter()
@@ -290,11 +282,38 @@ pub fn ingest_observation(ingest: &mut Ingest, obs: Observation, debug_history: 
         tree: graph.get_debug_tree(),
         queued_for_update: Some(queued_for_update.clone()),
         currently_updating: None,
+        queued_for_delete: None,
     });
 
     assert!(!successes.is_empty(), "TODO Report failures");
 
+    remove_reachable_nodes_from_set(graph, successes, &mut versions_to_delete);
+
+    debug_history.get_mut(&(obs.entity_type, obs.entity_id)).unwrap().versions.push(DebugHistoryVersion {
+        event_human_name: format!("Before delete from ingest at {}", obs.perceived_at),
+        time: obs.perceived_at,
+        tree: graph.get_debug_tree(),
+        queued_for_update: None,
+        currently_updating: None,
+        queued_for_delete: Some(versions_to_delete)
+    });
+
     Vec::new() // TODO Generate new timed events
+}
+
+fn remove_reachable_nodes_from_set(graph: &EntityStateGraph, mut stack: Vec<NodeIndex>, set: &mut HashSet<NodeIndex>) {
+    // Not going to bother keeping track of visited nodes because it's fine to remove from a set
+    // multiple times
+    while let Some(node_idx) = stack.pop() {
+        let mut parent_walker = graph.graph.parents(node_idx);
+        set.remove(&node_idx);
+
+        // TODO Can this stop early?
+        while let Some((_, parent_idx)) = parent_walker.walk_next(&graph.graph) {
+            stack.push(parent_idx);
+        }
+
+    }
 }
 
 fn ingest_changed_event<EventT>(
@@ -350,6 +369,7 @@ fn ingest_changed_event<EventT>(
                     tree: debug_graph.get_debug_tree(),
                     queued_for_update: Some(queued_for_update.clone()),
                     currently_updating: Some(existing_version_idx),
+                    queued_for_delete: None,
                 });
         }
 
@@ -391,7 +411,7 @@ fn ingest_for_version<EntityT>(
     debug_history: &mut GraphDebugHistory,
     queued_for_update: &HashSet<NodeIndex>,
     debug_time: DateTime<Utc>,
-) -> Result<(), Vec<Conflict>>
+) -> Result<NodeIndex, Vec<Conflict>>
 // Disgustang
     where EntityT: Entity + PartialInformationCompare + Into<AnyEntity>,
           for<'a> &'a AnyEntity: TryInto<&'a EntityT>,
@@ -405,6 +425,7 @@ fn ingest_for_version<EntityT>(
         tree: graph.get_debug_tree(),
         queued_for_update: Some(queued_for_update.clone()),
         currently_updating: Some(entity_idx),
+        queued_for_delete: None,
     });
 
     let event = &graph.get_version(entity_idx)
@@ -439,7 +460,7 @@ fn ingest_for_event<EntityT, EventT>(
     debug_history: &mut GraphDebugHistory,
     queued_for_update: &HashSet<NodeIndex>,
     debug_time: DateTime<Utc>,
-) -> Result<(), Vec<Conflict>>
+) -> Result<NodeIndex, Vec<Conflict>>
 // Disgustang
     where EntityT: Entity + PartialInformationCompare + Into<AnyEntity>,
           for<'a> &'a AnyEntity: TryInto<&'a EntityT>,
@@ -467,7 +488,7 @@ fn ingest_for_event<EntityT, EventT>(
 
     let entity_was_changed = &new_entity != entity;
 
-    if entity_was_changed {
+    let keep_idx = if entity_was_changed {
         let new_entity_idx = graph.add_child_disconnected(
             new_entity.into(),
             node.event.clone(),
@@ -485,13 +506,18 @@ fn ingest_for_event<EntityT, EventT>(
             queued_for_update,
             debug_time
         );
+
+        new_entity_idx
+    } else {
+        entity_idx
+    };
+
+    let mut child_walker = graph.graph.children(entity_idx);
+    while let Some(_child_idx) = child_walker.walk_next(&graph.graph) {
+        // todo!("Forward pass"); // note: forward pass must propagate keep_idx
     }
 
-    // todo!("Forward pass");
-
-    // todo!("Remove every element that's not part of the new tree, perhaps using some kind of mark-and-sweep-like procedure")
-
-    Ok(())
+    Ok(keep_idx)
 }
 
 // fn forward_ingest<EntityRawT: EntityRaw>(state: &StateInterface, entity_raw: &EntityRawT, perceived_at: DateTime<Utc>) -> ChronIngestResult<()> {

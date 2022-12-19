@@ -128,6 +128,7 @@ pub struct DebugHistoryVersion {
     pub tree: DebugTree,
     pub queued_for_update: Option<HashSet<NodeIndex>>,
     pub currently_updating: Option<NodeIndex>,
+    pub queued_for_delete: Option<HashSet<NodeIndex>>,
 }
 
 pub struct DebugHistoryItem {

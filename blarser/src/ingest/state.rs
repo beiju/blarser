@@ -258,13 +258,6 @@ pub struct StateGraph {
     ids_for_type: HashMap<EntityType, Vec<Uuid>>,
 }
 
-fn insert_from_observation<EntityT: Entity + PartialInformationCompare>(vec: &mut Vec<EntityT>, raw_json: serde_json::Value) {
-    let raw: EntityT::Raw = serde_json::from_value(raw_json)
-        .expect("TODO handle errors");
-    let entity = EntityT::from_raw(raw);
-    vec.push(entity);
-}
-
 impl StateGraph {
     pub fn new() -> Self { Default::default() }
 
@@ -312,6 +305,7 @@ impl StateGraph {
                     },
                     queued_for_update: None,
                     currently_updating: None,
+                    queued_for_delete: None,
                 }],
             });
         }
