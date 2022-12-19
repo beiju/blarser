@@ -23,7 +23,7 @@ use crate::state::EntityType;
 pub type StateGraphNode = (AnyEntity, Arc<AnyEvent>);
 pub type StateGraphEdge = AnyExtrapolated;
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct EntityStateGraph {
     pub(crate) graph: StableDag<StateGraphNode, StateGraphEdge>,
     roots: Vec<NodeIndex>,

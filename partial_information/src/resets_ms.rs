@@ -2,7 +2,7 @@ use std::fmt::Debug;
 use chrono::{DateTime, Timelike, Utc};
 use serde::{Deserialize, Serialize};
 use crate::compare::{Conflict, PartialInformationDiff};
-use crate::PartialInformationCompare;
+use crate::{MaybeKnown, PartialInformationCompare};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -32,6 +32,19 @@ impl DatetimeWithResettingMs {
 
     pub fn forget_ms(&mut self) {
         self.ms_known = false;
+    }
+
+    pub fn ns(&self) -> MaybeKnown<u32> {
+        if self.ms_known {
+            MaybeKnown::Known(self.date.nanosecond())
+        } else {
+            MaybeKnown::Unknown
+        }
+    }
+
+    pub fn set_ns(&mut self, ns: u32) {
+        self.date = self.date.with_nanosecond(ns).unwrap();
+        self.ms_known = true;
     }
 }
 

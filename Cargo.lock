@@ -167,7 +167,6 @@ dependencies = [
  "dialoguer",
  "diesel",
  "diesel-derive-enum",
- "enum_dispatch",
  "env_logger",
  "fed",
  "futures",
@@ -731,18 +730,6 @@ dependencies = [
  "syn 0.14.9",
  "syn_util",
  "synstructure",
-]
-
-[[package]]
-name = "enum_dispatch"
-version = "0.3.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0eb359f1476bf611266ac1f5355bc14aeca37b299d0ebccc038ee7058891c9cb"
-dependencies = [
- "once_cell",
- "proc-macro2 1.0.47",
- "quote 1.0.21",
- "syn 1.0.105",
 ]
 
 [[package]]

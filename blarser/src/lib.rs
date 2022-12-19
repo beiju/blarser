@@ -17,5 +17,6 @@ pub mod schema;
 pub mod entity;
 pub mod events;
 pub mod state;
+pub(crate) mod polymorphic_enum;
 // #[allow(dead_code)]
 // mod parse;

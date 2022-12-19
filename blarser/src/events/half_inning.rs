@@ -3,8 +3,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use partial_information::Conflict;
 
-use crate::entity::{AnyEntity, Entity};
-use crate::events::{AnyExtrapolated, Effect, Event, Extrapolated, ord_by_time};
+use crate::entity::AnyEntity;
+use crate::events::{AnyExtrapolated, Effect, Event, ord_by_time};
 use crate::events::game_update::GameUpdate;
 use crate::ingest::StateGraph;
 use crate::state::EntityType;
@@ -55,23 +55,12 @@ impl Event for HalfInning {
             }
             game.phase = 6;
             game.half_inning_score = 0.0;
-
-            // The first halfInning event re-sets the data that PlayBall clears
-            // if let Some(starting_pitchers) = aux {
-            //     let (home_pitcher, home_pitcher_name) = starting_pitchers.home;
-            //     let (away_pitcher, away_pitcher_name) = starting_pitchers.away;
-            //
-            //     game.home.pitcher = Some(MaybeKnown::Known(home_pitcher));
-            //     game.home.pitcher_name = Some(MaybeKnown::Known(home_pitcher_name));
-            //     game.away.pitcher = Some(MaybeKnown::Known(away_pitcher));
-            //     game.away.pitcher_name = Some(MaybeKnown::Known(away_pitcher_name));
-            // }
         }
 
         entity
     }
 
-    fn backward(&self, successor: &AnyEntity, extrapolated: &mut AnyExtrapolated, entity: &mut AnyEntity) -> Vec<Conflict> {
+    fn backward(&self, extrapolated: &AnyExtrapolated, entity: &mut AnyEntity) -> Vec<Conflict> {
         todo!()
     }
 }

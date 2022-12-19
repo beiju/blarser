@@ -51,7 +51,7 @@ impl Event for Hit {
         entity
     }
 
-    fn backward(&self, successor: &AnyEntity, extrapolated: &mut AnyExtrapolated, entity: &mut AnyEntity) -> Vec<Conflict> {
+    fn backward(&self, extrapolated: &AnyExtrapolated, entity: &mut AnyEntity) -> Vec<Conflict> {
         todo!()
     }
 }
@@ -96,7 +96,7 @@ impl Event for HomeRun {
         entity
     }
 
-    fn backward(&self, successor: &AnyEntity, extrapolated: &mut AnyExtrapolated, entity: &mut AnyEntity) -> Vec<Conflict> {
+    fn backward(&self, extrapolated: &AnyExtrapolated, entity: &mut AnyEntity) -> Vec<Conflict> {
         todo!()
     }
 }

@@ -1,18 +1,42 @@
 use std::fmt::Debug;
-use std::sync::Arc;
-use as_any::{AsAny, Downcast};
+use as_any::AsAny;
 use derive_more::{From, TryInto};
 use uuid::Uuid;
 use partial_information::{MaybeKnown, PartialInformationCompare};
 use partial_information_derive::PartialInformationCompare;
+use crate::entity::AnyEntity;
+use crate::polymorphic_enum::polymorphic_enum;
 use crate::state::EntityType;
 
-pub trait Extrapolated: Debug + AsAny {}
+pub trait Extrapolated: Debug + AsAny {
+
+
+    fn observe_entity(&self, entity: &AnyEntity) -> Self;
+}
 
 #[derive(Debug, Clone, PartialInformationCompare)]
 pub struct NullExtrapolated {}
 
-impl Extrapolated for NullExtrapolated {}
+impl Extrapolated for NullExtrapolated {
+    fn observe_entity(&self, _: &AnyEntity) -> Self {
+        Self {}
+    }
+}
+
+#[derive(Debug, Clone, PartialInformationCompare)]
+pub struct SubsecondsExtrapolated {
+    pub(crate) ns: MaybeKnown<u32>,
+}
+
+impl Extrapolated for SubsecondsExtrapolated {
+    fn observe_entity(&self, entity: &AnyEntity) -> Self {
+        let sim = entity.as_sim()
+            .expect("TODO: Strongly type this?");
+        Self {
+            ns: sim.next_phase_time.ns()
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialInformationCompare)]
 pub struct BatterIdExtrapolated {
@@ -25,19 +49,77 @@ impl BatterIdExtrapolated {
     }
 }
 
-impl Extrapolated for BatterIdExtrapolated {}
-
-#[derive(From, TryInto, Clone, Debug)]
-#[try_into(owned, ref, ref_mut)]
-pub enum AnyExtrapolated {
-    Null(NullExtrapolated),
-    BatterId(BatterIdExtrapolated),
+impl Extrapolated for BatterIdExtrapolated {
+    fn observe_entity(&self, _: &AnyEntity) -> Self {
+        self.clone()
+    }
 }
-#[derive(From, TryInto, Clone, Debug)]
-#[try_into(owned, ref, ref_mut)]
-pub enum AnyExtrapolatedRaw {
-    NullRaw(<NullExtrapolated as PartialInformationCompare>::Raw),
-    BatterIdRaw(<BatterIdExtrapolated as PartialInformationCompare>::Raw),
+
+#[derive(Debug, Clone, PartialInformationCompare)]
+pub struct PitchersExtrapolated {
+    pub away_pitcher_id: MaybeKnown<Uuid>,
+    pub away_pitcher_name: MaybeKnown<String>,
+    pub home_pitcher_id: MaybeKnown<Uuid>,
+    pub home_pitcher_name: MaybeKnown<String>,
+}
+
+impl Extrapolated for PitchersExtrapolated {
+    fn observe_entity(&self, entity: &AnyEntity) -> Self {
+        let game = entity.as_game()
+            .expect("TODO: Strongly type this?");
+        Self {
+            away_pitcher_id: game.away.pitcher.clone()
+                .expect("There should be an away pitcher at this point"),
+            away_pitcher_name: game.away.pitcher_name.clone()
+                .expect("There should be an away pitcher name at this point"),
+            home_pitcher_id: game.home.pitcher.clone()
+                .expect("There should be an home pitcher at this point"),
+            home_pitcher_name: game.home.pitcher_name.clone()
+                .expect("There should be an home pitcher name at this point"),
+        }
+    }
+}
+#[derive(Debug, Clone, PartialInformationCompare)]
+pub struct OddsExtrapolated {
+    pub away_odds: MaybeKnown<f32>,
+    pub home_odds: MaybeKnown<f32>,
+}
+
+impl Extrapolated for OddsExtrapolated {
+    fn observe_entity(&self, entity: &AnyEntity) -> Self {
+        let game = entity.as_game()
+            .expect("TODO: Strongly type this?");
+        Self {
+            away_odds: game.away.odds.clone()
+                .expect("There should be game odds at this point"),
+            home_odds: game.home.odds.clone()
+                .expect("There should be game odds at this point"),
+        }
+    }
+}
+
+// #[derive(From, TryInto, Clone, Debug)]
+// #[try_into(owned, ref, ref_mut)]
+// pub enum AnyExtrapolated {
+//     Null(NullExtrapolated),
+//     BatterId(BatterIdExtrapolated),
+// }
+
+polymorphic_enum! {
+    #[derive(From, TryInto, Clone, Debug)]
+    #[try_into(owned, ref, ref_mut)]
+    pub AnyExtrapolated: with_extrapolated {
+        Null(NullExtrapolated),
+        Subseconds(SubsecondsExtrapolated),
+        BatterId(BatterIdExtrapolated),
+        Odds(OddsExtrapolated),
+    }
+}
+
+impl AnyExtrapolated {
+    pub(crate) fn observe_entity(&self, entity: &AnyEntity) -> Self {
+        with_extrapolated!(self, |e| { e.observe_entity(entity).into() })
+    }
 }
 
 #[derive(Debug)]

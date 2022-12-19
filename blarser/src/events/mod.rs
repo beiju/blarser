@@ -39,13 +39,13 @@ pub use walk::Walk;
 use std::fmt::{Display, Formatter};
 use as_any::{AsAny, Downcast};
 use chrono::{DateTime, Utc};
-use enum_dispatch::enum_dispatch;
 use serde::{Deserialize, Serialize};
+use derive_more::{From, TryInto};
+
 use crate::entity::{AnyEntity, Entity};
 use crate::ingest::StateGraph;
 use partial_information::Conflict;
 
-#[enum_dispatch]
 pub trait Event: Serialize + for<'de> Deserialize<'de> + Ord + Display {
     fn time(&self) -> DateTime<Utc>;
 
@@ -66,54 +66,49 @@ pub trait Event: Serialize + for<'de> Deserialize<'de> + Ord + Display {
             panic!("Cannot use default fill_extrapolated on {}", extrapolated.type_name())
         }
     }
-    fn backward(&self, successor: &AnyEntity, extrapolated: &mut AnyExtrapolated, entity: &mut AnyEntity) -> Vec<Conflict>;
+    fn backward(&self, extrapolated: &AnyExtrapolated, entity: &mut AnyEntity) -> Vec<Conflict>;
 
 }
 
-#[enum_dispatch(Event)]
-#[derive(Debug, Serialize, Deserialize)]
-pub enum AnyEvent {
-    Start(Start),
-    EarlseasonStart(EarlseasonStart),
-    LetsGo(LetsGo),
-    PlayBall(PlayBall),
-    TogglePerforming(TogglePerforming),
-    HalfInning(HalfInning),
-    StormWarning(StormWarning),
-    BatterUp(BatterUp),
-    Strike(Strike),
-    Ball(Ball),
-    FoulBall(FoulBall),
-    Out(Out),
-    Hit(Hit),
-    HomeRun(HomeRun),
-    StolenBase(StolenBase),
-    Walk(Walk),
-    CaughtStealing(CaughtStealing),
+polymorphic_enum!{
+    #[derive(Debug, Serialize, Deserialize, TryInto, From)]
+    #[try_into(owned, ref, ref_mut)]
+    pub AnyEvent: with_any_event {
+        Start(Start),
+        EarlseasonStart(EarlseasonStart),
+        LetsGo(LetsGo),
+        PlayBall(PlayBall),
+        TogglePerforming(TogglePerforming),
+        HalfInning(HalfInning),
+        StormWarning(StormWarning),
+        BatterUp(BatterUp),
+        Strike(Strike),
+        Ball(Ball),
+        FoulBall(FoulBall),
+        Out(Out),
+        Hit(Hit),
+        HomeRun(HomeRun),
+        StolenBase(StolenBase),
+        Walk(Walk),
+        CaughtStealing(CaughtStealing),
+    }
 }
+
 
 impl Display for AnyEvent {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            AnyEvent::Start(e) => { e.fmt(f) }
-            AnyEvent::EarlseasonStart(e) => { e.fmt(f) }
-            AnyEvent::LetsGo(e) => { e.fmt(f) }
-            AnyEvent::PlayBall(e) => { e.fmt(f) }
-            AnyEvent::TogglePerforming(e) => { e.fmt(f) }
-            AnyEvent::HalfInning(e) => { e.fmt(f) }
-            AnyEvent::StormWarning(e) => { e.fmt(f) }
-            AnyEvent::BatterUp(e) => { e.fmt(f) }
-            AnyEvent::Strike(e) => { e.fmt(f) }
-            AnyEvent::Ball(e) => { e.fmt(f) }
-            AnyEvent::FoulBall(e) => { e.fmt(f) }
-            AnyEvent::Out(e) => { e.fmt(f) }
-            AnyEvent::Hit(e) => { e.fmt(f) }
-            AnyEvent::HomeRun(e) => { e.fmt(f) }
-            AnyEvent::StolenBase(e) => { e.fmt(f) }
-            AnyEvent::Walk(e) => { e.fmt(f) }
-            AnyEvent::CaughtStealing(e) => { e.fmt(f) }
-        }
+        with_any_event!(self, |e| { e.fmt(f) })
     }
+}
+
+impl AnyEvent {
+    pub fn time(&self) -> DateTime<Utc> {
+        with_any_event!(self, |e| { e.time() })
+    }
+    pub fn effects(&self, state: &StateGraph) -> Vec<Effect> {
+        with_any_event!(self, |e| { e.effects(state) })
+    }
+
 }
 
 macro_rules! ord_by_time {
@@ -144,3 +139,4 @@ ord_by_time!(AnyEvent);
 
 pub(crate) use ord_by_time;
 use crate::events::effects::NullExtrapolated;
+use crate::polymorphic_enum::polymorphic_enum;

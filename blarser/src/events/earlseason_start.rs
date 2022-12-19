@@ -5,7 +5,7 @@ use partial_information::{Conflict, DatetimeWithResettingMs, MaybeKnown, Partial
 
 use crate::entity::{AnyEntity};
 use crate::events::{AnyExtrapolated, Effect, Event, ord_by_time};
-use crate::events::effects::NullExtrapolated;
+use crate::events::effects::{NullExtrapolated, OddsExtrapolated, SubsecondsExtrapolated};
 use crate::ingest::StateGraph;
 use crate::state::EntityType;
 
@@ -59,70 +59,32 @@ impl Event for EarlseasonStart {
         entity
     }
 
-    fn backward(&self, successor: &AnyEntity, extrapolated: &mut AnyExtrapolated, entity: &mut AnyEntity) -> Vec<Conflict> {
-        // I have decided not to record anything in extrapolated, even though there's changed data
-        // to record, because I don't expect it to be useful. I don't even know if you'll even be
-        // able to query for timed events' extrapolated data.
-        // Still going to check the type of extrapolated though for completeness
-        let _: &mut NullExtrapolated = extrapolated.try_into()
-            .expect("Got the wrong Extrapolated type in EarlseasonStart.backward");
-
+    fn backward(&self, extrapolated: &AnyExtrapolated, entity: &mut AnyEntity) -> Vec<Conflict> {
         let mut conflicts = Vec::new();
-        match (successor.as_sim(), entity.as_sim_mut()) {
-            (Some(succcessor), Some(parent)) => {
-                if let Some(date) = succcessor.gods_day_date.known_date() {
-                    conflicts.extend(parent.gods_day_date.observe(&date))
-                }
-                if let Some(date) = succcessor.next_phase_time.known_date() {
-                    conflicts.extend(parent.next_phase_time.observe(&date))
-                }
-            }
-            (None, None) => {}
-            _ => {
-                panic!("Mismatched entity types passed to EarlseasonStart.backward")
-            }
-        }
-        
-        match (successor.as_game(), entity.as_game_mut()) {
-            (Some(succcessor), Some(parent)) => {
-                if let Some(MaybeKnown::Known(successor_odds)) = &succcessor.home.odds {
-                    if let Some(parent_odds) = parent.home.odds.as_mut() {
-                        conflicts.extend(parent_odds.observe(&successor_odds))
-                    }
-                }
-                if let Some(MaybeKnown::Known(successor_odds)) = &succcessor.away.odds {
-                    if let Some(parent_odds) = parent.away.odds.as_mut() {
-                        conflicts.extend(parent_odds.observe(&successor_odds))
-                    }
-                }
-                if let Some(MaybeKnown::Known(successor_pitcher)) = &succcessor.home.pitcher {
-                    if let Some(parent_pitcher) = parent.home.pitcher.as_mut() {
-                        conflicts.extend(parent_pitcher.observe(&successor_pitcher))
-                    }
-                }
-                if let Some(MaybeKnown::Known(successor_pitcher)) = &succcessor.away.pitcher {
-                    if let Some(parent_pitcher) = parent.away.pitcher.as_mut() {
-                        conflicts.extend(parent_pitcher.observe(&successor_pitcher))
-                    }
-                }
-                if let Some(MaybeKnown::Known(successor_pitcher_name)) = &succcessor.home.pitcher_name {
-                    if let Some(parent_pitcher_name) = parent.home.pitcher_name.as_mut() {
-                        conflicts.extend(parent_pitcher_name.observe(&successor_pitcher_name))
-                    }
-                }
-                if let Some(MaybeKnown::Known(successor_pitcher_name)) = &succcessor.away.pitcher_name {
-                    if let Some(parent_pitcher_name) = parent.away.pitcher_name.as_mut() {
-                        conflicts.extend(parent_pitcher_name.observe(&successor_pitcher_name))
-                    }
-                }
-            }
-            (None, None) => {}
-            _ => {
-                panic!("Mismatched entity types passed to EarlseasonStart.backward")
+
+        if let Some(sim) = entity.as_sim_mut() {
+            let ns_extrapolated: &SubsecondsExtrapolated = extrapolated.try_into()
+                .expect("Got the wrong Extrapolated type in EarlseasonStart.backward");
+
+            if let MaybeKnown::Known(ns) = ns_extrapolated.ns {
+                sim.gods_day_date.set_ns(ns);
+                sim.next_phase_time.set_ns(ns);
             }
         }
 
-        Vec::new()
+        if let Some(game) = entity.as_game_mut() {
+            let extrapolated: &OddsExtrapolated = extrapolated.try_into()
+                .expect("Got the wrong Extrapolated type in EarlseasonStart.backward");
+
+            if let MaybeKnown::Known(odd) = extrapolated.away_odds {
+                conflicts.extend(game.away.odds.observe(&Some(odd)));
+            }
+            if let MaybeKnown::Known(odd) = extrapolated.home_odds {
+                conflicts.extend(game.home.odds.observe(&Some(odd)));
+            }
+        }
+
+        conflicts
     }
 }
 

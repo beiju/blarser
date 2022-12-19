@@ -46,8 +46,8 @@ impl Event for PlayBall {
         entity
     }
 
-    fn backward(&self, successor: &AnyEntity, extrapolated: &mut AnyExtrapolated, entity: &mut AnyEntity) -> Vec<Conflict> {
-        todo!()
+    fn backward(&self, _extrapolated: &AnyExtrapolated, _entity: &mut AnyEntity) -> Vec<Conflict> {
+        Vec::new()
     }
 }
 

@@ -11,7 +11,6 @@ use std::fmt::{Display, Formatter};
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
 use derive_more::{From, TryInto, Unwrap};
-use enum_dispatch::enum_dispatch;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use partial_information::{Conflict, PartialInformationCompare};
@@ -27,7 +26,6 @@ pub use standings::Standings;
 pub use season::Season;
 use crate::state::EntityType;
 
-#[enum_dispatch]
 pub trait Entity: Serialize + for<'de> Deserialize<'de> + PartialEq + Clone + Display {
     fn entity_type(&self) -> EntityType;
     fn id(&self) -> Uuid;

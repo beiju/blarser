@@ -46,7 +46,7 @@ impl Event for StormWarning {
     //         other => panic!("StormWarning event does not apply to {}", other.name())        }
     // }
 
-    fn backward(&self, successor: &AnyEntity, extrapolated: &mut AnyExtrapolated, entity: &mut AnyEntity) -> Vec<Conflict> {
+    fn backward(&self, extrapolated: &AnyExtrapolated, entity: &mut AnyEntity) -> Vec<Conflict> {
         todo!()
     }
 }
