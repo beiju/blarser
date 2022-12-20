@@ -108,6 +108,9 @@ impl AnyEvent {
     pub fn effects(&self, state: &StateGraph) -> Vec<Effect> {
         with_any_event!(self, |e| { e.effects(state) })
     }
+    pub fn forward(&self, entity: &AnyEntity, extrapolated: &AnyExtrapolated) -> AnyEntity {
+        with_any_event!(self, |e| { e.forward(entity, extrapolated) })
+    }
 
 }
 

@@ -9,7 +9,6 @@ use chrono::{DateTime, Utc};
 use futures::{stream, Stream, StreamExt};
 use itertools::Itertools;
 use rocket::info;
-use thiserror::Error;
 use partial_information::{Conflict, PartialInformationCompare};
 use futures::future::join_all;
 use futures::stream::Peekable;
@@ -24,7 +23,7 @@ use crate::entity::{self, AnyEntity, AnyEntityRaw, Entity, EntityParseError, Ent
 use crate::events::{self, AnyEvent, Event};
 use crate::ingest::GraphDebugHistory;
 use crate::ingest::observation::Observation;
-use crate::ingest::state::{AddedReason, EntityStateGraph};
+use crate::ingest::state::{AddedReason, EntityStateGraph, StateGraphNode};
 use crate::schema::version_links::child_id;
 use crate::state::EntityType;
 // use crate::{with_any_entity_raw, with_any_event};
@@ -287,7 +286,9 @@ pub fn ingest_observation(ingest: &mut Ingest, obs: Observation, debug_history: 
 
     assert!(!successes.is_empty(), "TODO Report failures");
 
-    remove_reachable_nodes_from_set(graph, successes, &mut versions_to_delete);
+    let prev_nodes = get_reachable_nodes(graph, graph.leafs().clone());
+    let keep_nodes = get_reachable_nodes(graph, successes.iter().flatten().copied().collect());
+    let delete_nodes: HashSet<_> = prev_nodes.difference(&keep_nodes).copied().collect();
 
     debug_history.get_mut(&(obs.entity_type, obs.entity_id)).unwrap().versions.push(DebugHistoryVersion {
         event_human_name: format!("Before delete from ingest at {}", obs.perceived_at),
@@ -295,25 +296,40 @@ pub fn ingest_observation(ingest: &mut Ingest, obs: Observation, debug_history: 
         tree: graph.get_debug_tree(),
         queued_for_update: None,
         currently_updating: None,
-        queued_for_delete: Some(versions_to_delete)
+        queued_for_delete: Some(delete_nodes.clone())
+    });
+
+    for &node_idx in &delete_nodes {
+        graph.remove_node(node_idx);
+    }
+
+    graph.set_leafs(successes.into_iter().flatten().collect());
+
+    debug_history.get_mut(&(obs.entity_type, obs.entity_id)).unwrap().versions.push(DebugHistoryVersion {
+        event_human_name: format!("After delete from ingest at {}", obs.perceived_at),
+        time: obs.perceived_at,
+        tree: graph.get_debug_tree(),
+        queued_for_update: None,
+        currently_updating: None,
+        queued_for_delete: Some(delete_nodes), // leave it here to make problems more obvious
     });
 
     Vec::new() // TODO Generate new timed events
 }
 
-fn remove_reachable_nodes_from_set(graph: &EntityStateGraph, mut stack: Vec<NodeIndex>, set: &mut HashSet<NodeIndex>) {
-    // Not going to bother keeping track of visited nodes because it's fine to remove from a set
-    // multiple times
+fn get_reachable_nodes(graph: &EntityStateGraph, mut stack: Vec<NodeIndex>) -> HashSet<NodeIndex> {
+    let mut output = HashSet::new();
     while let Some(node_idx) = stack.pop() {
         let mut parent_walker = graph.graph.parents(node_idx);
-        set.remove(&node_idx);
+        output.insert(node_idx);
 
-        // TODO Can this stop early?
+        // I think this can stop early if it hits a node that was observed before this ingest
+        // started, but that will require more bookkeeping
         while let Some((_, parent_idx)) = parent_walker.walk_next(&graph.graph) {
             stack.push(parent_idx);
         }
-
     }
+    output
 }
 
 fn ingest_changed_event<EventT>(
@@ -411,7 +427,7 @@ fn ingest_for_version<EntityT>(
     debug_history: &mut GraphDebugHistory,
     queued_for_update: &HashSet<NodeIndex>,
     debug_time: DateTime<Utc>,
-) -> Result<NodeIndex, Vec<Conflict>>
+) -> Result<Vec<NodeIndex>, Vec<Conflict>>
 // Disgustang
     where EntityT: Entity + PartialInformationCompare + Into<AnyEntity>,
           for<'a> &'a AnyEntity: TryInto<&'a EntityT>,
@@ -460,7 +476,7 @@ fn ingest_for_event<EntityT, EventT>(
     debug_history: &mut GraphDebugHistory,
     queued_for_update: &HashSet<NodeIndex>,
     debug_time: DateTime<Utc>,
-) -> Result<NodeIndex, Vec<Conflict>>
+) -> Result<Vec<NodeIndex>, Vec<Conflict>>
 // Disgustang
     where EntityT: Entity + PartialInformationCompare + Into<AnyEntity>,
           for<'a> &'a AnyEntity: TryInto<&'a EntityT>,
@@ -488,7 +504,7 @@ fn ingest_for_event<EntityT, EventT>(
 
     let entity_was_changed = &new_entity != entity;
 
-    let keep_idx = if entity_was_changed {
+    let new_entity_idx = if entity_was_changed {
         let new_entity_idx = graph.add_child_disconnected(
             new_entity.into(),
             node.event.clone(),
@@ -512,12 +528,55 @@ fn ingest_for_event<EntityT, EventT>(
         entity_idx
     };
 
-    let mut child_walker = graph.graph.children(entity_idx);
-    while let Some(_child_idx) = child_walker.walk_next(&graph.graph) {
-        // todo!("Forward pass"); // note: forward pass must propagate keep_idx
+    debug_history.get_mut(&(obs.entity_type, obs.entity_id)).unwrap().versions.push(DebugHistoryVersion {
+        event_human_name: format!("Before forward pass at {}", obs.perceived_at),
+        time: obs.perceived_at,
+        tree: graph.get_debug_tree(),
+        queued_for_update: None,
+        currently_updating: None,
+        queued_for_delete: None,
+    });
+
+    let mut generation = vec![(entity_idx, new_entity_idx)];
+    loop { // generations loop
+        let mut next_generation = Vec::new();
+        for &(old_entity_idx, new_entity_idx) in &generation {
+            let mut child_walker = graph.graph.children(old_entity_idx);
+            while let Some((edge_idx, old_child_idx)) = child_walker.walk_next(&graph.graph) {
+                // Gotta re-fetch because of borrowing rules
+                let old_entity_node = graph.graph.node_weight(old_entity_idx)
+                    .expect("Must exist");
+                let extrapolated = graph.graph.edge_weight(edge_idx)
+                    .expect("Must exist");
+                let event = &graph.graph.node_weight(old_child_idx)
+                    .expect("Must exist").event;
+                let new_child = event.forward(&old_entity_node.entity, &extrapolated);
+                // for debugging, placed here because of borrow rules
+                let event_description = event.to_string();
+                let (_, new_child_idx) = graph.graph.add_child(new_entity_idx, extrapolated.clone(), StateGraphNode {
+                    entity: new_child,
+                    event: event.clone(),
+                    observed: None,
+                    added_reason: AddedReason::DescendantOfObservedNode,
+                });
+                next_generation.push((old_child_idx, new_child_idx));
+
+                debug_history.get_mut(&(obs.entity_type, obs.entity_id)).unwrap().versions.push(DebugHistoryVersion {
+                    event_human_name: format!("After forward pass step for {event_description} at {}", obs.perceived_at),
+                    time: obs.perceived_at,
+                    tree: graph.get_debug_tree(),
+                    queued_for_update: None,
+                    currently_updating: None,
+                    queued_for_delete: None,
+                });
+            }
+        }
+        if next_generation.is_empty() {
+            return Ok(generation.into_iter().map(|(_old, new)| new).collect())
+        }
+        generation = next_generation;
     }
 
-    Ok(keep_idx)
 }
 
 // fn forward_ingest<EntityRawT: EntityRaw>(state: &StateInterface, entity_raw: &EntityRawT, perceived_at: DateTime<Utc>) -> ChronIngestResult<()> {

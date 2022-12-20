@@ -22,6 +22,7 @@ pub enum AddedReason {
     Start,
     NewFromEvent,
     RefinedFromObservation,
+    DescendantOfObservedNode,
 }
 
 #[derive(Debug, Clone)]
@@ -129,6 +130,10 @@ impl EntityStateGraph {
 
     pub fn remove_edge(&mut self, idx: EdgeIndex) -> Option<StateGraphEdge> {
         self.graph.remove_edge(idx)
+    }
+
+    pub fn remove_node(&mut self, idx: NodeIndex) -> Option<StateGraphNode> {
+        self.graph.remove_node(idx)
     }
 
     pub fn get_candidate_placements(&self, earliest: DateTime<Utc>, latest: DateTime<Utc>) -> HashSet<NodeIndex> {
@@ -248,6 +253,8 @@ impl EntityStateGraph {
             generations,
             edges,
             data,
+            roots: self.roots.clone(),
+            leafs: self.leafs.clone(),
         }
     }
 }
@@ -302,6 +309,8 @@ impl StateGraph {
                             added_reason: AddedReason::Start,
                             json,
                         })).collect(),
+                        roots: vec![idx],
+                        leafs: vec![idx],
                     },
                     queued_for_update: None,
                     currently_updating: None,

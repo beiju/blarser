@@ -119,6 +119,8 @@ pub struct DebugTree {
     pub generations: Vec<HashSet<NodeIndex>>,
     pub edges: HashMap<NodeIndex, Vec<NodeIndex>>,
     pub data: HashMap<NodeIndex, DebugTreeNode>,
+    pub roots: Vec<NodeIndex>,
+    pub leafs: Vec<NodeIndex>,
 }
 
 #[derive(Debug, Serialize)]
