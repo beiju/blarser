@@ -231,8 +231,7 @@ pub fn ingest_observation(ingest: &mut Ingest, obs: Observation, debug_history: 
         obs.entity_type, obs.entity_id, obs.earliest_time(), obs.latest_time());
 
     let versions = graph.get_candidate_placements(obs.earliest_time(), obs.latest_time());
-    let mut versions_to_delete = versions.clone();
-    //dbg!(&versions);
+    dbg!(&versions);
     let mut queued_for_update = versions.clone();
 
     debug_history.get_mut(&(obs.entity_type, obs.entity_id)).unwrap().versions.push(DebugHistoryVersion {
@@ -246,6 +245,7 @@ pub fn ingest_observation(ingest: &mut Ingest, obs: Observation, debug_history: 
 
     let (successes, _failures): (Vec<_>, Vec<_>) = versions.into_iter()
         .map(|version_idx| {
+            info!("Running ingest on version {version_idx:?}");
             let node = graph.get_version(version_idx)
                 .expect("Expected node index from get_versions_between to be valid");
 
@@ -284,6 +284,8 @@ pub fn ingest_observation(ingest: &mut Ingest, obs: Observation, debug_history: 
         queued_for_delete: None,
     });
 
+    info!("Test for flush");
+    log::logger().flush();
     assert!(!successes.is_empty(), "TODO Report failures");
 
     let prev_nodes = get_reachable_nodes(graph, graph.leafs().clone());
@@ -503,6 +505,7 @@ fn ingest_for_event<EntityT, EventT>(
     }
 
     let entity_was_changed = &new_entity != entity;
+    info!("entity was {}changed", if entity_was_changed { "" } else { "not "});
 
     let new_entity_idx = if entity_was_changed {
         let new_entity_idx = graph.add_child_disconnected(
