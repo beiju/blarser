@@ -5,6 +5,8 @@ use std::io::BufReader;
 use std::iter;
 use std::path::Path;
 use std::pin::Pin;
+use std::sync::Arc;
+use as_any::AsAny;
 use chrono::{DateTime, Utc};
 use futures::{stream, Stream, StreamExt};
 use itertools::Itertools;
@@ -12,6 +14,7 @@ use rocket::info;
 use partial_information::{Conflict, PartialInformationCompare};
 use futures::future::join_all;
 use futures::stream::Peekable;
+use log::error;
 use petgraph::stable_graph::NodeIndex;
 use petgraph::visit::Walker;
 use serde::Deserialize;
@@ -222,6 +225,7 @@ impl Display for GenerationConflicts {
 }
 
 pub fn ingest_observation(ingest: &mut Ingest, obs: Observation, debug_history: &mut GraphDebugHistory) -> Vec<AnyEvent> {
+    let obs = Arc::new(obs); // sigh
     let mut state = ingest.state.lock().unwrap();
     let graph = state.entity_graph_mut(obs.entity_type, obs.entity_id)
         .expect("Tried to ingest observation for an entity that did not previously exist. \
@@ -234,7 +238,8 @@ pub fn ingest_observation(ingest: &mut Ingest, obs: Observation, debug_history: 
     dbg!(&versions);
     let mut queued_for_update = versions.clone();
 
-    debug_history.get_mut(&(obs.entity_type, obs.entity_id)).unwrap().versions.push(DebugHistoryVersion {
+    let debug_key = (obs.entity_type, obs.entity_id);
+    debug_history.get_mut(&debug_key).unwrap().versions.push(DebugHistoryVersion {
         event_human_name: format!("Start of ingest at {}", obs.perceived_at),
         time: obs.perceived_at,
         tree: graph.get_debug_tree(),
@@ -265,17 +270,17 @@ pub fn ingest_observation(ingest: &mut Ingest, obs: Observation, debug_history: 
             };
 
             match entity_type {
-                EntityType::Sim => { ingest_for_version::<entity::Sim>(graph, version_idx, &obs, debug_history, &queued_for_update, obs.perceived_at) }
-                EntityType::Player => { ingest_for_version::<entity::Player>(graph, version_idx, &obs, debug_history, &queued_for_update, obs.perceived_at) }
-                EntityType::Team => { ingest_for_version::<entity::Team>(graph, version_idx, &obs, debug_history, &queued_for_update, obs.perceived_at) }
-                EntityType::Game => { ingest_for_version::<entity::Game>(graph, version_idx, &obs, debug_history, &queued_for_update, obs.perceived_at) }
-                EntityType::Standings => { ingest_for_version::<entity::Standings>(graph, version_idx, &obs, debug_history, &queued_for_update, obs.perceived_at) }
-                EntityType::Season => { ingest_for_version::<entity::Season>(graph, version_idx, &obs, debug_history, &queued_for_update, obs.perceived_at) }
+                EntityType::Sim => { ingest_for_version::<entity::Sim>(graph, version_idx, obs.clone(), debug_history, &queued_for_update, obs.perceived_at) }
+                EntityType::Player => { ingest_for_version::<entity::Player>(graph, version_idx, obs.clone(), debug_history, &queued_for_update, obs.perceived_at) }
+                EntityType::Team => { ingest_for_version::<entity::Team>(graph, version_idx, obs.clone(), debug_history, &queued_for_update, obs.perceived_at) }
+                EntityType::Game => { ingest_for_version::<entity::Game>(graph, version_idx, obs.clone(), debug_history, &queued_for_update, obs.perceived_at) }
+                EntityType::Standings => { ingest_for_version::<entity::Standings>(graph, version_idx, obs.clone(), debug_history, &queued_for_update, obs.perceived_at) }
+                EntityType::Season => { ingest_for_version::<entity::Season>(graph, version_idx, obs.clone(), debug_history, &queued_for_update, obs.perceived_at) }
             }
         })
         .partition_result();
 
-    debug_history.get_mut(&(obs.entity_type, obs.entity_id)).unwrap().versions.push(DebugHistoryVersion {
+    debug_history.get_mut(&debug_key).unwrap().versions.push(DebugHistoryVersion {
         event_human_name: format!("End of ingest at {}", obs.perceived_at),
         time: obs.perceived_at,
         tree: graph.get_debug_tree(),
@@ -292,7 +297,7 @@ pub fn ingest_observation(ingest: &mut Ingest, obs: Observation, debug_history: 
     let keep_nodes = get_reachable_nodes(graph, successes.iter().flatten().copied().collect());
     let delete_nodes: HashSet<_> = prev_nodes.difference(&keep_nodes).copied().collect();
 
-    debug_history.get_mut(&(obs.entity_type, obs.entity_id)).unwrap().versions.push(DebugHistoryVersion {
+    debug_history.get_mut(&debug_key).unwrap().versions.push(DebugHistoryVersion {
         event_human_name: format!("Before delete from ingest at {}", obs.perceived_at),
         time: obs.perceived_at,
         tree: graph.get_debug_tree(),
@@ -307,7 +312,7 @@ pub fn ingest_observation(ingest: &mut Ingest, obs: Observation, debug_history: 
 
     graph.set_leafs(successes.into_iter().flatten().collect());
 
-    debug_history.get_mut(&(obs.entity_type, obs.entity_id)).unwrap().versions.push(DebugHistoryVersion {
+    debug_history.get_mut(&debug_key).unwrap().versions.push(DebugHistoryVersion {
         event_human_name: format!("After delete from ingest at {}", obs.perceived_at),
         time: obs.perceived_at,
         tree: graph.get_debug_tree(),
@@ -338,8 +343,6 @@ fn ingest_changed_event<EventT>(
     graph: &mut EntityStateGraph,
     existing_version_idx: NodeIndex,
     newly_added_version_idx: NodeIndex,
-    observed_date: DateTime<Utc>,
-    observed_indirection: i32,
     debug_history: &mut GraphDebugHistory,
     queued_for_update: &HashSet<NodeIndex>,
     debug_time: DateTime<Utc>,
@@ -406,10 +409,10 @@ fn ingest_changed_event<EventT>(
             all_parents_had_conflicts = false;
             if parent != &new_parent {
                 // Then a change was made and we need to save it to the graph and then recurse
-                let new_parent_idx = graph.add_child_disconnected(new_parent.into(), event_arc.clone(), AddedReason::RefinedFromObservation, observed_date, observed_indirection);
+                let new_parent_idx = graph.add_child_disconnected(new_parent.into(), event_arc.clone(), AddedReason::RefinedFromObservation);
                 graph.add_edge(new_parent_idx, newly_added_version_idx, new_extrapolated);
                 // Recurse
-                ingest_changed_event(graph, parent_idx, new_parent_idx, observed_date, observed_indirection + 1, debug_history, queued_for_update, debug_time);
+                ingest_changed_event(graph, parent_idx, new_parent_idx, debug_history, queued_for_update, debug_time);
             } else {
                 graph.add_edge(parent_idx, newly_added_version_idx, new_extrapolated);
             }
@@ -425,13 +428,13 @@ fn ingest_changed_event<EventT>(
 fn ingest_for_version<EntityT>(
     graph: &mut EntityStateGraph,
     entity_idx: NodeIndex,
-    obs: &Observation,
+    obs: Arc<Observation>,
     debug_history: &mut GraphDebugHistory,
     queued_for_update: &HashSet<NodeIndex>,
     debug_time: DateTime<Utc>,
 ) -> Result<Vec<NodeIndex>, Vec<Conflict>>
 // Disgustang
-    where EntityT: Entity + PartialInformationCompare + Into<AnyEntity>,
+    where EntityT: Entity + PartialInformationCompare + Into<AnyEntity> + 'static,
           for<'a> &'a AnyEntity: TryInto<&'a EntityT>,
           for<'a> &'a AnyEntityRaw: TryInto<&'a EntityT::Raw>,
           for<'a> <&'a AnyEntity as TryInto<&'a EntityT>>::Error: Debug,
@@ -474,13 +477,13 @@ fn ingest_for_version<EntityT>(
 fn ingest_for_event<EntityT, EventT>(
     graph: &mut EntityStateGraph,
     entity_idx: NodeIndex,
-    obs: &Observation,
+    obs: Arc<Observation>,
     debug_history: &mut GraphDebugHistory,
     queued_for_update: &HashSet<NodeIndex>,
     debug_time: DateTime<Utc>,
 ) -> Result<Vec<NodeIndex>, Vec<Conflict>>
 // Disgustang
-    where EntityT: Entity + PartialInformationCompare + Into<AnyEntity>,
+    where EntityT: Entity + PartialInformationCompare + Into<AnyEntity> + 'static,
           for<'a> &'a AnyEntity: TryInto<&'a EntityT>,
           for<'a> <&'a AnyEntity as TryInto<&'a EntityT>>::Error: Debug,
           for<'a> &'a AnyEntityRaw: TryInto<&'a EntityT::Raw>,
@@ -508,19 +511,16 @@ fn ingest_for_event<EntityT, EventT>(
     info!("entity was {}changed", if entity_was_changed { "" } else { "not "});
 
     let new_entity_idx = if entity_was_changed {
-        let new_entity_idx = graph.add_child_disconnected(
+        let new_entity_idx = graph.add_observed_child_disconnected(
             new_entity.into(),
             node.event.clone(),
             AddedReason::RefinedFromObservation,
-            obs.perceived_at,
-            0
+            obs.clone()
         );
         ingest_changed_event(
             graph,
             entity_idx,
             new_entity_idx,
-            obs.perceived_at,
-            1,
             debug_history,
             queued_for_update,
             debug_time
@@ -542,24 +542,51 @@ fn ingest_for_event<EntityT, EventT>(
 
     let mut generation = vec![(entity_idx, new_entity_idx)];
     loop { // generations loop
+        info!("Forward pass: walking next generation");
         let mut next_generation = Vec::new();
         for &(old_entity_idx, new_entity_idx) in &generation {
+            info!("Forward pass: walking children of {old_entity_idx:?}");
             let mut child_walker = graph.graph.children(old_entity_idx);
             while let Some((edge_idx, old_child_idx)) = child_walker.walk_next(&graph.graph) {
+                info!("Forward pass: walking child of {old_child_idx:?}");
                 // Gotta re-fetch because of borrowing rules
                 let old_entity_node = graph.graph.node_weight(old_entity_idx)
                     .expect("Must exist");
                 let extrapolated = graph.graph.edge_weight(edge_idx)
                     .expect("Must exist");
-                let event = &graph.graph.node_weight(old_child_idx)
-                    .expect("Must exist").event;
-                let new_child = event.forward(&old_entity_node.entity, &extrapolated);
+                let old_child = &graph.graph.node_weight(old_child_idx)
+                    .expect("Must exist");
+                let new_child_unobserved = old_child.event.forward(&old_entity_node.entity, &extrapolated);
                 // for debugging, placed here because of borrow rules
-                let event_description = event.to_string();
+                let event_description = old_child.event.to_string();
+
+                // Unfortunately, observations are not totally ordered, so sometimes we need to
+                // reapply an observation in the forward pass
+                let (new_child, observed) = if let Some(old_obs) = &old_child.observed {
+                    let raw: &EntityT::Raw = (&old_obs.entity_raw).try_into()
+                        .expect("This graph has inconsistent entity types");
+                    let unobserved: &EntityT = (&new_child_unobserved).try_into()
+                        .expect("Conflicting entity types");
+                    let mut new_child_entity = unobserved.clone();
+
+                    let conflicts = new_child_entity.observe(raw);
+                    if !conflicts.is_empty() {
+                        todo!("Terminate this branch, I think");
+                    }
+
+                    if &new_child_entity != unobserved {
+                        // TODO Apply to parent
+                    }
+
+                    (new_child_entity.into(), Some(old_obs.clone()))
+                } else {
+                    (new_child_unobserved, None)
+                };
+
                 let (_, new_child_idx) = graph.graph.add_child(new_entity_idx, extrapolated.clone(), StateGraphNode {
                     entity: new_child,
-                    event: event.clone(),
-                    observed: None,
+                    event: old_child.event.clone(),
+                    observed,
                     added_reason: AddedReason::DescendantOfObservedNode,
                 });
                 next_generation.push((old_child_idx, new_child_idx));

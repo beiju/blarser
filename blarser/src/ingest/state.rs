@@ -29,7 +29,7 @@ pub enum AddedReason {
 pub struct StateGraphNode {
     pub entity: AnyEntity,
     pub event: Arc<AnyEvent>,
-    pub observed: Option<(DateTime<Utc>, i32)>,
+    pub observed: Option<Arc<Observation>>,
     // For debugging mostly
     pub added_reason: AddedReason,
 }
@@ -38,14 +38,13 @@ impl StateGraphNode {
     pub fn new_observed(
         entity: AnyEntity,
         event: Arc<AnyEvent>,
-        observed: DateTime<Utc>,
-        observed_order: i32,
-        added_reason: AddedReason
+        observation: Arc<Observation>,
+        added_reason: AddedReason,
     ) -> Self {
         Self {
             entity,
             event,
-            observed: Some((observed, observed_order)),
+            observed: Some(observation),
             added_reason,
         }
     }
@@ -90,13 +89,17 @@ impl EntityStateGraph {
     pub fn get_version(&self, idx: NodeIndex) -> Option<&StateGraphNode> {
         self.graph.node_weight(idx)
     }
+    
+    pub fn get_version_mut(&mut self, idx: NodeIndex) -> Option<&mut StateGraphNode> {
+        self.graph.node_weight_mut(idx)
+    }
 
     pub fn add_child_version(&mut self,
                              parent_idx: NodeIndex,
                              new_entity: AnyEntity,
                              event: Arc<AnyEvent>,
                              extrapolated: AnyExtrapolated,
-                             added_reason: AddedReason
+                             added_reason: AddedReason,
     ) -> NodeIndex {
         let child_idx = self.graph.add_node(StateGraphNode {
             entity: new_entity,
@@ -112,13 +115,26 @@ impl EntityStateGraph {
                                   new_entity: AnyEntity,
                                   event: Arc<AnyEvent>,
                                   added_reason: AddedReason,
-                                  observed_by: DateTime<Utc>,
-                                  observed_indirection: i32,
     ) -> NodeIndex {
         self.graph.add_node(StateGraphNode {
             entity: new_entity,
             event,
-            observed: Some((observed_by, observed_indirection)),
+            observed: None,
+            added_reason,
+        })
+    }
+
+
+    pub fn add_observed_child_disconnected(&mut self,
+                                           new_entity: AnyEntity,
+                                           event: Arc<AnyEvent>,
+                                           added_reason: AddedReason,
+                                           obs: Arc<Observation>,
+    ) -> NodeIndex {
+        self.graph.add_node(StateGraphNode {
+            entity: new_entity,
+            event,
+            observed: Some(obs),
             added_reason,
         })
     }
@@ -162,13 +178,10 @@ impl EntityStateGraph {
             // If this node's time span ends before the observation's time span begins, we can stop
             // traversing its branch and not add it to outputs
             if latest_node_time.map_or(false, |t| t < earliest) { continue; }
-            // If this node is already observed, we can stop traversing its branch but we still
-            // need to add it to outputs (unless it's outside the time span)
-            if !node.observed.is_some() {
-                let mut parent_walker = self.graph.parents(node_idx);
-                while let Some((_, parent_idx)) = parent_walker.walk_next(&self.graph) {
-                    if !visited.contains(&parent_idx) { stack.push(parent_idx); }
-                }
+            // I thought you could stop walking if you hit an already-observed node but, alas, nope
+            let mut parent_walker = self.graph.parents(node_idx);
+            while let Some((_, parent_idx)) = parent_walker.walk_next(&self.graph) {
+                if !visited.contains(&parent_idx) { stack.push(parent_idx); }
             }
             // If this node's time span begins after the observation's time span ends, we continue
             // traversing its branch but don't add it to outputs
@@ -271,7 +284,7 @@ impl StateGraph {
     pub fn populate(&mut self, obses: Vec<Observation>, start_time: DateTime<Utc>, history: &mut GraphDebugHistory) {
         let start_event: Arc<AnyEvent> = Arc::new(Start::new(start_time).into());
         for obs in obses {
-            let entity = AnyEntity::from_raw(obs.entity_raw);
+            let entity = AnyEntity::from_raw(obs.entity_raw.clone());
 
             // Unfortunately these assignments all have to be in a specific order that makes it
             // not particularly easy to tell what's going on. Gathering data for the debug view is
@@ -282,19 +295,21 @@ impl StateGraph {
             let json = entity.to_json();
 
             // Real work
+            let entity_type = obs.entity_type;
+            let entity_id = obs.entity_id;
             let new_graph = EntityStateGraph::new(StateGraphNode::new_observed(
-                entity, start_event.clone(), obs.perceived_at, 0, AddedReason::Start));
+                entity, start_event.clone(), Arc::new(obs), AddedReason::Start));
 
             // Debug
             let generations = vec![new_graph.roots().iter().cloned().collect()];
             let idx = *new_graph.roots().iter().exactly_one().unwrap();
 
             // Real work
-            self.graphs.insert((obs.entity_type, obs.entity_id), new_graph);
-            self.ids_for_type.entry(obs.entity_type).or_default().push(obs.entity_id);
+            self.graphs.insert((entity_type, entity_id), new_graph);
+            self.ids_for_type.entry(entity_type).or_default().push(entity_id);
 
             // Debug
-            history.insert((obs.entity_type, obs.entity_id), DebugHistoryItem {
+            history.insert((entity_type, entity_id), DebugHistoryItem {
                 entity_human_name,
                 versions: vec![DebugHistoryVersion {
                     event_human_name: "Start".to_string(),
