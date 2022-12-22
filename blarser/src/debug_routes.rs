@@ -137,6 +137,70 @@ fn get_history(task: &State<IngestTaskHolder>) -> Result<GraphDebugHistorySync, 
     Ok(ingest.debug_history.clone())
 }
 
+#[get("/pause_state")]
+pub async fn pause_state(task: &State<IngestTaskHolder>) -> Json<serde_json::Value> {
+    let is_paused = {
+        let ingest = task.latest_ingest.lock().unwrap();
+        ingest.as_ref().map_or(false, |ingest| ingest.resumer.is_some())
+    };
+
+    Json(json!({
+        "paused": is_paused,
+    }))
+}
+
+#[rocket::post("/pause")]
+pub async fn post_pause(task: &State<IngestTaskHolder>) -> Json<serde_json::Value> {
+    let requester = {
+        let mut ingest = task.latest_ingest.lock().unwrap();
+        if let Some(ingest) = ingest.as_mut() {
+            if ingest.resumer.is_some() {
+                return Json(json!({ "error": "Already paused" }))
+            }
+
+            let (resumer, resume_reciever) = tokio::sync::oneshot::channel();
+            ingest.resumer = Some(resumer);
+            Some((ingest.pause_requester.clone(), resume_reciever))
+        } else {
+            None
+        }
+    };
+
+    if let Some((requester, resume_reciever)) = requester {
+        let requester = requester.lock().await;
+        requester.send(resume_reciever).await.unwrap();
+
+        Json(json!({
+            "paused": true,
+        }))
+    } else {
+        Json(json!({
+            "error": "No ingest",
+        }))
+    }
+}
+
+#[rocket::post("/resume")]
+pub async fn post_resume(task: &State<IngestTaskHolder>) -> Json<serde_json::Value> {
+    let mut ingest = task.latest_ingest.lock().unwrap();
+    if let Some(ingest) = ingest.as_mut() {
+        if let Some(resumer) = ingest.resumer.take() {
+            resumer.send(()).unwrap();
+            Json(json!({
+                "paused": false,
+            }))
+        } else {
+            Json(json!({
+                "error": "Not paused",
+            }))
+        }
+    } else {
+        Json(json!({
+            "error": "No ingest",
+        }))
+    }
+}
+
 pub fn routes() -> Vec<Route> {
-    rocket::routes![entities, entity, version]
+    rocket::routes![entities, entity, version, pause_state, post_pause, post_resume]
 }

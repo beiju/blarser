@@ -52,8 +52,13 @@ pub async fn run_ingest(mut ingest: Ingest, start_time: DateTime<Utc>) {
     info!("Got updates stream");
     pin_mut!(observations);
 
-
     loop {
+        if let Ok(resumer) = ingest.pause_request.try_recv() {
+            info!("Pausing ingest");
+            resumer.await.unwrap();
+            info!("Resuming ingest");
+        }
+
         let mut latest_feed_update;
         // TODO this always blocks until the next event comes in, defeating the purpose of having
         //   event-less "latest ingest time" updates

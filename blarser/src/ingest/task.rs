@@ -6,7 +6,7 @@ use rocket::info;
 use core::default::Default;
 use petgraph::stable_graph::NodeIndex;
 use serde::Serialize;
-use tokio::sync::{oneshot, Mutex as TokioMutex};
+use tokio::sync::{oneshot, mpsc, Mutex as TokioMutex};
 use uuid::Uuid;
 
 use crate::db::BlarserDbConn;
@@ -53,6 +53,8 @@ pub struct IngestTask {
     ingest_id: i32,
     pending_approvals: Arc<StdMutex<HashMap<i32, oneshot::Sender<bool>>>>,
     pub debug_history: GraphDebugHistorySync,
+    pub pause_requester: Arc<TokioMutex<mpsc::Sender<oneshot::Receiver<()>>>>,
+    pub resumer: Option<oneshot::Sender<()>>,
 }
 
 impl IngestTask {
@@ -84,7 +86,8 @@ impl IngestTask {
             .with_timezone(&Utc);
 
         let approvals = Arc::new(StdMutex::new(HashMap::new()));
-        let ingest = Ingest::new(ingest_id, conn);
+        let (pause_requester, pause_requests) = mpsc::channel(10);
+        let ingest = Ingest::new(ingest_id, conn, pause_requests);
         let debug_history = ingest.debug_history.clone();
 
         tokio::spawn(run_ingest(ingest, start_time_parsed));
@@ -93,6 +96,8 @@ impl IngestTask {
             ingest_id,
             pending_approvals: approvals,
             debug_history,
+            pause_requester: Arc::new(TokioMutex::new(pause_requester)),
+            resumer: None,
         }
     }
 
@@ -148,16 +153,18 @@ pub struct Ingest {
     pub pending_approvals: Arc<StdMutex<HashMap<i32, oneshot::Sender<bool>>>>,
     pub state: Arc<StdMutex<StateGraph>>,
     pub debug_history: GraphDebugHistorySync,
+    pub pause_request: mpsc::Receiver<oneshot::Receiver<()>>,
 }
 
 impl Ingest {
-    pub fn new(ingest_id: i32, db: BlarserDbConn) -> Self {
+    pub fn new(ingest_id: i32, db: BlarserDbConn, pause_request: mpsc::Receiver<oneshot::Receiver<()>>) -> Self {
         Self {
             ingest_id,
             db,
             pending_approvals: Arc::new(StdMutex::new(Default::default())),
             state: Arc::new(StdMutex::new(StateGraph::new())),
             debug_history: Arc::new(TokioMutex::new(Default::default())),
+            pause_request,
         }
     }
 
