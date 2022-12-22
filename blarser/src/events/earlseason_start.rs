@@ -59,14 +59,16 @@ impl Event for EarlseasonStart {
             ] {
                 self_by_team.batter_name = Some(String::new());
                 self_by_team.odds = Some(odds_extrapolated);
-                self_by_team.pitcher = Some(pitcher_extrapolated.pitcher_id);
-                self_by_team.pitcher_name = Some(pitcher_extrapolated.pitcher_name.clone());
-                self_by_team.pitcher_mod = pitcher_extrapolated.pitcher_mod.clone();
+                // TODO If this pitcher id/name/mod is right, remove pitchers from extrapolated
+                self_by_team.pitcher = None;
+                self_by_team.pitcher_name = Some(MaybeKnown::Known(String::new()));
+                self_by_team.pitcher_mod = MaybeKnown::Known(String::new());
                 self_by_team.score = Some(0.0);
                 self_by_team.strikes = Some(3);
             }
             game.last_update = Some(String::new());
-            game.last_update_full = Some(Vec::new());
+            // This starts happening in short circuits, I think
+            // game.last_update_full = Some(Vec::new());
         }
 
         entity
@@ -94,16 +96,16 @@ impl Event for EarlseasonStart {
                     .expect("Mismatched event types");
                 let extrapolated: &mut OddsAndPitchersExtrapolated = extrapolated.try_into()
                     .expect("Extrapolated type mismatch");
-                extrapolated.away.pitcher_id = new_game.away.pitcher
-                    .expect("Away pitcher should exist when reversing an EarlseasonStart event");
-                extrapolated.away.pitcher_name = new_game.away.pitcher_name.clone()
-                    .expect("Away pitcher should exist when reversing an EarlseasonStart event");
-                extrapolated.away.pitcher_mod = new_game.away.pitcher_mod.clone();
-                extrapolated.home.pitcher_id = new_game.home.pitcher
-                    .expect("Home pitcher should exist when reversing an EarlseasonStart event");
-                extrapolated.home.pitcher_name = new_game.home.pitcher_name.clone()
-                    .expect("Home pitcher should exist when reversing an EarlseasonStart event");
-                extrapolated.home.pitcher_mod = new_game.home.pitcher_mod.clone();
+                // extrapolated.away.pitcher_id = new_game.away.pitcher
+                //     .expect("Away pitcher should exist when reversing an EarlseasonStart event");
+                // extrapolated.away.pitcher_name = new_game.away.pitcher_name.clone()
+                //     .expect("Away pitcher should exist when reversing an EarlseasonStart event");
+                // extrapolated.away.pitcher_mod = new_game.away.pitcher_mod.clone();
+                // extrapolated.home.pitcher_id = new_game.home.pitcher
+                //     .expect("Home pitcher should exist when reversing an EarlseasonStart event");
+                // extrapolated.home.pitcher_name = new_game.home.pitcher_name.clone()
+                //     .expect("Home pitcher should exist when reversing an EarlseasonStart event");
+                // extrapolated.home.pitcher_mod = new_game.home.pitcher_mod.clone();
                 extrapolated.away_odds = new_game.away.odds
                     .expect("Odds should exist when reversing an EarlseasonStart event");
                 extrapolated.home_odds = new_game.home.odds
