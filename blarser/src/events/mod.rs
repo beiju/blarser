@@ -20,7 +20,6 @@ mod stolen_base;
 mod walk;
 // mod player_reroll;
 
-use std::any::Any;
 pub(crate) use game_update::GameUpdate;
 pub use effects::{Extrapolated, AnyExtrapolated, Effect};
 pub use start::Start;
@@ -145,5 +144,4 @@ macro_rules! ord_by_time {
 ord_by_time!(AnyEvent);
 
 pub(crate) use ord_by_time;
-use crate::events::effects::NullExtrapolated;
 use crate::polymorphic_enum::polymorphic_enum;

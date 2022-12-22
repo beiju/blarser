@@ -4,37 +4,22 @@ use derive_more::{From, TryInto};
 use uuid::Uuid;
 use partial_information::MaybeKnown;
 use partial_information_derive::PartialInformationCompare;
-use crate::entity::AnyEntity;
 use crate::polymorphic_enum::polymorphic_enum;
 use crate::state::EntityType;
 
-pub trait Extrapolated: Debug + AsAny {
-    fn fill(&self, entity: &AnyEntity) -> Self;
-}
+pub trait Extrapolated: Debug + AsAny {}
 
-#[derive(Debug, Clone, PartialInformationCompare)]
+#[derive(Default, Debug, Clone, PartialInformationCompare)]
 pub struct NullExtrapolated {}
 
-impl Extrapolated for NullExtrapolated {
-    fn fill(&self, _: &AnyEntity) -> Self {
-        Self {}
-    }
-}
+impl Extrapolated for NullExtrapolated {}
 
 #[derive(Default, Debug, Clone, PartialInformationCompare)]
 pub struct SubsecondsExtrapolated {
     pub(crate) ns: MaybeKnown<u32>,
 }
 
-impl Extrapolated for SubsecondsExtrapolated {
-    fn fill(&self, entity: &AnyEntity) -> Self {
-        let sim = entity.as_sim()
-            .expect("TODO: Strongly type this?");
-        Self {
-            ns: sim.next_phase_time.ns()
-        }
-    }
-}
+impl Extrapolated for SubsecondsExtrapolated {}
 
 #[derive(Debug, Clone, PartialInformationCompare)]
 pub struct BatterIdExtrapolated {
@@ -47,11 +32,7 @@ impl BatterIdExtrapolated {
     }
 }
 
-impl Extrapolated for BatterIdExtrapolated {
-    fn fill(&self, _: &AnyEntity) -> Self {
-        self.clone()
-    }
-}
+impl Extrapolated for BatterIdExtrapolated {}
 
 #[derive(Default, Debug, Clone, PartialInformationCompare)]
 pub struct PitcherExtrapolated {
@@ -72,53 +53,17 @@ impl PitchersExtrapolated {
     }
 }
 
-impl Extrapolated for PitchersExtrapolated {
-    fn fill(&self, entity: &AnyEntity) -> Self {
-        let game = entity.as_game()
-            .expect("TODO: Strongly type this?");
-        Self {
-            away: PitcherExtrapolated {
-                pitcher_id: game.away.pitcher.clone()
-                    .expect("There should be an away pitcher at this point"),
-                pitcher_name: game.away.pitcher_name.clone()
-                    .expect("There should be an away pitcher name at this point"),
-                pitcher_mod: game.away.pitcher_mod.clone(),
-            },
-            home: PitcherExtrapolated {
-                pitcher_id: game.home.pitcher.clone()
-                    .expect("There should be a home pitcher at this point"),
-                pitcher_name: game.home.pitcher_name.clone()
-                    .expect("There should be a home pitcher name at this point"),
-                pitcher_mod: game.home.pitcher_mod.clone(),
-            },
-        }
-    }
-}
+impl Extrapolated for PitchersExtrapolated {}
+
 #[derive(Default, Debug, Clone, PartialInformationCompare)]
-pub struct OddsExtrapolated {
+pub struct OddsAndPitchersExtrapolated {
+    pub away: PitcherExtrapolated,
+    pub home: PitcherExtrapolated,
     pub away_odds: MaybeKnown<f32>,
     pub home_odds: MaybeKnown<f32>,
 }
 
-impl Extrapolated for OddsExtrapolated {
-    fn fill(&self, entity: &AnyEntity) -> Self {
-        let game = entity.as_game()
-            .expect("TODO: Strongly type this?");
-        Self {
-            away_odds: game.away.odds.clone()
-                .expect("There should be game odds at this point"),
-            home_odds: game.home.odds.clone()
-                .expect("There should be game odds at this point"),
-        }
-    }
-}
-
-// #[derive(From, TryInto, Clone, Debug)]
-// #[try_into(owned, ref, ref_mut)]
-// pub enum AnyExtrapolated {
-//     Null(NullExtrapolated),
-//     BatterId(BatterIdExtrapolated),
-// }
+impl Extrapolated for OddsAndPitchersExtrapolated {}
 
 polymorphic_enum! {
     #[derive(From, TryInto, Clone, Debug)]
@@ -128,7 +73,7 @@ polymorphic_enum! {
         Subseconds(SubsecondsExtrapolated),
         BatterId(BatterIdExtrapolated),
         Pitchers(PitchersExtrapolated),
-        Odds(OddsExtrapolated),
+        OddsAndPitchers(OddsAndPitchersExtrapolated),
     }
 }
 
@@ -141,11 +86,11 @@ pub struct Effect {
 
 impl Effect {
     pub fn one_id(ty: EntityType, id: Uuid) -> Self {
-        Self::one_id_with(ty, id, NullExtrapolated {})
+        Self::one_id_with(ty, id, NullExtrapolated::default())
     }
 
     pub fn all_ids(ty: EntityType) -> Self {
-        Self::all_ids_with(ty, NullExtrapolated {})
+        Self::all_ids_with(ty, NullExtrapolated::default())
     }
 
     pub fn null_id(ty: EntityType) -> Self {
