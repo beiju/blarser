@@ -4,10 +4,10 @@ use serde::{Deserialize, Serialize};
 use crate::compare::{Conflict, PartialInformationDiff};
 use crate::PartialInformationCompare;
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Default, Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum MaybeKnown<UnderlyingType> {
-    Unknown,
+    #[default] Unknown,
     Known(UnderlyingType),
 }
 

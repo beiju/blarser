@@ -5,7 +5,7 @@ use partial_information::{Conflict, DatetimeWithResettingMs, MaybeKnown, Partial
 
 use crate::entity::{AnyEntity};
 use crate::events::{AnyExtrapolated, Effect, Event, ord_by_time};
-use crate::events::effects::{NullExtrapolated, OddsExtrapolated, SubsecondsExtrapolated};
+use crate::events::effects::{OddsExtrapolated, SubsecondsExtrapolated};
 use crate::ingest::StateGraph;
 use crate::state::EntityType;
 
@@ -32,7 +32,7 @@ impl Event for EarlseasonStart {
         ]
     }
 
-    fn forward(&self, mut entity: &AnyEntity, _: &AnyExtrapolated) -> AnyEntity {
+    fn forward(&self, entity: &AnyEntity, _: &AnyExtrapolated) -> AnyEntity {
         let mut entity = entity.clone();
 
         if let Some(sim) = entity.as_sim_mut() {

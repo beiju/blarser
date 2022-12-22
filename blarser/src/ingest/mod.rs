@@ -7,24 +7,19 @@ mod fed;
 mod state;
 mod error;
 
-use std::cmp::Reverse;
-use std::ops::Deref;
-
 pub use task::{IngestTask, IngestTaskHolder};
 pub use observation::Observation;
 pub use observation_event::ChronObservationEvent;
 pub use state::StateGraph;
 
+use std::cmp::Reverse;
 use chrono::{DateTime, Utc};
-use diesel::internal::operators_macro::FieldAliasMapper;
-
 use futures::{pin_mut, StreamExt};
 use log::info;
 
 pub use crate::ingest::task::{Ingest, GraphDebugHistorySync, GraphDebugHistory};
 use crate::ingest::fed::{EventStreamItem, get_fed_event_stream, get_timed_event_list, ingest_event};
-use crate::ingest::chron::{chron_updates, chron_updates_hardcoded, ingest_observation, load_initial_state};
-use crate::events::Event;
+use crate::ingest::chron::{chron_updates_hardcoded, ingest_observation, load_initial_state};
 
 #[derive(Debug)]
 enum Source {
@@ -35,7 +30,7 @@ enum Source {
 
 pub async fn run_ingest(mut ingest: Ingest, start_time: DateTime<Utc>) {
     info!("Loading initial state from {start_time}...");
-    let initial_observations = load_initial_state(&ingest, start_time).await;
+    let initial_observations = load_initial_state(start_time).await;
     {
         let mut history = ingest.debug_history.lock().await;
         let mut state = ingest.state.lock().unwrap();
@@ -57,9 +52,9 @@ pub async fn run_ingest(mut ingest: Ingest, start_time: DateTime<Utc>) {
     info!("Got updates stream");
     pin_mut!(observations);
 
-    let mut latest_feed_update = start_time;
 
     loop {
+        let mut latest_feed_update;
         // TODO this always blocks until the next event comes in, defeating the purpose of having
         //   event-less "latest ingest time" updates
         info!("Finding next feed event time");
@@ -136,6 +131,5 @@ pub async fn run_ingest(mut ingest: Ingest, start_time: DateTime<Utc>) {
         };
 
         timed_events.extend(new_timed_events.into_iter().map(Reverse));
-
     }
 }

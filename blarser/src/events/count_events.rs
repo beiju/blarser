@@ -3,13 +3,12 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use partial_information::Conflict;
 
-use crate::entity::{AnyEntity, Entity};
-use crate::events::{AnyExtrapolated, Effect, Event, Extrapolated, ord_by_time};
+use crate::entity::AnyEntity;
+use crate::events::{AnyExtrapolated, Effect, Event, ord_by_time};
 use crate::events::effects::BatterIdExtrapolated;
 use crate::events::event_util::game_effect_with_batter_id;
 use crate::events::game_update::GameUpdate;
 use crate::ingest::StateGraph;
-use crate::state::EntityType;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Strike {
@@ -41,7 +40,7 @@ impl Event for Strike {
         entity
     }
 
-    fn backward(&self, extrapolated: &AnyExtrapolated, entity: &mut AnyEntity) -> Vec<Conflict> {
+    fn backward(&self, _extrapolated: &AnyExtrapolated, _entity: &mut AnyEntity) -> Vec<Conflict> {
         todo!()
     }
 }
@@ -84,7 +83,7 @@ impl Event for Ball {
         entity
     }
 
-    fn backward(&self, extrapolated: &AnyExtrapolated, entity: &mut AnyEntity) -> Vec<Conflict> {
+    fn backward(&self, _extrapolated: &AnyExtrapolated, _entity: &mut AnyEntity) -> Vec<Conflict> {
         todo!()
     }
 }
@@ -131,7 +130,7 @@ impl Event for FoulBall {
         entity
     }
 
-    fn backward(&self, extrapolated: &AnyExtrapolated, entity: &mut AnyEntity) -> Vec<Conflict> {
+    fn backward(&self, _extrapolated: &AnyExtrapolated, _entity: &mut AnyEntity) -> Vec<Conflict> {
         todo!()
     }
 }

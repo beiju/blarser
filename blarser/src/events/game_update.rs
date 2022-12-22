@@ -1,10 +1,6 @@
-use std::iter;
-use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use partial_information::MaybeKnown;
-use crate::api::{EventType, EventuallyEvent, Weather};
-use crate::entity::{Game, UpdateFull};
+use crate::entity::Game;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Score {
@@ -125,16 +121,16 @@ impl GameUpdate {
     }
 }
 
-#[derive(Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct GamePitch(GameUpdate);
-
-impl GamePitch {
-    pub fn forward(&self, game: &mut Game) {
-        self.0.forward(game);
-
-        // if game.weather == (Weather::Snowy as i32) && game.state.map_or(false, |state| state.snowfall_events.is_none()) {
-        //     game.state.snowfall_events = Some(0);
-        // }
-    }
-}
+// #[derive(Serialize, Deserialize)]
+// #[serde(transparent)]
+// pub struct GamePitch(GameUpdate);
+//
+// impl GamePitch {
+//     pub fn forward(&self, game: &mut Game) {
+//         self.0.forward(game);
+//
+//         // if game.weather == (Weather::Snowy as i32) && game.state.map_or(false, |state| state.snowfall_events.is_none()) {
+//         //     game.state.snowfall_events = Some(0);
+//         // }
+//     }
+// }

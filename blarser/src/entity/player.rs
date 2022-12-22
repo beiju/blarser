@@ -1,12 +1,11 @@
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
-use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use partial_information::{Rerollable, PartialInformationCompare, MaybeKnown};
 use partial_information_derive::PartialInformationCompare;
 
-use crate::entity::{AnyEntity, Entity, EntityRaw, WrongEntityError};
+use crate::entity::{Entity, EntityRaw};
 use crate::state::EntityType;
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, PartialInformationCompare)]
@@ -107,7 +106,7 @@ pub struct Player {
     pub pitching_rating: Option<MaybeKnown<f32>>,
     pub baserunning_rating: Option<MaybeKnown<f32>>,
 
-    #[allow(non_snake_case)] pub eDensity: Option<f32>,
+    #[allow(non_snake_case)] pub edensity: Option<f32>,
 }
 
 impl Display for Player {

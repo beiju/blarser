@@ -1,12 +1,11 @@
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
-use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use partial_information::{PartialInformationCompare, Spurious};
 use partial_information_derive::PartialInformationCompare;
 
-use crate::entity::{AnyEntity, Entity, EntityRaw, WrongEntityError};
+use crate::entity::{Entity, EntityRaw};
 use crate::state::EntityType;
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, PartialInformationCompare)]
@@ -87,9 +86,9 @@ pub struct Team {
     pub tournament_wins: Option<i32>,
     pub underchampionships: Option<i32>,
 
-    #[allow(non_snake_case)] pub eDensity: Option<f32>,
-    #[allow(non_snake_case)] pub eVelocity: Option<f32>,
-    #[allow(non_snake_case)] pub imPosition: Option<f32>,
+    pub edensity: Option<f32>,
+    pub evelocity: Option<f32>,
+    pub imposition: Option<f32>,
 }
 
 impl Display for Team {

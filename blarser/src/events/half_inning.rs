@@ -1,7 +1,7 @@
 use std::fmt::{Display, Formatter};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use partial_information::{Conflict, MaybeKnown, PartialInformationCompare};
+use partial_information::{Conflict, MaybeKnown};
 
 use crate::entity::AnyEntity;
 use crate::events::{AnyExtrapolated, Effect, Event, ord_by_time};
@@ -54,10 +54,12 @@ impl Event for HalfInning {
             self.game_update.forward(game);
 
             if game.inning == -1 {
-                game.home.pitcher = Some(extrapolated.home_pitcher_id);
-                game.home.pitcher_name = Some(extrapolated.home_pitcher_name.clone());
-                game.away.pitcher = Some(extrapolated.away_pitcher_id);
-                game.away.pitcher_name = Some(extrapolated.away_pitcher_name.clone());
+                game.home.pitcher = Some(extrapolated.home.pitcher_id);
+                game.home.pitcher_name = Some(extrapolated.home.pitcher_name.clone());
+                game.home.pitcher_mod = extrapolated.home.pitcher_mod.clone();
+                game.away.pitcher = Some(extrapolated.away.pitcher_id);
+                game.away.pitcher_name = Some(extrapolated.away.pitcher_name.clone());
+                game.away.pitcher_mod = extrapolated.away.pitcher_mod.clone();
             }
 
             game.top_of_inning = !game.top_of_inning;
@@ -72,14 +74,16 @@ impl Event for HalfInning {
         entity
     }
 
-    fn backward(&self, extrapolated: &AnyExtrapolated, entity: &mut AnyEntity) -> Vec<Conflict> {
-        let mut conflicts = Vec::new();
+    fn backward(&self, _extrapolated: &AnyExtrapolated, entity: &mut AnyEntity) -> Vec<Conflict> {
+        let conflicts = Vec::new();
         
         if let Some(game) = entity.as_game_mut() {
             game.home.pitcher = None;
             game.home.pitcher_name = Some(MaybeKnown::Known(String::new()));
+            game.home.pitcher_mod = MaybeKnown::Known(String::new());
             game.away.pitcher = None;
             game.away.pitcher_name = Some(MaybeKnown::Known(String::new()));
+            game.away.pitcher_mod = MaybeKnown::Known(String::new());
         }
 
         conflicts

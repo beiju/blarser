@@ -1,7 +1,5 @@
 #![feature(let_chains)]
 #![feature(trivial_bounds)] // Necessary for partial_information
-#![feature(generic_associated_types)]
-#![feature(map_first_last)] // Used in ObservationStream in chron ingest
 #![feature(min_specialization)] // Used for Event/Entity interaction
 #![recursion_limit = "256"]
 

@@ -4,14 +4,13 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use futures::{Stream, stream};
 use fed::{FedEvent, FedEventData};
-use log::{info, log};
-use serde_json::json;
+use log::info;
 use crate::entity::Base;
 
 use crate::events;
-use crate::events::{Effect, AnyEvent, Event, GameUpdate};
+use crate::events::{Effect, AnyEvent, GameUpdate};
 use crate::ingest::error::IngestResult;
-use crate::ingest::task::{DebugHistoryItem, DebugHistoryVersion, Ingest};
+use crate::ingest::task::{DebugHistoryVersion, Ingest};
 
 pub struct EventStreamItem {
     last_update_time: DateTime<Utc>,
@@ -19,14 +18,6 @@ pub struct EventStreamItem {
 }
 
 impl EventStreamItem {
-    pub fn time(&self) -> DateTime<Utc> {
-        if let Some(event) = &self.event {
-            std::cmp::min(event.time(), self.last_update_time)
-        } else {
-            self.last_update_time
-        }
-    }
-
     pub fn last_update_time(&self) -> DateTime<Utc> {
         self.last_update_time
     }

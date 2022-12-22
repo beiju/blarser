@@ -1,13 +1,12 @@
-use std::fmt::{Display, format, Formatter};
-use chrono::{DateTime, Duration, Utc};
-use itertools::Itertools;
+use std::fmt::{Display, Formatter};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_with::with_prefix;
 use uuid::Uuid;
 use partial_information::{PartialInformationCompare, MaybeKnown};
 use partial_information_derive::PartialInformationCompare;
 
-use crate::entity::{AnyEntity, Base, Entity, EntityRaw, RunnerAdvancement, WrongEntityError};
+use crate::entity::{Base, Entity, EntityRaw, RunnerAdvancement};
 use crate::state::EntityType;
 
 // This only existed in Short Circuits
@@ -96,7 +95,7 @@ pub struct GameByTeam {
     pub team_emoji: String,
     pub batter_mod: String,
     pub batter_name: Option<String>,
-    pub pitcher_mod: String,
+    pub pitcher_mod: MaybeKnown<String>,
     pub pitcher_name: Option<MaybeKnown<String>>,
     pub team_nickname: String,
     pub team_batter_count: Option<i32>,
@@ -213,22 +212,22 @@ impl Game {
         }
     }
 
-    pub(crate) fn team_fielding(&self) -> &GameByTeam {
-        if self.top_of_inning {
-            &self.home
-        } else {
-            &self.away
-        }
-    }
-
-    pub(crate) fn team_fielding_mut(&mut self) -> &mut GameByTeam {
-        if self.top_of_inning {
-            &mut self.home
-        } else {
-            &mut self.away
-        }
-    }
-
+    // pub(crate) fn team_fielding(&self) -> &GameByTeam {
+    //     if self.top_of_inning {
+    //         &self.home
+    //     } else {
+    //         &self.away
+    //     }
+    // }
+    //
+    // pub(crate) fn team_fielding_mut(&mut self) -> &mut GameByTeam {
+    //     if self.top_of_inning {
+    //         &mut self.home
+    //     } else {
+    //         &mut self.away
+    //     }
+    // }
+    //
     // pub(crate) fn score_runner(&mut self, runner_id: Uuid) {
     //     let runner_from_state = self.base_runners.remove(0);
     //     if runner_from_state != runner_id {
@@ -296,31 +295,31 @@ impl Game {
         self.at_bat_strikes = 0;
     }
 
-    pub(crate) fn get_baserunner_with_name(&self, expected_name: &str, base_plus_one: Base) -> usize {
-        self.get_baserunner_with_property(expected_name, base_plus_one, &self.base_runner_names)
-            .expect("Couldn't find baserunner with specified name on specified base")
-    }
-
-    fn get_baserunner_with_id(&self, expected_id: Uuid, base_plus_one: Base) -> usize {
-        self.get_baserunner_with_property(&expected_id, base_plus_one, &self.base_runners)
-            .expect("Couldn't find baserunner with specified id on specified base")
-    }
-
-    fn get_baserunner_with_property<U, T: ?Sized + std::cmp::PartialEq<U>>(
-        &self, expected_property: &T, which_base: Base, baserunner_properties: &[U],
-    ) -> Option<usize> {
-        Iterator::zip(baserunner_properties.into_iter(), self.bases_occupied.iter())
-            .enumerate()
-            .filter_map(|(i, (name, base))| {
-                if expected_property == name && *base == (which_base as i32 - 1) {
-                    Some(i)
-                } else {
-                    None
-                }
-            })
-            .exactly_one().ok()
-    }
-
+    // pub(crate) fn get_baserunner_with_name(&self, expected_name: &str, base_plus_one: Base) -> usize {
+    //     self.get_baserunner_with_property(expected_name, base_plus_one, &self.base_runner_names)
+    //         .expect("Couldn't find baserunner with specified name on specified base")
+    // }
+    //
+    // fn get_baserunner_with_id(&self, expected_id: Uuid, base_plus_one: Base) -> usize {
+    //     self.get_baserunner_with_property(&expected_id, base_plus_one, &self.base_runners)
+    //         .expect("Couldn't find baserunner with specified id on specified base")
+    // }
+    //
+    // fn get_baserunner_with_property<U, T: ?Sized + std::cmp::PartialEq<U>>(
+    //     &self, expected_property: &T, which_base: Base, baserunner_properties: &[U],
+    // ) -> Option<usize> {
+    //     Iterator::zip(baserunner_properties.into_iter(), self.bases_occupied.iter())
+    //         .enumerate()
+    //         .filter_map(|(i, (name, base))| {
+    //             if expected_property == name && *base == (which_base as i32 - 1) {
+    //                 Some(i)
+    //             } else {
+    //                 None
+    //             }
+    //         })
+    //         .exactly_one().ok()
+    // }
+    //
     pub fn advance_runners(&mut self, advancements: &[RunnerAdvancement]) {
         for (i, advancement) in advancements.iter().enumerate() {
             assert_eq!(self.base_runners[i], advancement.runner_id);

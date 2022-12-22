@@ -5,7 +5,7 @@ use crate::schema::*;
 use crate::state::EntityType;
 
 #[derive(Insertable)]
-#[table_name = "approvals"]
+#[diesel(table_name = approvals)]
 pub struct NewApproval<'a> {
     pub entity_type: EntityType,
     pub entity_id: Uuid,

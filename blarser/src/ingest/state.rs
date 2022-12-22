@@ -8,7 +8,6 @@ use daggy::stable_dag::{StableDag, NodeIndex, EdgeIndex};
 use petgraph::visit::Walker;
 use serde::Serialize;
 use uuid::Uuid;
-use partial_information::PartialInformationCompare;
 
 use crate::entity::{self, AnyEntity, Entity};
 use crate::events::{Effect, AnyEvent, EarlseasonStart, Event, AnyExtrapolated, Start};

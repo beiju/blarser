@@ -11,8 +11,8 @@ use blarser::state::{StateInterface, EntityDescription};
 use crate::routes::ApiError;
 
 #[rocket::get("/debug")]
-pub async fn debug(conn: BlarserDbConn, ingest_holder: &State<IngestTaskHolder>) -> Result<Template, ApiError> {
-    let ingest_id = ingest_holder.latest_ingest_id()
+pub async fn debug(_conn: BlarserDbConn, ingest_holder: &State<IngestTaskHolder>) -> Result<Template, ApiError> {
+    let _ingest_id = ingest_holder.latest_ingest_id()
         .ok_or_else(|| ApiError::InternalError("There is no ingest yet".to_string()))?;
 
     #[derive(Serialize)]

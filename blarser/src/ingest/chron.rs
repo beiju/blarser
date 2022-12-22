@@ -6,30 +6,24 @@ use std::iter;
 use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
-use as_any::AsAny;
 use chrono::{DateTime, Utc};
 use futures::{stream, Stream, StreamExt};
 use itertools::Itertools;
 use rocket::info;
 use partial_information::{Conflict, PartialInformationCompare};
 use futures::future::join_all;
-use futures::stream::Peekable;
-use log::error;
 use petgraph::stable_graph::NodeIndex;
 use petgraph::visit::Walker;
 use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::api::chronicler;
-use crate::ingest::task::{DebugHistoryVersion, DebugTree, Ingest};
-use crate::entity::{self, AnyEntity, AnyEntityRaw, Entity, EntityParseError, EntityRaw};
-use crate::events::{self, AnyEvent, Event, with_any_event};
+use crate::ingest::task::{DebugHistoryVersion, Ingest};
+use crate::entity::{self, AnyEntity, AnyEntityRaw, Entity, EntityParseError};
+use crate::events::{AnyEvent, Event, with_any_event};
 use crate::ingest::GraphDebugHistory;
 use crate::ingest::observation::Observation;
 use crate::ingest::state::{AddedReason, EntityStateGraph, StateGraphNode};
-use crate::schema::version_links::child_id;
-use crate::state::EntityType;
-// use crate::{with_any_entity_raw, with_any_event};
 // use crate::events::Event;
 
 fn initial_state(start_at_time: DateTime<Utc>) -> impl Stream<Item=Observation> {
@@ -62,6 +56,7 @@ fn initial_state(start_at_time: DateTime<Utc>) -> impl Stream<Item=Observation> 
 
 type PinnedObservationStream = Pin<Box<dyn Stream<Item=Observation> + Send>>;
 
+#[allow(unused)]
 pub fn chron_updates(start_at_time: DateTime<Utc>) -> impl Stream<Item=Observation> {
     // So much of this is just making the type system happy
     let streams = chronicler::ENDPOINT_NAMES.into_iter()
@@ -103,7 +98,7 @@ pub fn chron_updates(start_at_time: DateTime<Utc>) -> impl Stream<Item=Observati
 struct CsvRow {
     pub entity_id: Uuid,
     pub timestamp: DateTime<Utc>,
-    pub hash: String,
+    #[allow(unused)] pub hash: String,
     pub data: serde_json::Value,
 }
 
@@ -158,40 +153,8 @@ pub fn chron_updates_hardcoded(start_at_time: DateTime<Utc>) -> impl Iterator<It
     })
 }
 
-pub async fn load_initial_state(ingest: &Ingest, start_at_time: DateTime<Utc>) -> Vec<Observation> {
-    let initial_versions: Vec<_> = initial_state(start_at_time).collect().await;
-
-    // ingest.run(move |mut state| {
-    //     state.add_initial_versions(start_time_parsed, initial_versions.into_iter())
-    // }).await
-    //     .expect("Failed to save initial versions");
-    initial_versions
-}
-
-pub(crate) struct ObservationStreamWithCursor<'s, StreamT: Stream<Item=Observation>> {
-    stream: Pin<&'s mut Peekable<StreamT>>,
-}
-
-impl<'s, StreamT: Stream<Item=Observation>> ObservationStreamWithCursor<'s, StreamT> {
-    pub fn new(stream: Pin<&'s mut Peekable<StreamT>>) -> Self {
-        Self { stream }
-    }
-
-    pub async fn next_before(&mut self, limit: DateTime<Utc>) -> Option<Observation> {
-        let Some(next_item) = self.stream.as_mut().peek().await else {
-            return None;
-        };
-
-        if next_item.latest_time() < limit {
-            self.stream.next().await
-        } else {
-            None
-        }
-    }
-
-    pub async fn next_cursor(&mut self) -> Option<DateTime<Utc>> {
-        self.stream.as_mut().peek().await.map(|obs| obs.latest_time())
-    }
+pub async fn load_initial_state(start_at_time: DateTime<Utc>) -> Vec<Observation> {
+    initial_state(start_at_time).collect().await
 }
 
 #[derive(Debug)]
@@ -258,24 +221,13 @@ pub fn ingest_observation(ingest: &mut Ingest, obs: Observation, debug_history: 
             //dbg!(&version);
             //dbg!(&event);
 
-            // Round trip through the version enum to please the borrow checker
-            // TODO: Is this still required after refactoring?
-            let entity_type = match &node.entity {
-                AnyEntity::Sim(_) => { EntityType::Sim }
-                AnyEntity::Player(_) => { EntityType::Player }
-                AnyEntity::Team(_) => { EntityType::Team }
-                AnyEntity::Game(_) => { EntityType::Game }
-                AnyEntity::Standings(_) => { EntityType::Standings }
-                AnyEntity::Season(_) => { EntityType::Season }
-            };
-
-            match entity_type {
-                EntityType::Sim => { ingest_for_version::<entity::Sim>(graph, version_idx, obs.clone(), debug_history, &queued_for_update, obs.perceived_at) }
-                EntityType::Player => { ingest_for_version::<entity::Player>(graph, version_idx, obs.clone(), debug_history, &queued_for_update, obs.perceived_at) }
-                EntityType::Team => { ingest_for_version::<entity::Team>(graph, version_idx, obs.clone(), debug_history, &queued_for_update, obs.perceived_at) }
-                EntityType::Game => { ingest_for_version::<entity::Game>(graph, version_idx, obs.clone(), debug_history, &queued_for_update, obs.perceived_at) }
-                EntityType::Standings => { ingest_for_version::<entity::Standings>(graph, version_idx, obs.clone(), debug_history, &queued_for_update, obs.perceived_at) }
-                EntityType::Season => { ingest_for_version::<entity::Season>(graph, version_idx, obs.clone(), debug_history, &queued_for_update, obs.perceived_at) }
+            match &node.entity {
+                AnyEntity::Sim(_) => { ingest_for_version::<entity::Sim>(graph, version_idx, obs.clone(), debug_history, &queued_for_update, obs.perceived_at) }
+                AnyEntity::Player(_) => { ingest_for_version::<entity::Player>(graph, version_idx, obs.clone(), debug_history, &queued_for_update, obs.perceived_at) }
+                AnyEntity::Team(_) => { ingest_for_version::<entity::Team>(graph, version_idx, obs.clone(), debug_history, &queued_for_update, obs.perceived_at) }
+                AnyEntity::Game(_) => { ingest_for_version::<entity::Game>(graph, version_idx, obs.clone(), debug_history, &queued_for_update, obs.perceived_at) }
+                AnyEntity::Standings(_) => { ingest_for_version::<entity::Standings>(graph, version_idx, obs.clone(), debug_history, &queued_for_update, obs.perceived_at) }
+                AnyEntity::Season(_) => { ingest_for_version::<entity::Season>(graph, version_idx, obs.clone(), debug_history, &queued_for_update, obs.perceived_at) }
             }
         })
         .partition_result();
@@ -394,20 +346,20 @@ fn ingest_changed_entity<EventT>(
                 });
         }
 
-        let parent = &graph.get_version(parent_idx)
-            .expect("This should always be a valid node index")
-            .entity;
-        let mut new_parent = parent.clone();
+        let parent_node = graph.get_version(parent_idx)
+            .expect("This should always be a valid node index");
+        let new_parent = parent_node.event.forward(&parent_node.entity, &new_extrapolated);
         let modified_child = &graph.get_version(newly_added_version_idx)
             .expect("Come on I literally just added this node")
             .entity;
-        let conflicts = event.backward(&new_extrapolated, &mut new_parent);
+        let conflicts: Vec<Conflict> = Vec::new(); // event.backward(&new_extrapolated, &mut new_parent);
+        assert_eq!(&event.forward(&new_parent, &new_extrapolated), modified_child);
 
         if !conflicts.is_empty() {
             version_conflicts.push(conflicts);
         } else {
             all_parents_had_conflicts = false;
-            if parent != &new_parent {
+            if &parent_node.entity != &new_parent {
                 // Then a change was made and we need to save it to the graph and then recurse
                 let new_parent_idx = graph.add_child_disconnected(new_parent.into(), event_arc.clone(), AddedReason::RefinedFromObservation);
                 graph.add_edge(new_parent_idx, newly_added_version_idx, new_extrapolated);
@@ -483,8 +435,6 @@ fn ingest_for_event<EntityT, EventT>(
         .expect("Expected node index supplied to ingest_for_event to be valid");
 
     let entity: &EntityT = (&node.entity).try_into()
-        .expect("This coercion should always succeed");
-    let event: &EventT = node.event.as_ref().try_into()
         .expect("This coercion should always succeed");
 
     let mut new_entity = entity.clone();

@@ -12,7 +12,7 @@ use blarser::ingest::{GraphDebugHistorySync, GraphDebugHistory, IngestTaskHolder
 use blarser::state::EntityType;
 
 #[derive(Debug, Error)]
-enum DebugApiError {
+pub enum DebugApiError {
     #[error("The lock was poisoned!")]
     LockPoisoned,
 

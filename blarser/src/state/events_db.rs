@@ -16,7 +16,7 @@ pub enum EventSource {
 }
 
 #[derive(Insertable)]
-#[table_name = "events"]
+#[diesel(table_name = events)]
 pub(crate) struct NewEvent {
     pub(crate) ingest_id: i32,
     pub(crate) time: DateTime<Utc>,
@@ -25,7 +25,7 @@ pub(crate) struct NewEvent {
 }
 
 #[derive(Identifiable, Queryable, PartialEq, Debug, Clone)]
-#[table_name = "events"]
+#[diesel(table_name = events)]
 pub(crate) struct DbEvent {
     pub id: i32,
     pub ingest_id: i32,
@@ -36,7 +36,7 @@ pub(crate) struct DbEvent {
 }
 
 #[derive(Insertable)]
-#[table_name = "event_effects"]
+#[diesel(table_name = event_effects)]
 pub(crate) struct NewEventEffect {
     pub(crate) event_id: i32,
     pub(crate) entity_type: EntityType,
@@ -44,9 +44,9 @@ pub(crate) struct NewEventEffect {
     pub(crate) aux_data: serde_json::Value,
 }
 
-#[derive(Identifiable, Queryable, Associations, PartialEq, Debug,)]
-#[belongs_to(parent = "DbEvent", foreign_key = "event_id")]
-#[table_name = "event_effects"]
+#[derive(Identifiable, Queryable, Associations, PartialEq, Debug)]
+#[diesel(belongs_to(DbEvent, foreign_key = event_id))]
+#[diesel(table_name = event_effects)]
 pub struct EventEffect {
     pub id: i32,
     pub event_id: i32,

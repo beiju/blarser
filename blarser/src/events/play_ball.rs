@@ -3,8 +3,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use partial_information::{Conflict, MaybeKnown};
 
-use crate::entity::{AnyEntity, Entity};
-use crate::events::{Effect, Event, ord_by_time, AnyExtrapolated, Extrapolated};
+use crate::entity::AnyEntity;
+use crate::events::{Effect, Event, ord_by_time, AnyExtrapolated};
 use crate::events::game_update::GameUpdate;
 use crate::ingest::StateGraph;
 use crate::state::EntityType;
@@ -46,7 +46,7 @@ impl Event for PlayBall {
         entity
     }
 
-    fn backward(&self, _extrapolated: &AnyExtrapolated, entity: &mut AnyEntity) -> Vec<Conflict> {
+    fn backward(&self, _extrapolated: &AnyExtrapolated, _entity: &mut AnyEntity) -> Vec<Conflict> {
         Vec::new()
     }
 }

@@ -1,14 +1,9 @@
 use std::fmt::{Display, Formatter};
-use std::sync::Arc;
 use chrono::{DateTime, Utc};
-use diesel::QueryResult;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 use partial_information::Conflict;
-
-use crate::api::EventuallyEvent;
-use crate::entity::{AnyEntity, Entity};
-use crate::events::{Effect, AnyEvent, Event, ord_by_time, Extrapolated, AnyExtrapolated};
+use crate::entity::AnyEntity;
+use crate::events::{Effect, Event, ord_by_time, AnyExtrapolated};
 use crate::events::game_update::GameUpdate;
 use crate::ingest::StateGraph;
 use crate::state::EntityType;
@@ -30,7 +25,7 @@ impl Event for StormWarning {
         ]
     }
 
-    fn forward(&self, entity: &AnyEntity, _: &AnyExtrapolated) -> AnyEntity {
+    fn forward(&self, _entity: &AnyEntity, _: &AnyExtrapolated) -> AnyEntity {
         todo!()
     }
 
@@ -46,7 +41,7 @@ impl Event for StormWarning {
     //         other => panic!("StormWarning event does not apply to {}", other.name())        }
     // }
 
-    fn backward(&self, extrapolated: &AnyExtrapolated, entity: &mut AnyEntity) -> Vec<Conflict> {
+    fn backward(&self, _extrapolated: &AnyExtrapolated, _entity: &mut AnyEntity) -> Vec<Conflict> {
         todo!()
     }
 }

@@ -2,7 +2,7 @@ use std::fmt::Debug;
 use as_any::AsAny;
 use derive_more::{From, TryInto};
 use uuid::Uuid;
-use partial_information::{MaybeKnown, PartialInformationCompare};
+use partial_information::MaybeKnown;
 use partial_information_derive::PartialInformationCompare;
 use crate::entity::AnyEntity;
 use crate::polymorphic_enum::polymorphic_enum;
@@ -55,22 +55,22 @@ impl Extrapolated for BatterIdExtrapolated {
     }
 }
 
-#[derive(Debug, Clone, PartialInformationCompare)]
+#[derive(Default, Debug, Clone, PartialInformationCompare)]
+pub struct PitcherExtrapolated {
+    pub pitcher_id: MaybeKnown<Uuid>,
+    pub pitcher_name: MaybeKnown<String>,
+    pub pitcher_mod: MaybeKnown<String>,
+}
+
+#[derive(Default, Debug, Clone, PartialInformationCompare)]
 pub struct PitchersExtrapolated {
-    pub away_pitcher_id: MaybeKnown<Uuid>,
-    pub away_pitcher_name: MaybeKnown<String>,
-    pub home_pitcher_id: MaybeKnown<Uuid>,
-    pub home_pitcher_name: MaybeKnown<String>,
+    pub away: PitcherExtrapolated,
+    pub home: PitcherExtrapolated,
 }
 
 impl PitchersExtrapolated {
     pub fn new() -> Self {
-        Self {
-            away_pitcher_id: MaybeKnown::Unknown,
-            away_pitcher_name: MaybeKnown::Unknown,
-            home_pitcher_id: MaybeKnown::Unknown,
-            home_pitcher_name: MaybeKnown::Unknown,
-        }
+        Default::default()
     }
 }
 
@@ -79,14 +79,20 @@ impl Extrapolated for PitchersExtrapolated {
         let game = entity.as_game()
             .expect("TODO: Strongly type this?");
         Self {
-            away_pitcher_id: game.away.pitcher.clone()
-                .expect("There should be an away pitcher at this point"),
-            away_pitcher_name: game.away.pitcher_name.clone()
-                .expect("There should be an away pitcher name at this point"),
-            home_pitcher_id: game.home.pitcher.clone()
-                .expect("There should be an home pitcher at this point"),
-            home_pitcher_name: game.home.pitcher_name.clone()
-                .expect("There should be an home pitcher name at this point"),
+            away: PitcherExtrapolated {
+                pitcher_id: game.away.pitcher.clone()
+                    .expect("There should be an away pitcher at this point"),
+                pitcher_name: game.away.pitcher_name.clone()
+                    .expect("There should be an away pitcher name at this point"),
+                pitcher_mod: game.away.pitcher_mod.clone(),
+            },
+            home: PitcherExtrapolated {
+                pitcher_id: game.home.pitcher.clone()
+                    .expect("There should be a home pitcher at this point"),
+                pitcher_name: game.home.pitcher_name.clone()
+                    .expect("There should be a home pitcher name at this point"),
+                pitcher_mod: game.home.pitcher_mod.clone(),
+            },
         }
     }
 }

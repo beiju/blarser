@@ -4,7 +4,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::api::ChroniclerItem;
-use crate::entity::{AnyEntityRaw, EntityParseError, EntityRaw};
+use crate::entity::{AnyEntityRaw, EntityParseError};
 use crate::state::EntityType;
 
 
@@ -219,8 +219,8 @@ impl Ord for Observation {
 
 #[derive(Debug, Error)]
 enum IngestError {
-    #[error("Needs approval: {0:?}")]
-    NeedsApproval(Vec<(i32, String)>),
+    // #[error("Needs approval: {0:?}")]
+    // NeedsApproval(Vec<(i32, String)>),
 
     #[error(transparent)]
     DieselError(#[from] diesel::result::Error),

@@ -13,8 +13,8 @@ pub use entities_mod::*;
 
 #[derive(rocket::Responder)]
 pub enum ApiError {
-    #[response(status = 400)]
-    ParseError(String),
+    // #[response(status = 400)]
+    // ParseError(String),
 
     #[response(status = 500)]
     InternalError(String)

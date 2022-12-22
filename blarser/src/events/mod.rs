@@ -37,12 +37,12 @@ pub use stolen_base::{StolenBase, CaughtStealing};
 pub use walk::Walk;
 
 use std::fmt::{Display, Formatter};
-use as_any::{AsAny, Downcast};
+use as_any::AsAny;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use derive_more::{From, TryInto};
 
-use crate::entity::{AnyEntity, Entity};
+use crate::entity::AnyEntity;
 use crate::ingest::StateGraph;
 use partial_information::Conflict;
 
@@ -59,7 +59,7 @@ pub trait Event: Serialize + for<'de> Deserialize<'de> + Ord + Display {
     fn effects(&self, state: &StateGraph) -> Vec<Effect>;
 
     fn forward(&self, entity: &AnyEntity, extrapolated: &AnyExtrapolated) -> AnyEntity;
-    fn fill_extrapolated(&self, entity: &AnyEntity, extrapolated: &AnyExtrapolated) -> AnyExtrapolated {
+    fn fill_extrapolated(&self, _entity: &AnyEntity, extrapolated: &AnyExtrapolated) -> AnyExtrapolated {
         if let AnyExtrapolated::Null(_) = extrapolated {
             AnyExtrapolated::Null(NullExtrapolated {})
         } else {

@@ -9,11 +9,10 @@ mod common;
 
 use std::fmt::{Display, Formatter};
 use uuid::Uuid;
-use chrono::{DateTime, Utc};
 use derive_more::{From, TryInto, Unwrap};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use partial_information::{Conflict, PartialInformationCompare};
+use partial_information::PartialInformationCompare;
 
 // use crate::events::AnyEvent;
 
@@ -24,6 +23,7 @@ pub use team::Team;
 pub use game::{Game, GameByTeam, UpdateFull, UpdateFullMetadata};
 pub use standings::Standings;
 pub use season::Season;
+use crate::polymorphic_enum::polymorphic_enum;
 use crate::state::EntityType;
 
 pub trait Entity: Serialize + for<'de> Deserialize<'de> + PartialEq + Clone + Display {
@@ -45,48 +45,37 @@ impl Display for WrongEntityError {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, From, TryInto, Unwrap)]
-#[try_into(owned, ref, ref_mut)]
-pub enum AnyEntity {
-    Sim(Sim),
-    Player(Player),
-    Team(Team),
-    Game(Game),
-    Standings(Standings),
-    Season(Season),
+polymorphic_enum! {
+    #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, From, TryInto, Unwrap)]
+    #[try_into(owned, ref, ref_mut)]
+    pub AnyEntity: with_any_entity {
+        Sim(Sim),
+        Player(Player),
+        Team(Team),
+        Game(Game),
+        Standings(Standings),
+        Season(Season),
+    }
 }
 
-macro_rules! impl_match {
-    ($any_entity_var:expr, $pattern_var:ident => $pattern_block:block) => {
-        match $any_entity_var {
-            AnyEntity::Sim($pattern_var) => $pattern_block
-            AnyEntity::Player($pattern_var) => $pattern_block
-            AnyEntity::Team($pattern_var) => $pattern_block
-            AnyEntity::Game($pattern_var) => $pattern_block
-            AnyEntity::Standings($pattern_var) => $pattern_block
-            AnyEntity::Season($pattern_var) => $pattern_block
-        }
-
-    };
-}
 
 impl Display for AnyEntity {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        impl_match!(self, e => { e.fmt(f) })
+        with_any_entity!(self, |e| { e.fmt(f) })
     }
 }
 
 impl Entity for AnyEntity {
     fn entity_type(&self) -> EntityType {
-        impl_match!(&self, e => { e.entity_type() })
+        with_any_entity!(&self, |e| { e.entity_type() })
     }
 
     fn id(&self) -> Uuid {
-        impl_match!(&self, e => { e.id() })
+        with_any_entity!(&self, |e| { e.id() })
     }
 
     fn description(&self) -> String {
-        impl_match!(&self, e => { e.description() })
+        with_any_entity!(&self, |e| { e.description() })
     }
 }
 
@@ -141,11 +130,11 @@ impl AnyEntity {
     }
 
     pub fn to_json(&self) -> serde_json::Value {
-        impl_match!(&self, e => { serde_json::to_value(e).unwrap() })
+        with_any_entity!(&self, |e| { serde_json::to_value(e).unwrap() })
     }
 
     pub fn is_ambiguous(&self) -> bool {
-        impl_match!(&self, e => { e.is_ambiguous() })
+        with_any_entity!(&self, |e| { e.is_ambiguous() })
     }
 
     impl_as_ref!(Sim, AnyEntity::Sim, as_sim, as_sim_mut);

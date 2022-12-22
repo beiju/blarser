@@ -6,6 +6,7 @@ pub use crate::api::eventually_schema::{EventuallyEvent, EventuallyResponse};
 
 const PAGE_SIZE: usize = 100;
 
+#[allow(unused)]
 pub fn events(start: &'static str) -> impl Stream<Item=EventuallyEvent> {
     eventually_pages(start)
         .flat_map(|vec| stream::iter(vec.into_iter()))
