@@ -1,7 +1,7 @@
 use std::fmt::{Display, Formatter};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use partial_information::Conflict;
+
 use crate::entity::AnyEntity;
 use crate::events::{Effect, Event, ord_by_time, AnyExtrapolated};
 use crate::events::game_update::GameUpdate;
@@ -29,6 +29,10 @@ impl Event for StormWarning {
         todo!()
     }
 
+    fn reverse(&self, old_parent: &AnyEntity, extrapolated: &mut AnyExtrapolated, new_parent: &mut AnyEntity) {
+        todo!()
+    }
+
     // fn forward(&self, entity: AnyEntity, _: serde_json::Value) -> AnyEntity {
     //     match entity {
     //         AnyEntity::Game(mut game) => {
@@ -40,10 +44,6 @@ impl Event for StormWarning {
     //         },
     //         other => panic!("StormWarning event does not apply to {}", other.name())        }
     // }
-
-    fn backward(&self, _extrapolated: &AnyExtrapolated, _entity: &mut AnyEntity) -> Vec<Conflict> {
-        todo!()
-    }
 }
 
 impl Display for StormWarning {

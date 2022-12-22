@@ -1,9 +1,8 @@
 use std::fmt::{Display, Formatter};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use partial_information::{Conflict, MaybeKnown};
 
-use crate::entity::AnyEntity;
+use crate::entity::{AnyEntity, Game};
 use crate::events::{AnyExtrapolated, Effect, Event, ord_by_time};
 use crate::events::effects::PitchersExtrapolated;
 use crate::events::game_update::GameUpdate;
@@ -74,19 +73,43 @@ impl Event for HalfInning {
         entity
     }
 
-    fn backward(&self, _extrapolated: &AnyExtrapolated, entity: &mut AnyEntity) -> Vec<Conflict> {
-        let conflicts = Vec::new();
-        
-        if let Some(game) = entity.as_game_mut() {
-            game.home.pitcher = None;
-            game.home.pitcher_name = Some(MaybeKnown::Known(String::new()));
-            game.home.pitcher_mod = MaybeKnown::Known(String::new());
-            game.away.pitcher = None;
-            game.away.pitcher_name = Some(MaybeKnown::Known(String::new()));
-            game.away.pitcher_mod = MaybeKnown::Known(String::new());
-        }
+    fn reverse(&self, old_parent: &AnyEntity, extrapolated: &mut AnyExtrapolated, new_parent: &mut AnyEntity) {
+        match old_parent {
+            AnyEntity::Game(old_game) => {
+                let new_game: &mut Game = new_parent.try_into()
+                    .expect("Mismatched entity type");
+                let extrapolated: &mut PitchersExtrapolated = extrapolated.try_into()
+                    .expect("Mismatched extrapolated type");
+                extrapolated.home.pitcher_id = new_game.home.pitcher.unwrap();
+                extrapolated.home.pitcher_name = new_game.home.pitcher_name.clone().unwrap();
+                extrapolated.home.pitcher_mod = new_game.home.pitcher_mod.clone();
+                extrapolated.away.pitcher_id = new_game.away.pitcher.unwrap();
+                extrapolated.away.pitcher_name = new_game.away.pitcher_name.clone().unwrap();
+                extrapolated.away.pitcher_mod = new_game.away.pitcher_mod.clone();
 
-        conflicts
+                new_game.half_inning_score = old_game.half_inning_score;
+                new_game.game_start_phase = old_game.game_start_phase;
+                new_game.phase = old_game.phase;
+                if new_game.top_of_inning {
+                    new_game.inning -= 1;
+                }
+                new_game.top_of_inning = !new_game.top_of_inning;
+
+                if new_game.inning == -1 {
+                    new_game.home.pitcher = old_game.home.pitcher;
+                    new_game.home.pitcher_name = old_game.home.pitcher_name.clone();
+                    new_game.home.pitcher_mod = old_game.home.pitcher_mod.clone();
+                    new_game.away.pitcher = old_game.away.pitcher;
+                    new_game.away.pitcher_name = old_game.away.pitcher_name.clone();
+                    new_game.away.pitcher_mod = old_game.away.pitcher_mod.clone();
+                }
+
+                self.game_update.reverse(old_game, new_game);
+            }
+            _ => {
+                panic!("Mismatched extrapolated type")
+            }
+        }
     }
 }
 

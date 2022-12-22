@@ -12,6 +12,7 @@ macro_rules! polymorphic_enum {
     (($($vis:tt)*) $(#[$meta:meta])* $name:ident: $macro:ident { $($variant:ident($type:path),)* }) => {
         $(#[$meta])*
         $($vis)* enum $name { $($variant($type)),* }
+        #[allow(unused_macros)]
         macro_rules! $macro {
             ($on:expr, |$with:ident| $body:block) => {
                 match $on {

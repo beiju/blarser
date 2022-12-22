@@ -106,7 +106,7 @@ pub struct Player {
     pub pitching_rating: Option<MaybeKnown<f32>>,
     pub baserunning_rating: Option<MaybeKnown<f32>>,
 
-    #[allow(non_snake_case)] pub edensity: Option<f32>,
+    #[serde(rename = "eDensity")] pub edensity: Option<f32>,
 }
 
 impl Display for Player {

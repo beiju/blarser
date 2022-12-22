@@ -1,10 +1,10 @@
 use std::fmt::{Display, Formatter};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use partial_information::Conflict;
 
-use crate::entity::AnyEntity;
+use crate::entity::{AnyEntity, Game};
 use crate::events::{AnyExtrapolated, Effect, Event, ord_by_time};
+use crate::events::effects::NullExtrapolated;
 use crate::events::game_update::GameUpdate;
 use crate::ingest::StateGraph;
 use crate::state::EntityType;
@@ -39,15 +39,25 @@ impl Event for LetsGo {
         entity
     }
 
-    fn backward(&self, _: &AnyExtrapolated, entity: &mut AnyEntity) -> Vec<Conflict> {
-        if let Some(game) = entity.as_game_mut() {
-            game.game_start = false;
-            game.game_start_phase = 0; // guess
-            game.home.team_batter_count = None;
-            game.away.team_batter_count = None;
-        }
+    fn reverse(&self, old_parent: &AnyEntity, extrapolated: &mut AnyExtrapolated, new_parent: &mut AnyEntity) {
+        match old_parent {
+            AnyEntity::Game(old_game) => {
+                let new_game: &mut Game = new_parent.try_into()
+                    .expect("Mismatched event types");
+                let _: &mut NullExtrapolated = extrapolated.try_into()
+                    .expect("Extrapolated type mismatch");
 
-        Vec::new()
+                new_game.game_start = old_game.game_start;
+                new_game.game_start_phase = old_game.game_start_phase;
+                new_game.home.team_batter_count = old_game.home.team_batter_count;
+                new_game.away.team_batter_count = old_game.away.team_batter_count;
+
+                self.game_update.reverse(old_game, new_game);
+            }
+            _ => {
+                panic!("Can't reverse-apply LetsGo to this entity type");
+            }
+        }
     }
 }
 

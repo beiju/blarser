@@ -9,27 +9,25 @@ use crate::polymorphic_enum::polymorphic_enum;
 use crate::state::EntityType;
 
 pub trait Extrapolated: Debug + AsAny {
-
-
-    fn observe_entity(&self, entity: &AnyEntity) -> Self;
+    fn fill(&self, entity: &AnyEntity) -> Self;
 }
 
 #[derive(Debug, Clone, PartialInformationCompare)]
 pub struct NullExtrapolated {}
 
 impl Extrapolated for NullExtrapolated {
-    fn observe_entity(&self, _: &AnyEntity) -> Self {
+    fn fill(&self, _: &AnyEntity) -> Self {
         Self {}
     }
 }
 
-#[derive(Debug, Clone, PartialInformationCompare)]
+#[derive(Default, Debug, Clone, PartialInformationCompare)]
 pub struct SubsecondsExtrapolated {
     pub(crate) ns: MaybeKnown<u32>,
 }
 
 impl Extrapolated for SubsecondsExtrapolated {
-    fn observe_entity(&self, entity: &AnyEntity) -> Self {
+    fn fill(&self, entity: &AnyEntity) -> Self {
         let sim = entity.as_sim()
             .expect("TODO: Strongly type this?");
         Self {
@@ -50,7 +48,7 @@ impl BatterIdExtrapolated {
 }
 
 impl Extrapolated for BatterIdExtrapolated {
-    fn observe_entity(&self, _: &AnyEntity) -> Self {
+    fn fill(&self, _: &AnyEntity) -> Self {
         self.clone()
     }
 }
@@ -75,7 +73,7 @@ impl PitchersExtrapolated {
 }
 
 impl Extrapolated for PitchersExtrapolated {
-    fn observe_entity(&self, entity: &AnyEntity) -> Self {
+    fn fill(&self, entity: &AnyEntity) -> Self {
         let game = entity.as_game()
             .expect("TODO: Strongly type this?");
         Self {
@@ -96,14 +94,14 @@ impl Extrapolated for PitchersExtrapolated {
         }
     }
 }
-#[derive(Debug, Clone, PartialInformationCompare)]
+#[derive(Default, Debug, Clone, PartialInformationCompare)]
 pub struct OddsExtrapolated {
     pub away_odds: MaybeKnown<f32>,
     pub home_odds: MaybeKnown<f32>,
 }
 
 impl Extrapolated for OddsExtrapolated {
-    fn observe_entity(&self, entity: &AnyEntity) -> Self {
+    fn fill(&self, entity: &AnyEntity) -> Self {
         let game = entity.as_game()
             .expect("TODO: Strongly type this?");
         Self {
@@ -131,12 +129,6 @@ polymorphic_enum! {
         BatterId(BatterIdExtrapolated),
         Pitchers(PitchersExtrapolated),
         Odds(OddsExtrapolated),
-    }
-}
-
-impl AnyExtrapolated {
-    pub(crate) fn observe_entity(&self, entity: &AnyEntity) -> Self {
-        with_extrapolated!(self, |e| { e.observe_entity(entity).into() })
     }
 }
 

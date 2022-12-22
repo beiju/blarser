@@ -85,6 +85,10 @@ impl EntityStateGraph {
         &self.roots
     }
 
+    pub fn add_root(&mut self, idx: NodeIndex) {
+        self.roots.push(idx)
+    }
+
     pub fn get_version(&self, idx: NodeIndex) -> Option<&StateGraphNode> {
         self.graph.node_weight(idx)
     }

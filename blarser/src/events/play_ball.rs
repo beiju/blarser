@@ -1,10 +1,11 @@
 use std::fmt::{Display, Formatter};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use partial_information::{Conflict, MaybeKnown};
+use partial_information::MaybeKnown;
 
-use crate::entity::AnyEntity;
+use crate::entity::{AnyEntity, Game};
 use crate::events::{Effect, Event, ord_by_time, AnyExtrapolated};
+use crate::events::effects::NullExtrapolated;
 use crate::events::game_update::GameUpdate;
 use crate::ingest::StateGraph;
 use crate::state::EntityType;
@@ -39,15 +40,41 @@ impl Event for PlayBall {
             // It unsets pitchers :(
             game.home.pitcher = None;
             game.home.pitcher_name = Some(MaybeKnown::Known(String::new()));
+            game.home.pitcher_mod = MaybeKnown::Known(String::new());
             game.away.pitcher = None;
             game.away.pitcher_name = Some(MaybeKnown::Known(String::new()));
+            game.away.pitcher_mod = MaybeKnown::Known(String::new());
         }
 
         entity
     }
 
-    fn backward(&self, _extrapolated: &AnyExtrapolated, _entity: &mut AnyEntity) -> Vec<Conflict> {
-        Vec::new()
+    fn reverse(&self, old_parent: &AnyEntity, extrapolated: &mut AnyExtrapolated, new_parent: &mut AnyEntity) {
+        match old_parent {
+            AnyEntity::Game(old_game) => {
+                let new_game: &mut Game = new_parent.try_into()
+                    .expect("Mismatched event types");
+                let _: &mut NullExtrapolated = extrapolated.try_into()
+                    .expect("Extrapolated type mismatch");
+
+                new_game.home.pitcher = old_game.home.pitcher;
+                new_game.home.pitcher_name = old_game.home.pitcher_name.clone();
+                new_game.home.pitcher_mod = old_game.home.pitcher_mod.clone();
+                new_game.away.pitcher = old_game.away.pitcher;
+                new_game.away.pitcher_name = old_game.away.pitcher_name.clone();
+                new_game.away.pitcher_mod = old_game.away.pitcher_mod.clone();
+
+                new_game.game_start_phase = old_game.game_start_phase;
+                new_game.inning = old_game.inning;
+                new_game.phase = old_game.phase;
+                new_game.top_of_inning = old_game.top_of_inning;
+
+                self.game_update.reverse(old_game, new_game);
+            }
+            _ => {
+                panic!("Can't reverse-apply PlayBall to this entity type");
+            }
+        }
     }
 }
 

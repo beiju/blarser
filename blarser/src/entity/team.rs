@@ -86,9 +86,9 @@ pub struct Team {
     pub tournament_wins: Option<i32>,
     pub underchampionships: Option<i32>,
 
-    pub edensity: Option<f32>,
-    pub evelocity: Option<f32>,
-    pub imposition: Option<f32>,
+    #[serde(rename = "eDensity")] pub edensity: Option<f32>,
+    #[serde(rename = "eVelocity")] pub evelocity: Option<f32>,
+    #[serde(rename = "imPosition")] pub imposition: Option<f32>,
 }
 
 impl Display for Team {

@@ -1,7 +1,6 @@
 use std::fmt::{Display, Formatter};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use partial_information::Conflict;
 
 use crate::entity::AnyEntity;
 use crate::events::{AnyExtrapolated, Effect, Event, ord_by_time};
@@ -37,8 +36,8 @@ impl Event for Start {
         panic!("Cannot re-apply a Start event");
     }
 
-    fn backward(&self, _: &AnyExtrapolated, _: &mut AnyEntity) -> Vec<Conflict> {
-        panic!("Can't backtrack through a Start event");
+    fn reverse(&self, old_parent: &AnyEntity, extrapolated: &mut AnyExtrapolated, new_parent: &mut AnyEntity) {
+        todo!()
     }
 }
 

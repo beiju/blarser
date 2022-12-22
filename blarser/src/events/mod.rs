@@ -20,6 +20,7 @@ mod stolen_base;
 mod walk;
 // mod player_reroll;
 
+use std::any::Any;
 pub(crate) use game_update::GameUpdate;
 pub use effects::{Extrapolated, AnyExtrapolated, Effect};
 pub use start::Start;
@@ -37,14 +38,12 @@ pub use stolen_base::{StolenBase, CaughtStealing};
 pub use walk::Walk;
 
 use std::fmt::{Display, Formatter};
-use as_any::AsAny;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use derive_more::{From, TryInto};
 
 use crate::entity::AnyEntity;
 use crate::ingest::StateGraph;
-use partial_information::Conflict;
 
 pub trait Event: Serialize + for<'de> Deserialize<'de> + Ord + Display {
     fn time(&self) -> DateTime<Utc>;
@@ -59,14 +58,14 @@ pub trait Event: Serialize + for<'de> Deserialize<'de> + Ord + Display {
     fn effects(&self, state: &StateGraph) -> Vec<Effect>;
 
     fn forward(&self, entity: &AnyEntity, extrapolated: &AnyExtrapolated) -> AnyEntity;
-    fn fill_extrapolated(&self, _entity: &AnyEntity, extrapolated: &AnyExtrapolated) -> AnyExtrapolated {
-        if let AnyExtrapolated::Null(_) = extrapolated {
-            AnyExtrapolated::Null(NullExtrapolated {})
-        } else {
-            panic!("Cannot use default fill_extrapolated on {}", extrapolated.type_name())
-        }
-    }
-    fn backward(&self, extrapolated: &AnyExtrapolated, entity: &mut AnyEntity) -> Vec<Conflict>;
+
+    // Copy the changed fields of old_parent onto new_parent, leaving the unchanged fields alone.
+    fn reverse(&self, old_parent: &AnyEntity, extrapolated: &mut AnyExtrapolated, new_parent: &mut AnyEntity);
+    // #[allow(unused_variables)]
+    // fn reverse(&self, child: &AnyEntity, extrapolated: &mut AnyExtrapolated, parent: &mut AnyEntity) {
+    //     let _: &mut NullExtrapolated = extrapolated.try_into().unwrap();
+    //     todo!("Implement me")
+    // }
 
 }
 
@@ -112,6 +111,9 @@ impl AnyEvent {
     }
     pub fn forward(&self, entity: &AnyEntity, extrapolated: &AnyExtrapolated) -> AnyEntity {
         with_any_event!(self, |e| { e.forward(entity, extrapolated) })
+    }
+    pub fn reverse(&self, old_parent: &AnyEntity, extrapolated: &mut AnyExtrapolated, new_parent: &mut AnyEntity) {
+        with_any_event!(self, |e| { e.reverse(old_parent, extrapolated, new_parent) })
     }
 
 }

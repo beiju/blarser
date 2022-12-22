@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::compare::{Conflict, PartialInformationDiff};
 use crate::{MaybeKnown, PartialInformationCompare};
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DatetimeWithResettingMs {
     date: DateTime<Utc>,

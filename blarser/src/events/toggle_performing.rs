@@ -1,7 +1,6 @@
 use std::fmt::{Display, Formatter};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use partial_information::Conflict;
 
 use crate::entity::AnyEntity;
 use crate::events::{AnyExtrapolated, Effect, Event, ord_by_time};
@@ -41,7 +40,7 @@ impl Event for TogglePerforming {
         entity
     }
 
-    fn backward(&self, _extrapolated: &AnyExtrapolated, _entity: &mut AnyEntity) -> Vec<Conflict> {
+    fn reverse(&self, old_parent: &AnyEntity, extrapolated: &mut AnyExtrapolated, new_parent: &mut AnyEntity) {
         todo!()
     }
 }

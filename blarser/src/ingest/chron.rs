@@ -115,7 +115,6 @@ pub fn chron_updates_hardcoded(start_at_time: DateTime<Utc>) -> impl Iterator<It
                 .filter_map(move |result| {
                     let record = result.expect("Reading CSV row failed");
                     let dt_str = record.get(1).unwrap().replace(" ", "T") + ":00";
-                    //dbg!(&dt_str);
                     let row = CsvRow {
                         entity_id: Uuid::try_parse(record.get(0).unwrap()).unwrap(),
                         timestamp: DateTime::from(DateTime::parse_from_rfc3339(&dt_str).unwrap()),
@@ -198,7 +197,6 @@ pub fn ingest_observation(ingest: &mut Ingest, obs: Observation, debug_history: 
         obs.entity_type, obs.entity_id, obs.earliest_time(), obs.latest_time());
 
     let versions = graph.get_candidate_placements(obs.earliest_time(), obs.latest_time());
-    dbg!(&versions);
     let mut queued_for_update = versions.clone();
 
     let debug_key = (obs.entity_type, obs.entity_id);
@@ -218,8 +216,6 @@ pub fn ingest_observation(ingest: &mut Ingest, obs: Observation, debug_history: 
                 .expect("Expected node index from get_versions_between to be valid");
 
             queued_for_update.remove(&version_idx);
-            //dbg!(&version);
-            //dbg!(&event);
 
             match &node.entity {
                 AnyEntity::Sim(_) => { ingest_for_version::<entity::Sim>(graph, version_idx, obs.clone(), debug_history, &queued_for_update, obs.perceived_at) }
@@ -241,8 +237,6 @@ pub fn ingest_observation(ingest: &mut Ingest, obs: Observation, debug_history: 
         queued_for_delete: None,
     });
 
-    info!("Test for flush");
-    log::logger().flush();
     assert!(!successes.is_empty(), "TODO Report failures");
 
     let prev_nodes = get_reachable_nodes(graph, graph.leafs().clone());
@@ -255,7 +249,7 @@ pub fn ingest_observation(ingest: &mut Ingest, obs: Observation, debug_history: 
         tree: graph.get_debug_tree(),
         queued_for_update: None,
         currently_updating: None,
-        queued_for_delete: Some(delete_nodes.clone())
+        queued_for_delete: Some(delete_nodes.clone()),
     });
 
     for &node_idx in &delete_nodes {
@@ -291,89 +285,116 @@ fn get_reachable_nodes(graph: &EntityStateGraph, mut stack: Vec<NodeIndex>) -> H
     output
 }
 
-fn ingest_changed_entity<EventT>(
+// Within this function, the "old" and "new" prefixes refer to two parallel subtrees. "old" already
+// exists and "new" is being built
+fn ingest_changed_entity<EntityT, EventT>(
     graph: &mut EntityStateGraph,
-    existing_version_idx: NodeIndex,
-    newly_added_version_idx: NodeIndex,
+    old_child_idx: NodeIndex,
+    new_child_idx: NodeIndex,
     debug_history: &mut GraphDebugHistory,
     queued_for_update: &HashSet<NodeIndex>,
     debug_time: DateTime<Utc>,
-) where EventT: Event,
+) where EntityT: Entity + PartialInformationCompare + 'static,
+        AnyEntity: TryInto<EntityT>,
+        <AnyEntity as TryInto<EntityT>>::Error: Debug,
+        for<'a> &'a AnyEntityRaw: TryInto<&'a EntityT::Raw>,
+        for<'a> <&'a AnyEntityRaw as TryInto<&'a EntityT::Raw>>::Error: Debug,
+        EventT: Event,
         for<'a> &'a AnyEvent: TryInto<&'a EventT>,
         for<'a> <&'a AnyEvent as TryInto<&'a EventT>>::Error: Debug {
-    let event_arc = graph.get_version(existing_version_idx)
+    let event_arc = graph.get_version(old_child_idx)
         .expect("Expected node index supplied to ingest_changed_event to be valid")
         .event.clone();
 
     let event: &EventT = event_arc.as_ref().try_into()
         .expect("This coercion should always succeed");
 
-    // Gather data for debug here, because lifetimes
-    let modified_child = &graph.get_version(newly_added_version_idx)
-        .expect("Come on I literally just added this node")
-        .entity;
-
-    let history_key = (modified_child.entity_type(), modified_child.id());
-    let child_desc = modified_child.to_string();
-
     let mut all_parents_had_conflicts = true; // starts as vacuous truth
     let mut version_conflicts = Vec::new();
-    let mut parent_walker = graph.graph.parents(existing_version_idx);
-    while let Some((edge_idx, parent_idx)) = parent_walker.walk_next(&graph.graph) {
-        let old_extrapolated = graph.graph.edge_weight(edge_idx)
+    let mut parent_walker = graph.graph.parents(old_child_idx);
+    while let Some((old_edge_idx, old_parent_idx)) = parent_walker.walk_next(&graph.graph) {
+        let old_extrapolated = graph.graph.edge_weight(old_edge_idx)
             .expect("This should always be a valid edge index");
 
-        // Need to call get_version again because of lifetimes
-        let modified_child = &graph.get_version(newly_added_version_idx)
-            .expect("Come on I literally just added this node")
-            .entity;
+        let new_child_node = graph.get_version(new_child_idx)
+            .expect("Come on I literally just added this node");
 
-        let new_extrapolated = old_extrapolated.observe_entity(modified_child);
+        let old_parent_node = graph.get_version(old_parent_idx)
+            .expect("This should always be a valid edge index");
+
+        let mut new_extrapolated = old_extrapolated.clone();
+        let mut new_parent = new_child_node.entity.clone();
+        event.reverse(&old_parent_node.entity, &mut new_extrapolated, &mut new_parent);
 
         { // Debug stuff
+            // Need to call get_version again because of lifetimes
+            let new_child = &graph.get_version(new_child_idx)
+                .expect("Come on I literally just added this node")
+                .entity;
+
             let mut debug_graph = graph.clone();
-            debug_graph.add_edge(parent_idx, newly_added_version_idx, new_extrapolated.clone());
-            debug_history.get_mut(&history_key)
+            debug_graph.add_edge(old_parent_idx, new_child_idx, new_extrapolated.clone());
+            debug_history.get_mut(&(new_child.entity_type(), new_child.id()))
                 .expect("This entity should already be in debug_history")
                 .versions
                 .push(DebugHistoryVersion {
-                    event_human_name: format!("After adding parent {parent_idx:?} for {child_desc}"),
+                    event_human_name: format!("After adding parent {old_parent_idx:?} to {}", new_child.description()),
                     time: debug_time,
                     tree: debug_graph.get_debug_tree(),
                     queued_for_update: Some(queued_for_update.clone()),
-                    currently_updating: Some(existing_version_idx),
+                    currently_updating: Some(old_child_idx),
                     queued_for_delete: None,
                 });
         }
 
-        let parent_node = graph.get_version(parent_idx)
-            .expect("This should always be a valid node index");
-        let new_parent = parent_node.event.forward(&parent_node.entity, &new_extrapolated);
-        let modified_child = &graph.get_version(newly_added_version_idx)
-            .expect("Come on I literally just added this node")
-            .entity;
-        let conflicts: Vec<Conflict> = Vec::new(); // event.backward(&new_extrapolated, &mut new_parent);
-        assert_eq!(&event.forward(&new_parent, &new_extrapolated), modified_child);
-
-        if !conflicts.is_empty() {
-            version_conflicts.push(conflicts);
+        // Never recurse past an observed node, but do use our reconstructed parent to check that
+        // this is working
+        let new_parent_idx = if let Some(obs) = &old_parent_node.observed {
+            info!("Parent has been observed; checking compatibility");
+            let raw: &EntityT::Raw = (&obs.entity_raw).try_into()
+                .expect("Mismatched entity types");
+            let mut new_parent: EntityT = new_parent.try_into()
+                .expect("I just added this one");
+            let conflicts = new_parent.observe(raw);
+            if conflicts.is_empty() {
+                all_parents_had_conflicts = false;
+                graph.add_edge(old_parent_idx, new_child_idx, new_extrapolated.clone());
+            } else {
+                version_conflicts.push(conflicts);
+                todo!("Early exit")
+            }
+            old_parent_idx
         } else {
+            info!("Parent has not been observed; propagating changes");
             all_parents_had_conflicts = false;
-            if &parent_node.entity != &new_parent {
+            if &old_parent_node.entity != &new_parent {
+                info!("Saving changes and recursing");
                 // Then a change was made and we need to save it to the graph and then recurse
-                let new_parent_idx = graph.add_child_disconnected(new_parent.into(), event_arc.clone(), AddedReason::RefinedFromObservation);
-                graph.add_edge(new_parent_idx, newly_added_version_idx, new_extrapolated);
+                let new_parent_idx = graph.add_child_disconnected(new_parent.into(), old_parent_node.event.clone(), AddedReason::RefinedFromObservation);
+                graph.add_edge(new_parent_idx, new_child_idx, new_extrapolated.clone());
                 // Recurse with the different event type
-                let child_event_arc = &graph.get_version(parent_idx)
+                let child_event_arc = &graph.get_version(old_parent_idx)
                     .expect("Expected node index supplied to ingest_changed_event to be valid")
                     .event;
                 with_any_event!(child_event_arc.as_ref(), |_: EventT| {
-                    ingest_changed_entity::<EventT>(graph, parent_idx, new_parent_idx, debug_history, queued_for_update, debug_time)
-                })
+                    ingest_changed_entity::<EntityT, EventT>(graph, old_parent_idx, new_parent_idx, debug_history, queued_for_update, debug_time)
+                });
+
+                new_parent_idx
             } else {
-                graph.add_edge(parent_idx, newly_added_version_idx, new_extrapolated);
+                info!("No changes to save");
+                graph.add_edge(old_parent_idx, new_child_idx, new_extrapolated.clone());
+                old_parent_idx
             }
-        }
+        };
+
+        let new_parent_node = graph.get_version(new_parent_idx)
+            .expect("This should always be a valid node index");
+        let new_child_node = &graph.get_version(new_child_idx)
+            .expect("This should always be a valid node index");
+
+        // Test reconstructing child from parent, now that parent should be appropriately modified
+        assert_eq!(&event.forward(&new_parent_node.entity, &new_extrapolated), &new_child_node.entity);
     }
 
     if all_parents_had_conflicts {
@@ -392,11 +413,12 @@ fn ingest_for_version<EntityT>(
 ) -> Result<Vec<NodeIndex>, Vec<Conflict>>
 // Disgustang
     where EntityT: Entity + PartialInformationCompare + Into<AnyEntity> + 'static,
+          AnyEntity: TryInto<EntityT>,
+          <AnyEntity as TryInto<EntityT>>::Error: Debug,
           for<'a> &'a AnyEntity: TryInto<&'a EntityT>,
           for<'a> &'a AnyEntityRaw: TryInto<&'a EntityT::Raw>,
           for<'a> <&'a AnyEntity as TryInto<&'a EntityT>>::Error: Debug,
           for<'a> <&'a AnyEntityRaw as TryInto<&'a <EntityT as PartialInformationCompare>::Raw>>::Error: Debug {
-
     debug_history.get_mut(&(obs.entity_type, obs.entity_id)).unwrap().versions.push(DebugHistoryVersion {
         event_human_name: format!("Updating {:?} during ingest at {}", entity_idx, obs.perceived_at),
         time: obs.perceived_at,
@@ -424,10 +446,12 @@ fn ingest_for_event<EntityT, EventT>(
 ) -> Result<Vec<NodeIndex>, Vec<Conflict>>
 // Disgustang
     where EntityT: Entity + PartialInformationCompare + Into<AnyEntity> + 'static,
+          AnyEntity: TryInto<EntityT>,
+          <AnyEntity as TryInto<EntityT>>::Error: Debug,
           for<'a> &'a AnyEntity: TryInto<&'a EntityT>,
           for<'a> <&'a AnyEntity as TryInto<&'a EntityT>>::Error: Debug,
           for<'a> &'a AnyEntityRaw: TryInto<&'a EntityT::Raw>,
-          for<'a> <&'a AnyEntityRaw as TryInto<&'a <EntityT as PartialInformationCompare>::Raw>>::Error: Debug,
+          for<'a> <&'a AnyEntityRaw as TryInto<&'a EntityT::Raw>>::Error: Debug,
           EventT: Event,
           for<'a> &'a AnyEvent: TryInto<&'a EventT>,
           for<'a> <&'a AnyEvent as TryInto<&'a EventT>>::Error: Debug {
@@ -453,15 +477,15 @@ fn ingest_for_event<EntityT, EventT>(
             new_entity.into(),
             node.event.clone(),
             AddedReason::RefinedFromObservation,
-            obs.clone()
+            obs.clone(),
         );
-        ingest_changed_entity(
+        ingest_changed_entity::<EntityT, _>(
             graph,
             entity_idx,
             new_entity_idx,
             debug_history,
             queued_for_update,
-            debug_time
+            debug_time,
         );
 
         new_entity_idx
@@ -479,28 +503,37 @@ fn ingest_for_event<EntityT, EventT>(
     });
 
     let mut generation = vec![(entity_idx, new_entity_idx)];
-    loop { // generations loop
+    loop {
+        // generations loop
         info!("Forward pass: walking next generation");
         let mut next_generation = Vec::new();
         for &(old_entity_idx, new_entity_idx) in &generation {
             info!("Forward pass: walking children of {old_entity_idx:?}");
             let mut child_walker = graph.graph.children(old_entity_idx);
             while let Some((edge_idx, old_child_idx)) = child_walker.walk_next(&graph.graph) {
-                info!("Forward pass: walking child of {old_child_idx:?}");
+                info!("Forward pass: walking child {old_child_idx:?}");
                 // Gotta re-fetch because of borrowing rules
                 let old_entity_node = graph.graph.node_weight(old_entity_idx)
                     .expect("Must exist");
+                let new_entity_node = graph.graph.node_weight(new_entity_idx)
+                    .expect("Must exist");
                 let extrapolated = graph.graph.edge_weight(edge_idx)
                     .expect("Must exist");
-                let old_child = &graph.graph.node_weight(old_child_idx)
+                let old_child_node = graph.graph.node_weight(old_child_idx)
                     .expect("Must exist");
-                let new_child_unobserved = old_child.event.forward(&old_entity_node.entity, &extrapolated);
+                let new_child_unobserved = old_child_node.event.forward(&old_entity_node.entity, &extrapolated);
+                info!("Old parent: {:?}", old_entity_node.entity);
+                info!("New parent: {:?}", new_entity_node.entity);
+                info!("Applying Event: {:?}", old_child_node.event);
+                info!("Old child: {:?}", old_child_node.entity);
+                info!("New child: {:?}", new_child_unobserved);
                 // for debugging, placed here because of borrow rules
-                let event_description = old_child.event.to_string();
+                let event_description = old_child_node.event.to_string();
 
                 // Unfortunately, observations are not totally ordered, so sometimes we need to
                 // reapply an observation in the forward pass
-                let (new_child, observed) = if let Some(old_obs) = &old_child.observed {
+                let (new_child, observed) = if let Some(old_obs) = &old_child_node.observed {
+                    info!("Reapplying observation for {old_child_idx:?}");
                     let raw: &EntityT::Raw = (&old_obs.entity_raw).try_into()
                         .expect("This graph has inconsistent entity types");
                     let unobserved: &EntityT = (&new_child_unobserved).try_into()
@@ -509,7 +542,7 @@ fn ingest_for_event<EntityT, EventT>(
 
                     let conflicts = new_child_entity.observe(raw);
                     if !conflicts.is_empty() {
-                        todo!("Terminate this branch, I think");
+                        return Err(conflicts)
                     }
 
                     if &new_child_entity != unobserved {
@@ -523,7 +556,7 @@ fn ingest_for_event<EntityT, EventT>(
 
                 let (_, new_child_idx) = graph.graph.add_child(new_entity_idx, extrapolated.clone(), StateGraphNode {
                     entity: new_child,
-                    event: old_child.event.clone(),
+                    event: old_child_node.event.clone(),
                     observed,
                     added_reason: AddedReason::DescendantOfObservedNode,
                 });
@@ -540,11 +573,10 @@ fn ingest_for_event<EntityT, EventT>(
             }
         }
         if next_generation.is_empty() {
-            return Ok(generation.into_iter().map(|(_old, new)| new).collect())
+            return Ok(generation.into_iter().map(|(_old, new)| new).collect());
         }
         generation = next_generation;
     }
-
 }
 
 // fn forward_ingest<EntityRawT: EntityRaw>(state: &StateInterface, entity_raw: &EntityRawT, perceived_at: DateTime<Utc>) -> ChronIngestResult<()> {
