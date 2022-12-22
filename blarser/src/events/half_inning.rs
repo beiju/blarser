@@ -45,16 +45,19 @@ impl Event for HalfInning {
         ]
     }
 
-    fn forward(&self, entity: &AnyEntity, _: &AnyExtrapolated) -> AnyEntity {
+    fn forward(&self, entity: &AnyEntity, extrapolated: &AnyExtrapolated) -> AnyEntity {
         let mut entity = entity.clone();
         if let Some(game) = entity.as_game_mut() {
+            let extrapolated: &PitchersExtrapolated = extrapolated.try_into()
+                .expect("Wrong extrapolated type in HalfInning update");
+
             self.game_update.forward(game);
 
             if game.inning == -1 {
-                game.home.pitcher = Some(MaybeKnown::Unknown);
-                game.home.pitcher_name = Some(MaybeKnown::Unknown);
-                game.away.pitcher = Some(MaybeKnown::Unknown);
-                game.away.pitcher_name = Some(MaybeKnown::Unknown);
+                game.home.pitcher = Some(extrapolated.home_pitcher_id);
+                game.home.pitcher_name = Some(extrapolated.home_pitcher_name.clone());
+                game.away.pitcher = Some(extrapolated.away_pitcher_id);
+                game.away.pitcher_name = Some(extrapolated.away_pitcher_name.clone());
             }
 
             game.top_of_inning = !game.top_of_inning;
@@ -73,21 +76,10 @@ impl Event for HalfInning {
         let mut conflicts = Vec::new();
         
         if let Some(game) = entity.as_game_mut() {
-            let extrapolated: &PitchersExtrapolated = extrapolated.try_into()
-                .expect("Got the wrong Extrapolated type in HalfInning.backward");
-
-            if let MaybeKnown::Known(id) = &extrapolated.away_pitcher_id {
-                conflicts.extend(game.away.pitcher.observe(&Some(*id)));
-            }
-            if let MaybeKnown::Known(name) = &extrapolated.away_pitcher_name {
-                conflicts.extend(game.away.pitcher_name.observe(&Some(name.to_string())));
-            }
-            if let MaybeKnown::Known(id) = &extrapolated.home_pitcher_id {
-                conflicts.extend(game.home.pitcher.observe(&Some(*id)));
-            }
-            if let MaybeKnown::Known(name) = &extrapolated.home_pitcher_name {
-                conflicts.extend(game.home.pitcher_name.observe(&Some(name.to_string())));
-            }
+            game.home.pitcher = None;
+            game.home.pitcher_name = Some(MaybeKnown::Known(String::new()));
+            game.away.pitcher = None;
+            game.away.pitcher_name = Some(MaybeKnown::Known(String::new()));
         }
 
         conflicts

@@ -89,7 +89,7 @@ impl EntityStateGraph {
     pub fn get_version(&self, idx: NodeIndex) -> Option<&StateGraphNode> {
         self.graph.node_weight(idx)
     }
-    
+
     pub fn get_version_mut(&mut self, idx: NodeIndex) -> Option<&mut StateGraphNode> {
         self.graph.node_weight_mut(idx)
     }
@@ -237,6 +237,16 @@ impl EntityStateGraph {
         let mut edges = HashMap::new();
         let mut data = HashMap::new();
 
+        let mut order_map = HashMap::new();
+        let mut next_order_num: usize = 0;
+        for &root in &self.roots {
+            let mut dfs = petgraph::visit::Dfs::new(&self.graph, root);
+            while let Some(node) = dfs.next(&self.graph) {
+                order_map.insert(node, next_order_num);
+                next_order_num += 1;
+            }
+        }
+
         let mut next_generation: HashSet<_> = self.roots.iter()
             .cloned()
             .collect();
@@ -251,6 +261,8 @@ impl EntityStateGraph {
                     is_observed: node.observed.is_some(),
                     added_reason: node.added_reason,
                     json: node.entity.to_json(),
+                    order: *order_map.get(&idx)
+                        .expect("Every index reachable from a root should be in order_map"),
                 });
                 let mut child_walker = self.graph.children(idx);
                 while let Some((_, child_idx)) = child_walker.walk_next(&self.graph) {
@@ -323,6 +335,7 @@ impl StateGraph {
                             is_observed: true, // by definition
                             added_reason: AddedReason::Start,
                             json,
+                            order: 0,
                         })).collect(),
                         roots: vec![idx],
                         leafs: vec![idx],

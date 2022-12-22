@@ -112,6 +112,7 @@ pub struct DebugTreeNode {
     pub is_observed: bool,
     pub added_reason: AddedReason,
     pub json: serde_json::Value,
+    pub order: usize,
 }
 
 #[derive(Debug, Serialize, Clone)]

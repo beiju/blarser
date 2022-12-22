@@ -23,7 +23,7 @@ use uuid::Uuid;
 use crate::api::chronicler;
 use crate::ingest::task::{DebugHistoryVersion, DebugTree, Ingest};
 use crate::entity::{self, AnyEntity, AnyEntityRaw, Entity, EntityParseError, EntityRaw};
-use crate::events::{self, AnyEvent, Event};
+use crate::events::{self, AnyEvent, Event, with_any_event};
 use crate::ingest::GraphDebugHistory;
 use crate::ingest::observation::Observation;
 use crate::ingest::state::{AddedReason, EntityStateGraph, StateGraphNode};
@@ -339,7 +339,7 @@ fn get_reachable_nodes(graph: &EntityStateGraph, mut stack: Vec<NodeIndex>) -> H
     output
 }
 
-fn ingest_changed_event<EventT>(
+fn ingest_changed_entity<EventT>(
     graph: &mut EntityStateGraph,
     existing_version_idx: NodeIndex,
     newly_added_version_idx: NodeIndex,
@@ -411,8 +411,13 @@ fn ingest_changed_event<EventT>(
                 // Then a change was made and we need to save it to the graph and then recurse
                 let new_parent_idx = graph.add_child_disconnected(new_parent.into(), event_arc.clone(), AddedReason::RefinedFromObservation);
                 graph.add_edge(new_parent_idx, newly_added_version_idx, new_extrapolated);
-                // Recurse
-                ingest_changed_event(graph, parent_idx, new_parent_idx, debug_history, queued_for_update, debug_time);
+                // Recurse with the different event type
+                let child_event_arc = &graph.get_version(parent_idx)
+                    .expect("Expected node index supplied to ingest_changed_event to be valid")
+                    .event;
+                with_any_event!(child_event_arc.as_ref(), |_: EventT| {
+                    ingest_changed_entity::<EventT>(graph, parent_idx, new_parent_idx, debug_history, queued_for_update, debug_time)
+                })
             } else {
                 graph.add_edge(parent_idx, newly_added_version_idx, new_extrapolated);
             }
@@ -452,26 +457,9 @@ fn ingest_for_version<EntityT>(
     let event = &graph.get_version(entity_idx)
         .expect("Expected node index supplied to ingest_for_version to be valid")
         .event;
-
-    match event.as_ref() {
-        AnyEvent::Start(_) => ingest_for_event::<EntityT, events::Start>(graph, entity_idx, obs, debug_history, queued_for_update, debug_time),
-        AnyEvent::EarlseasonStart(_) => ingest_for_event::<EntityT, events::EarlseasonStart>(graph, entity_idx, obs, debug_history, queued_for_update, debug_time),
-        AnyEvent::LetsGo(_) => ingest_for_event::<EntityT, events::LetsGo>(graph, entity_idx, obs, debug_history, queued_for_update, debug_time),
-        AnyEvent::PlayBall(_) => ingest_for_event::<EntityT, events::PlayBall>(graph, entity_idx, obs, debug_history, queued_for_update, debug_time),
-        AnyEvent::TogglePerforming(_) => ingest_for_event::<EntityT, events::TogglePerforming>(graph, entity_idx, obs, debug_history, queued_for_update, debug_time),
-        AnyEvent::HalfInning(_) => ingest_for_event::<EntityT, events::HalfInning>(graph, entity_idx, obs, debug_history, queued_for_update, debug_time),
-        AnyEvent::StormWarning(_) => ingest_for_event::<EntityT, events::StormWarning>(graph, entity_idx, obs, debug_history, queued_for_update, debug_time),
-        AnyEvent::BatterUp(_) => ingest_for_event::<EntityT, events::BatterUp>(graph, entity_idx, obs, debug_history, queued_for_update, debug_time),
-        AnyEvent::Strike(_) => ingest_for_event::<EntityT, events::Strike>(graph, entity_idx, obs, debug_history, queued_for_update, debug_time),
-        AnyEvent::Ball(_) => ingest_for_event::<EntityT, events::Ball>(graph, entity_idx, obs, debug_history, queued_for_update, debug_time),
-        AnyEvent::FoulBall(_) => ingest_for_event::<EntityT, events::FoulBall>(graph, entity_idx, obs, debug_history, queued_for_update, debug_time),
-        AnyEvent::Out(_) => ingest_for_event::<EntityT, events::Out>(graph, entity_idx, obs, debug_history, queued_for_update, debug_time),
-        AnyEvent::Hit(_) => ingest_for_event::<EntityT, events::Hit>(graph, entity_idx, obs, debug_history, queued_for_update, debug_time),
-        AnyEvent::HomeRun(_) => ingest_for_event::<EntityT, events::HomeRun>(graph, entity_idx, obs, debug_history, queued_for_update, debug_time),
-        AnyEvent::StolenBase(_) => ingest_for_event::<EntityT, events::StolenBase>(graph, entity_idx, obs, debug_history, queued_for_update, debug_time),
-        AnyEvent::Walk(_) => ingest_for_event::<EntityT, events::Walk>(graph, entity_idx, obs, debug_history, queued_for_update, debug_time),
-        AnyEvent::CaughtStealing(_) => ingest_for_event::<EntityT, events::CaughtStealing>(graph, entity_idx, obs, debug_history, queued_for_update, debug_time),
-    }
+    with_any_event!(event.as_ref(), |_: EventT| {
+        ingest_for_event::<EntityT, EventT>(graph, entity_idx, obs, debug_history, queued_for_update, debug_time)
+    })
 }
 
 fn ingest_for_event<EntityT, EventT>(
@@ -517,7 +505,7 @@ fn ingest_for_event<EntityT, EventT>(
             AddedReason::RefinedFromObservation,
             obs.clone()
         );
-        ingest_changed_event(
+        ingest_changed_entity(
             graph,
             entity_idx,
             new_entity_idx,

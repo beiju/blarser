@@ -17,10 +17,19 @@ macro_rules! polymorphic_enum {
                 match $on {
                     $($name::$variant($with) => $body )*
                 }
-            }
+            };
+            ($on:expr, |$with:ident: $bound_type:ident| $body:block) => {
+                match $on {
+                    $($name::$variant($with) => { type $bound_type = $type; $body } )*
+                }
+            };
+            ($on:expr, |_: $bound_type:ident| $body:block) => {
+                match $on {
+                    $($name::$variant(_) => { type $bound_type = $type; $body } )*
+                }
+            };
         }
     }
-
 }
 
 pub(crate) use polymorphic_enum;

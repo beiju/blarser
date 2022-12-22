@@ -11,6 +11,8 @@ pub enum MaybeKnown<UnderlyingType> {
     Known(UnderlyingType),
 }
 
+impl<T> Copy for MaybeKnown<T> where T: Copy {}
+
 impl<UnderlyingType> MaybeKnown<UnderlyingType>
     where UnderlyingType: Clone + Debug {
     pub fn known(&self) -> Option<&UnderlyingType> {

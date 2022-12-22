@@ -74,26 +74,28 @@ polymorphic_enum!{
     #[derive(Debug, Serialize, Deserialize, TryInto, From)]
     #[try_into(owned, ref, ref_mut)]
     pub AnyEvent: with_any_event {
-        Start(Start),
-        EarlseasonStart(EarlseasonStart),
-        LetsGo(LetsGo),
-        PlayBall(PlayBall),
-        TogglePerforming(TogglePerforming),
-        HalfInning(HalfInning),
-        StormWarning(StormWarning),
-        BatterUp(BatterUp),
-        Strike(Strike),
-        Ball(Ball),
-        FoulBall(FoulBall),
-        Out(Out),
-        Hit(Hit),
-        HomeRun(HomeRun),
-        StolenBase(StolenBase),
-        Walk(Walk),
-        CaughtStealing(CaughtStealing),
+        // These need to use absolute paths for the exported macro to work
+        Start(crate::events::Start),
+        EarlseasonStart(crate::events::EarlseasonStart),
+        LetsGo(crate::events::LetsGo),
+        PlayBall(crate::events::PlayBall),
+        TogglePerforming(crate::events::TogglePerforming),
+        HalfInning(crate::events::HalfInning),
+        StormWarning(crate::events::StormWarning),
+        BatterUp(crate::events::BatterUp),
+        Strike(crate::events::Strike),
+        Ball(crate::events::Ball),
+        FoulBall(crate::events::FoulBall),
+        Out(crate::events::Out),
+        Hit(crate::events::Hit),
+        HomeRun(crate::events::HomeRun),
+        StolenBase(crate::events::StolenBase),
+        Walk(crate::events::Walk),
+        CaughtStealing(crate::events::CaughtStealing),
     }
 }
 
+pub(crate) use with_any_event;
 
 impl Display for AnyEvent {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
