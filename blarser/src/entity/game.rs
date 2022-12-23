@@ -3,7 +3,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_with::with_prefix;
 use uuid::Uuid;
-use partial_information::{PartialInformationCompare, MaybeKnown};
+use partial_information::{PartialInformationCompare, MaybeKnown, RangeInclusive};
 use partial_information_derive::PartialInformationCompare;
 
 use crate::entity::{Base, Entity, EntityRaw, RunnerAdvancement};
@@ -144,7 +144,7 @@ pub struct Game {
     pub is_title_match: bool,
     pub queued_events: Option<Vec<i32>>,
     pub series_length: i32,
-    pub bases_occupied: Vec<i32>,
+    pub bases_occupied: Vec<RangeInclusive<i32>>,
     pub base_runner_mods: Vec<String>,
     pub game_start_phase: i32,
     pub half_inning_outs: i32,
@@ -266,6 +266,33 @@ impl Game {
         self.end_at_bat()
     }
 
+    pub(crate) fn reverse_out(&mut self, outs_added: i32, other: &Self) {
+        let end_of_half_inning = other.half_inning_outs + outs_added == 3;
+        if end_of_half_inning {
+            self.half_inning_outs = other.half_inning_outs;
+            self.phase = other.half_inning_outs;
+            self.reverse_clear_bases(other);
+
+            // Reset both top and bottom inning scored only when the bottom half ends
+            if !other.top_of_inning {
+                self.top_inning_score = other.top_inning_score;
+                self.bottom_inning_score = other.bottom_inning_score;
+                self.half_inning_score = other.half_inning_score;
+            }
+
+            // End the game
+            if other.game_should_end() {
+                self.top_inning_score = other.top_inning_score;
+                self.half_inning_score = other.half_inning_score;
+                self.phase = other.phase;
+            }
+        } else {
+            self.half_inning_outs -= outs_added;
+        }
+
+        self.reverse_end_at_bat(other);
+    }
+
     fn game_should_end(&self) -> bool {
         if self.inning < 8 { return false; }
 
@@ -288,11 +315,28 @@ impl Game {
         self.baserunner_count = 0;
     }
 
+    pub fn reverse_clear_bases(&mut self, other: &Self) {
+        self.base_runners = other.base_runners.clone();
+        self.base_runner_names = other.base_runner_names.clone();
+        self.base_runner_mods = other.base_runner_mods.clone();
+        self.bases_occupied = other.bases_occupied.clone();
+        self.baserunner_count = other.baserunner_count;
+    }
+
     pub(crate) fn end_at_bat(&mut self) {
         self.team_at_bat_mut().batter = None;
         self.team_at_bat_mut().batter_name = Some("".to_string());
+        self.team_at_bat_mut().batter_mod = String::new();
         self.at_bat_balls = 0;
         self.at_bat_strikes = 0;
+    }
+
+    pub(crate) fn reverse_end_at_bat(&mut self, other: &Self) {
+        self.team_at_bat_mut().batter = other.team_at_bat().batter;
+        self.team_at_bat_mut().batter_name = other.team_at_bat().batter_name.clone();
+        self.team_at_bat_mut().batter_mod = other.team_at_bat().batter_mod.clone();
+        self.at_bat_balls = other.at_bat_balls;
+        self.at_bat_strikes = other.at_bat_strikes;
     }
 
     // pub(crate) fn get_baserunner_with_name(&self, expected_name: &str, base_plus_one: Base) -> usize {
@@ -323,8 +367,8 @@ impl Game {
     pub fn advance_runners(&mut self, advancements: &[RunnerAdvancement]) {
         for (i, advancement) in advancements.iter().enumerate() {
             assert_eq!(self.base_runners[i], advancement.runner_id);
-            assert_eq!(self.bases_occupied[i], advancement.from_base);
-            self.bases_occupied[i] = advancement.to_base;
+            assert!(self.bases_occupied[i].could_be(&advancement.from_base));
+            self.bases_occupied[i].update(advancement.to_base);
         }
     }
 
@@ -355,13 +399,15 @@ impl Game {
         self.base_runners.push(runner_id);
         self.base_runner_names.push(runner_name);
         self.base_runner_mods.push(runner_mod);
-        self.bases_occupied.push(to_base as i32);
+        self.bases_occupied.push(RangeInclusive::from_raw(to_base as i32));
         self.baserunner_count += 1;
 
-        let mut last_occupied_base: Option<i32> = None;
+        let mut last_occupied_base: Option<RangeInclusive<i32>> = None;
         for base_num in self.bases_occupied.iter_mut().rev() {
             if let Some(last_occupied_base_num) = last_occupied_base.as_mut() {
-                if *base_num <= *last_occupied_base_num {
+                if base_num.upper <= last_occupied_base_num.upper {
+                    assert!(base_num.lower <= last_occupied_base_num.lower,
+                            "Bases must be ordered even when not fully known");
                     *last_occupied_base_num = *base_num + 1;
 
                     *base_num = *last_occupied_base_num;

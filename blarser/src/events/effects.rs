@@ -77,6 +77,24 @@ impl Default for OddsAndPitchersExtrapolated {
     }
 }
 
+#[derive(Debug, Clone, PartialInformationCompare)]
+pub struct AdvancementExtrapolated {
+    // This is a vec parallel to `baserunners`, `basesOccupied`, etc. Each element a MaybeUnknown
+    // bool representing whether that player advanced (or, for hit events, whether they advanced an
+    // extra base)
+    pub bases: Vec<MaybeKnown<bool>>,
+}
+
+impl Extrapolated for AdvancementExtrapolated {}
+
+impl AdvancementExtrapolated {
+    pub fn new(num_occupied_bases: usize) -> Self {
+        Self {
+            bases: vec![MaybeKnown::Unknown; num_occupied_bases],
+        }
+    }
+}
+
 polymorphic_enum! {
     #[derive(From, TryInto, Clone, Debug)]
     #[try_into(owned, ref, ref_mut)]
@@ -86,6 +104,7 @@ polymorphic_enum! {
         BatterId(BatterIdExtrapolated),
         Pitchers(PitchersExtrapolated),
         OddsAndPitchers(OddsAndPitchersExtrapolated),
+        Advancement(AdvancementExtrapolated),
     }
 }
 

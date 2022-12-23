@@ -4,8 +4,10 @@ use crate::events::effects::BatterIdExtrapolated;
 use crate::ingest::StateGraph;
 use crate::state::EntityType;
 
-const BATTER_MOD_PRECEDENCE: [&'static str; 1] = [
-    "COFFEE_RALLY"
+// This list is very much in flux
+const BATTER_MOD_PRECEDENCE: [&'static str; 2] = [
+    "COFFEE_RALLY",
+    "BLASERUNNING",
 ];
 
 pub fn game_effect_with_modified_batter_id(game_id: Uuid, state: &StateGraph, add: isize) -> Effect {

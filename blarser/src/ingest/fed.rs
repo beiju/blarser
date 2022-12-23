@@ -211,7 +211,7 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
                     .expect("Invalid num_bases in Hit event"),
             }.into()
         }
-        FedEventData::HomeRun { game, .. } => {
+        FedEventData::HomeRun { game, num_runs, .. } => {
             events::HomeRun {
                 game_update: GameUpdate {
                     game_id: game.game_id,
@@ -220,9 +220,10 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
                     description,
                 },
                 time: fed_event.created,
+                num_runs
             }.into()
         }
-        FedEventData::StolenBase { game, base_stolen, .. } => {
+        FedEventData::StolenBase { game, base_stolen, runner_id, .. } => {
             events::StolenBase {
                 game_update: GameUpdate {
                     game_id: game.game_id,
@@ -233,6 +234,7 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
                 time: fed_event.created,
                 to_base: Base::try_from(base_stolen)
                     .expect("Invalid base_stolen in StolenBase event"),
+                runner_id,
             }.into()
         }
         FedEventData::CaughtStealing { game, base_stolen, .. } => {

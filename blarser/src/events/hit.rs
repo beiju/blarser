@@ -65,6 +65,7 @@ ord_by_time!(Hit);
 pub struct HomeRun {
     pub(crate) game_update: GameUpdate,
     pub(crate) time: DateTime<Utc>,
+    pub(crate) num_runs: i32,
 }
 
 impl Event for HomeRun {
@@ -86,7 +87,12 @@ impl Event for HomeRun {
 
             self.game_update.forward(game);
 
-            // game_update takes care of the scoring
+            // game_update usually takes care of the scoring but home runs are weird
+            game.score_update = Some(format!("1 Run scored!")); // TODO other run numbers
+            game.top_inning_score += self.num_runs as f32;
+            game.half_inning_score += self.num_runs as f32;
+            *game.team_at_bat_mut().score.as_mut().unwrap() += self.num_runs as f32;
+
             game.clear_bases();
             game.end_at_bat();
         }
