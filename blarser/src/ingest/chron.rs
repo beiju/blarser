@@ -490,6 +490,9 @@ fn ingest_for_event<EntityT, EventT>(
 
         new_entity_idx
     } else {
+        graph.get_version_mut(entity_idx)
+            .expect("This version should exist")
+            .observed = Some(obs.clone());
         entity_idx
     };
 

@@ -246,6 +246,10 @@ impl Player {
             self.item_attr.iter().flatten().any(|n| n == mod_name)
     }
 
+    pub fn is_wielding(&self, bat_name: &str) -> bool {
+        self.bat.as_ref().map_or(false, |n| n == bat_name)
+    }
+
     pub fn adjust_attributes(&mut self, lower: f32, upper: f32) {
         self.adjust_batting(lower, upper);
         self.adjust_pitching(lower, upper);

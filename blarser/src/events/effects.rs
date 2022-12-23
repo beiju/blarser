@@ -22,18 +22,18 @@ pub struct SubsecondsExtrapolated {
 impl Extrapolated for SubsecondsExtrapolated {}
 
 #[derive(Debug, Clone, PartialInformationCompare)]
-pub struct BatterIdExtrapolated {
-    pub(crate) batter_id: Option<Uuid>,
-    pub(crate) batter_mod: String,
+pub struct GamePlayerExtrapolated {
+    pub(crate) player_id: Uuid,
+    pub(crate) player_mod: String,
 }
 
-impl BatterIdExtrapolated {
-    pub fn new(batter_id: Option<Uuid>, batter_mod: String) -> Self {
-        Self { batter_id, batter_mod }
+impl GamePlayerExtrapolated {
+    pub fn new(player_id: Uuid, player_mod: String) -> Self {
+        Self { player_id, player_mod }
     }
 }
 
-impl Extrapolated for BatterIdExtrapolated {}
+impl Extrapolated for GamePlayerExtrapolated {}
 
 #[derive(Default, Debug, Clone, PartialInformationCompare)]
 pub struct PitcherExtrapolated {
@@ -101,7 +101,7 @@ polymorphic_enum! {
     pub AnyExtrapolated: with_extrapolated {
         Null(NullExtrapolated),
         Subseconds(SubsecondsExtrapolated),
-        BatterId(BatterIdExtrapolated),
+        GamePlayer(GamePlayerExtrapolated),
         Pitchers(PitchersExtrapolated),
         OddsAndPitchers(OddsAndPitchersExtrapolated),
         Advancement(AdvancementExtrapolated),

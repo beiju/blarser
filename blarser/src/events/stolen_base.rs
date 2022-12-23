@@ -7,8 +7,8 @@ use partial_information::{PartialInformationCompare, RangeInclusive};
 
 use crate::entity::{AnyEntity, Base, Game};
 use crate::events::{AnyExtrapolated, Effect, Event, ord_by_time};
-use crate::events::effects::{BatterIdExtrapolated, NullExtrapolated};
-use crate::events::event_util::game_effect_with_batter_id;
+use crate::events::effects::{GamePlayerExtrapolated, NullExtrapolated};
+use crate::events::event_util::game_effect_with_batter;
 use crate::events::game_update::GameUpdate;
 use crate::ingest::StateGraph;
 use crate::state::EntityType;
@@ -91,17 +91,14 @@ impl Event for CaughtStealing {
         self.time
     }
 
-    fn effects(&self, state: &StateGraph) -> Vec<Effect> {
-        vec![
-            game_effect_with_batter_id(self.game_update.game_id, state)
-        ]
+    fn effects(&self, _: &StateGraph) -> Vec<Effect> {
+        vec![Effect::one_id(EntityType::Game, self.game_update.game_id)]
     }
 
     fn forward(&self, entity: &AnyEntity, extrapolated: &AnyExtrapolated) -> AnyEntity {
         let mut entity = entity.clone();
         if let Some(game) = entity.as_game_mut() {
-            let extrapolated: &BatterIdExtrapolated = extrapolated.try_into().unwrap();
-            game.team_at_bat_mut().batter = extrapolated.batter_id;
+            let _: &NullExtrapolated = extrapolated.try_into().unwrap();
 
             self.game_update.forward(game);
 
