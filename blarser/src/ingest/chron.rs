@@ -494,7 +494,7 @@ fn ingest_for_event<EntityT, EventT>(
     };
 
     debug_history.get_mut(&(obs.entity_type, obs.entity_id)).unwrap().versions.push(DebugHistoryVersion {
-        event_human_name: format!("Before forward pass at {}", obs.perceived_at),
+        event_human_name: format!("After updating entity and parents {}", obs.perceived_at),
         time: obs.perceived_at,
         tree: graph.get_debug_tree(),
         queued_for_update: None,

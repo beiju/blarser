@@ -3,20 +3,21 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use partial_information::{DatetimeWithResettingMs, MaybeKnown};
 
-use crate::entity::{AnyEntity, Game, Sim};
-use crate::events::{AnyExtrapolated, Effect, Event, ord_by_time};
-use crate::events::effects::{OddsAndPitchersExtrapolated, SubsecondsExtrapolated};
+use crate::entity::{AnyEntity, Sim};
+use crate::events::{AnyEvent, AnyExtrapolated, Effect, Event, GameUpcoming, ord_by_time};
+use crate::events::effects::SubsecondsExtrapolated;
 use crate::ingest::StateGraph;
 use crate::state::EntityType;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct EarlseasonStart {
     time: DateTime<Utc>,
+    season: i32,
 }
 
 impl EarlseasonStart {
-    pub fn new(time: DateTime<Utc>) -> Self {
-        EarlseasonStart { time }
+    pub fn new(time: DateTime<Utc>, season: i32) -> Self {
+        EarlseasonStart { time, season }
     }
 }
 
@@ -25,10 +26,21 @@ impl Event for EarlseasonStart {
         self.time
     }
 
+    fn generate_successors(&self, state: &StateGraph) -> Vec<AnyEvent> {
+        let day0_successors = state.games_for_day(self.season, 0)
+            .map(|game_id| {
+                GameUpcoming::new(self.time, game_id).into()
+            });
+        let day1_successors = state.games_for_day(self.season, 1)
+            .map(|game_id| {
+                GameUpcoming::new(self.time, game_id).into()
+            });
+        day0_successors.chain(day1_successors).collect()
+    }
+
     fn effects(&self, _: &StateGraph) -> Vec<Effect> {
         vec![
             Effect::null_id_with(EntityType::Sim, SubsecondsExtrapolated::default()),
-            Effect::all_ids_with(EntityType::Game, OddsAndPitchersExtrapolated::default()),
         ]
     }
 
@@ -50,25 +62,6 @@ impl Event for EarlseasonStart {
             } else {
                 panic!("Tried to apply EarlseasonStart event while not in Preseason phase")
             }
-        } else if let Some(game) = entity.as_game_mut() {
-            let extrapolated: &OddsAndPitchersExtrapolated = extrapolated.try_into()
-                .expect("Mismatched extrapolated type");
-            for (self_by_team, odds_extrapolated, pitcher_extrapolated) in [
-                (&mut game.home, extrapolated.home_odds, &extrapolated.home),
-                (&mut game.away, extrapolated.away_odds, &extrapolated.away)
-            ] {
-                self_by_team.batter_name = Some(String::new());
-                self_by_team.odds = Some(odds_extrapolated);
-                // TODO If this pitcher id/name/mod is right, remove pitchers from extrapolated
-                self_by_team.pitcher = None;
-                self_by_team.pitcher_name = Some(MaybeKnown::Known(String::new()));
-                self_by_team.pitcher_mod = MaybeKnown::Known(String::new());
-                self_by_team.score = Some(0.0);
-                self_by_team.strikes = Some(3);
-            }
-            game.last_update = Some(String::new());
-            // This starts happening in short circuits, I think
-            // game.last_update_full = Some(Vec::new());
         }
 
         entity
@@ -90,41 +83,6 @@ impl Event for EarlseasonStart {
                 } else {
                     panic!("Tried to reverse-apply EarlseasonStart event while not in Earlseason phase")
                 }
-            }
-            AnyEntity::Game(old_game) => {
-                let new_game: &mut Game = new_parent.try_into()
-                    .expect("Mismatched event types");
-                let extrapolated: &mut OddsAndPitchersExtrapolated = extrapolated.try_into()
-                    .expect("Extrapolated type mismatch");
-                // extrapolated.away.pitcher_id = new_game.away.pitcher
-                //     .expect("Away pitcher should exist when reversing an EarlseasonStart event");
-                // extrapolated.away.pitcher_name = new_game.away.pitcher_name.clone()
-                //     .expect("Away pitcher should exist when reversing an EarlseasonStart event");
-                // extrapolated.away.pitcher_mod = new_game.away.pitcher_mod.clone();
-                // extrapolated.home.pitcher_id = new_game.home.pitcher
-                //     .expect("Home pitcher should exist when reversing an EarlseasonStart event");
-                // extrapolated.home.pitcher_name = new_game.home.pitcher_name.clone()
-                //     .expect("Home pitcher should exist when reversing an EarlseasonStart event");
-                // extrapolated.home.pitcher_mod = new_game.home.pitcher_mod.clone();
-                extrapolated.away_odds = new_game.away.odds
-                    .expect("Odds should exist when reversing an EarlseasonStart event");
-                extrapolated.home_odds = new_game.home.odds
-                    .expect("Odds should exist when reversing an EarlseasonStart event");
-
-                for (old_by_team, new_by_team) in [
-                    (&old_game.home, &mut new_game.home),
-                    (&old_game.away, &mut new_game.away),
-                ] {
-                    new_by_team.batter_name = old_by_team.batter_name.clone();
-                    new_by_team.odds = old_by_team.odds;
-                    new_by_team.pitcher = old_by_team.pitcher;
-                    new_by_team.pitcher_name = old_by_team.pitcher_name.clone();
-                    new_by_team.pitcher_mod = old_by_team.pitcher_mod.clone();
-                    new_by_team.score = old_by_team.score;
-                    new_by_team.strikes = old_by_team.strikes;
-                }
-                new_game.last_update = old_game.last_update.clone();
-                new_game.last_update_full = old_game.last_update_full.clone();
             }
             _ => {
                 panic!("Can't reverse-apply EarlseasonStart to this entity type");

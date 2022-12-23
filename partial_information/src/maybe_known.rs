@@ -6,24 +6,26 @@ use crate::PartialInformationCompare;
 
 #[derive(Default, Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub enum MaybeKnown<UnderlyingType> {
+pub enum MaybeKnown<UnderlyingType: PartialInformationCompare> {
     #[default] Unknown,
     Known(UnderlyingType),
+    UnknownExcluding(UnderlyingType::Raw),
 }
 
-impl<T> Copy for MaybeKnown<T> where T: Copy {}
+impl<T: PartialInformationCompare> Copy for MaybeKnown<T> where T: Copy, T::Raw: Copy {}
 
-impl<UnderlyingType> MaybeKnown<UnderlyingType>
+impl<UnderlyingType: PartialInformationCompare> MaybeKnown<UnderlyingType>
     where UnderlyingType: Clone + Debug {
     pub fn known(&self) -> Option<&UnderlyingType> {
         match self {
             MaybeKnown::Unknown => { None }
             MaybeKnown::Known(val) => { Some(val) }
+            MaybeKnown::UnknownExcluding(_) => { None }
         }
     }
 }
 
-impl<UnderlyingType> From<UnderlyingType> for MaybeKnown<UnderlyingType>
+impl<UnderlyingType: PartialInformationCompare> From<UnderlyingType> for MaybeKnown<UnderlyingType>
     where UnderlyingType: Clone + Debug {
     fn from(item: UnderlyingType) -> Self {
         Self::Known(item)
@@ -38,7 +40,7 @@ pub enum MaybeKnownDiff<'d, T: 'd + PartialInformationCompare> {
 
 impl<T> PartialInformationCompare for MaybeKnown<T>
     where T: 'static + PartialInformationCompare,
-          T::Raw: Clone + Default {
+          T::Raw: Clone + Default + PartialEq {
     type Raw = T::Raw;
     type Diff<'d> = MaybeKnownDiff<'d, T>;
 
@@ -48,6 +50,7 @@ impl<T> PartialInformationCompare for MaybeKnown<T>
             MaybeKnown::Known(expected) => {
                 MaybeKnownDiff::Diff(expected.diff(observed, time))
             }
+            MaybeKnown::UnknownExcluding(_) => { todo!() }
         }
     }
 
@@ -60,6 +63,15 @@ impl<T> PartialInformationCompare for MaybeKnown<T>
             MaybeKnown::Known(expected) => {
                 expected.observe(observed)
             }
+            MaybeKnown::UnknownExcluding(excluded) => {
+                if excluded == observed {
+                    vec![Conflict::new(String::new(),
+                                       format!("Observed the excluded value {:?}", excluded))]
+                } else {
+                    *self = MaybeKnown::Known(T::from_raw((*observed).clone()));
+                    vec![]
+                }
+            }
         }
     }
 
@@ -67,6 +79,7 @@ impl<T> PartialInformationCompare for MaybeKnown<T>
         match self {
             MaybeKnown::Unknown => { true }
             MaybeKnown::Known(_) => { false }
+            MaybeKnown::UnknownExcluding(_) => { true }
         }
     }
 

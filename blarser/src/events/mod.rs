@@ -18,6 +18,7 @@ mod out;
 mod hit;
 mod stolen_base;
 mod walk;
+mod game_upcoming;
 // mod player_reroll;
 
 pub(crate) use game_update::GameUpdate;
@@ -35,6 +36,7 @@ pub use out::Out;
 pub use hit::{Hit, HomeRun};
 pub use stolen_base::{StolenBase, CaughtStealing};
 pub use walk::Walk;
+pub use game_upcoming::GameUpcoming;
 
 use std::fmt::{Display, Formatter};
 use chrono::{DateTime, Utc};
@@ -50,7 +52,8 @@ pub trait Event: Serialize + for<'de> Deserialize<'de> + Ord + Display {
     // "Successors" are events that are generated when this event occurs. Typically they are timed
     // events scheduled for some time in the future. This can be used to fill in for known-missing
     // Feed events.
-    fn generate_successors(&self) -> Vec<AnyEvent> {
+    #[allow(unused_variables)]
+    fn generate_successors(&self, state: &StateGraph) -> Vec<AnyEvent> {
         Vec::new()
     }
 
@@ -90,6 +93,7 @@ polymorphic_enum!{
         StolenBase(crate::events::StolenBase),
         Walk(crate::events::Walk),
         CaughtStealing(crate::events::CaughtStealing),
+        GameUpcoming(crate::events::GameUpcoming),
     }
 }
 
@@ -105,6 +109,11 @@ impl AnyEvent {
     pub fn time(&self) -> DateTime<Utc> {
         with_any_event!(self, |e| { e.time() })
     }
+
+    pub fn generate_successors(&self, state: &StateGraph) -> Vec<AnyEvent> {
+        with_any_event!(self, |e| { e.generate_successors(state) })
+    }
+
     pub fn effects(&self, state: &StateGraph) -> Vec<Effect> {
         with_any_event!(self, |e| { e.effects(state) })
     }

@@ -68,8 +68,7 @@ pub async fn ingest_event(ingest: &mut Ingest, event: AnyEvent) -> IngestResult<
             let graph = state.entity_graph_mut(effect.ty, id)
                 .expect("Tried to apply event to entity that does not exist");
             info!("Applying {event} to {} {id} with {:?}", effect.ty, effect.extrapolated);
-            let new_events = graph.apply_event(event.clone(), &effect.extrapolated)?;
-            new_timed_events.extend(new_events);
+            graph.apply_event(event.clone(), &effect.extrapolated);
             history.get_mut(&(effect.ty, id)).unwrap().versions.push(DebugHistoryVersion {
                 event_human_name: format!("After applying {event}"),
                 time: event.time(),
@@ -78,6 +77,7 @@ pub async fn ingest_event(ingest: &mut Ingest, event: AnyEvent) -> IngestResult<
                 currently_updating: None,
                 queued_for_delete: None,
             });
+            new_timed_events.extend(event.generate_successors(&state));
         }
     }
 

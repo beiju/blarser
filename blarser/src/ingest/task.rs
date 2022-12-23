@@ -114,7 +114,7 @@ impl IngestTask {
 pub struct DebugTreeNode {
     pub description: String,
     pub is_ambiguous: bool,
-    pub is_observed: bool,
+    pub observed: Option<DateTime<Utc>>,
     pub added_reason: AddedReason,
     pub json: serde_json::Value,
     pub order: usize,

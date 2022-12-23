@@ -10,7 +10,7 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use crate::entity::{self, AnyEntity, Entity};
-use crate::events::{Effect, AnyEvent, EarlseasonStart, Event, AnyExtrapolated, Start};
+use crate::events::{Effect, AnyEvent, EarlseasonStart, Event, AnyExtrapolated, Start, with_any_event};
 use crate::ingest::error::IngestResult;
 use crate::ingest::{GraphDebugHistory, Observation};
 use crate::ingest::task::{DebugHistoryItem, DebugHistoryVersion, DebugTree, DebugTreeNode};
@@ -195,7 +195,7 @@ impl EntityStateGraph {
         outputs
     }
 
-    pub fn apply_event(&mut self, event: Arc<AnyEvent>, extrapolated: &AnyExtrapolated) -> IngestResult<Vec<AnyEvent>> {
+    pub fn apply_event(&mut self, event: Arc<AnyEvent>, extrapolated: &AnyExtrapolated) {
         let new_leafs = self.leafs.clone().into_iter()
             .map(|entity_idx| {
                 self.apply_event_to_entity(event.clone(), entity_idx, extrapolated)
@@ -203,34 +203,16 @@ impl EntityStateGraph {
             .collect();
 
         self.leafs = new_leafs;
-
-        Ok(Vec::new()) // TODO
     }
 
     fn apply_event_to_entity(&mut self, event: Arc<AnyEvent>, entity_idx: NodeIndex, extrapolated: &AnyExtrapolated) -> NodeIndex {
         let entity = &self.get_version(entity_idx)
             .expect("Indices in State.leafs should always be valid")
             .entity;
-
-        let new_entity = match event.as_ref() {
-            AnyEvent::Start(e) => { e.forward(entity, extrapolated) }
-            AnyEvent::EarlseasonStart(e) => { e.forward(entity, extrapolated) }
-            AnyEvent::LetsGo(e) => { e.forward(entity, extrapolated) }
-            AnyEvent::PlayBall(e) => { e.forward(entity, extrapolated) }
-            AnyEvent::TogglePerforming(e) => { e.forward(entity, extrapolated) }
-            AnyEvent::HalfInning(e) => { e.forward(entity, extrapolated) }
-            AnyEvent::StormWarning(e) => { e.forward(entity, extrapolated) }
-            AnyEvent::BatterUp(e) => { e.forward(entity, extrapolated) }
-            AnyEvent::Strike(e) => { e.forward(entity, extrapolated) }
-            AnyEvent::Ball(e) => { e.forward(entity, extrapolated) }
-            AnyEvent::FoulBall(e) => { e.forward(entity, extrapolated) }
-            AnyEvent::Out(e) => { e.forward(entity, extrapolated) }
-            AnyEvent::Hit(e) => { e.forward(entity, extrapolated) }
-            AnyEvent::HomeRun(e) => { e.forward(entity, extrapolated) }
-            AnyEvent::StolenBase(e) => { e.forward(entity, extrapolated) }
-            AnyEvent::Walk(e) => { e.forward(entity, extrapolated) }
-            AnyEvent::CaughtStealing(e) => { e.forward(entity, extrapolated) }
-        };
+        
+        let new_entity = with_any_event!(event.as_ref(), |e| { 
+            e.forward(entity, extrapolated) 
+        });
 
         self.add_child_version(entity_idx, new_entity, event, extrapolated.clone(), AddedReason::NewFromEvent)
     }
@@ -261,7 +243,7 @@ impl EntityStateGraph {
                 data.insert(idx, DebugTreeNode {
                     description: node.entity.description(),
                     is_ambiguous: node.entity.is_ambiguous(),
-                    is_observed: node.observed.is_some(),
+                    observed: node.observed.as_ref().map(|obs| obs.perceived_at),
                     added_reason: node.added_reason,
                     json: node.entity.to_json(),
                     order: *order_map.get(&idx)
@@ -308,6 +290,7 @@ impl StateGraph {
             let entity_human_name = entity.to_string();
             let description = entity.description();
             let json = entity.to_json();
+            let time = obs.perceived_at;
 
             // Real work
             let entity_type = obs.entity_type;
@@ -335,7 +318,7 @@ impl StateGraph {
                         data: iter::once((idx, DebugTreeNode {
                             description,
                             is_ambiguous: false, // can't be ambiguous at start
-                            is_observed: true, // by definition
+                            observed: Some(time),
                             added_reason: AddedReason::Start,
                             json,
                             order: 0,
@@ -374,7 +357,7 @@ impl StateGraph {
             .expect("Sim object was not Sim type");
 
         if sim.phase == 1 && sim.earlseason_date > after {
-            vec![AnyEvent::from(EarlseasonStart::new(sim.earlseason_date))]
+            vec![AnyEvent::from(EarlseasonStart::new(sim.earlseason_date, sim.season))]
         } else {
             vec![]
         }
@@ -424,5 +407,17 @@ impl StateGraph {
     pub fn query_team_unique<F, T>(&self, id: Uuid, accessor: F) -> T
         where F: Fn(&entity::Team) -> T, T: Debug + Eq {
         self.query_entity_unique::<entity::Team, _, _>(&(EntityType::Team, id), accessor)
+    }
+    
+    pub fn games_for_day(&self, season: i32, day: i32) -> impl Iterator<Item=Uuid> + '_ {
+        self.ids_for_type.get(&EntityType::Game)
+            .expect("Game entity type must exist here")
+            .iter()
+            .filter(move |&&game_id| {
+                self.query_game_unique(game_id, |game| {
+                    game.season == season && game.day == day
+                })
+            })
+            .cloned()
     }
 }

@@ -55,7 +55,7 @@ impl PitchersExtrapolated {
 
 impl Extrapolated for PitchersExtrapolated {}
 
-#[derive(Default, Debug, Clone, PartialInformationCompare)]
+#[derive(Debug, Clone, PartialInformationCompare)]
 pub struct OddsAndPitchersExtrapolated {
     pub away: PitcherExtrapolated,
     pub home: PitcherExtrapolated,
@@ -64,6 +64,17 @@ pub struct OddsAndPitchersExtrapolated {
 }
 
 impl Extrapolated for OddsAndPitchersExtrapolated {}
+
+impl Default for OddsAndPitchersExtrapolated {
+    fn default() -> Self {
+        Self {
+            away: Default::default(),
+            home: Default::default(),
+            away_odds: MaybeKnown::UnknownExcluding(0.),
+            home_odds: MaybeKnown::UnknownExcluding(0.),
+        }
+    }
+}
 
 polymorphic_enum! {
     #[derive(From, TryInto, Clone, Debug)]
