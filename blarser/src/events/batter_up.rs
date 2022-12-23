@@ -34,14 +34,15 @@ impl Event for BatterUp {
         let mut entity = entity.clone();
         if let Some(game) = entity.as_game_mut() {
             let extrapolated: &BatterIdExtrapolated = extrapolated.try_into().unwrap();
-            game.team_at_bat_mut().batter = extrapolated.batter_id;
 
             self.game_update.forward(game);
 
             let prev_batter_count = game.team_at_bat().team_batter_count
                 .expect("TeamBatterCount must be populated during a game");
             game.team_at_bat_mut().team_batter_count = Some(prev_batter_count + 1);
+            game.team_at_bat_mut().batter = extrapolated.batter_id;
             game.team_at_bat_mut().batter_name = Some(self.batter_name.clone());
+            game.team_at_bat_mut().batter_mod = extrapolated.batter_mod.clone();
         }
         entity
     }

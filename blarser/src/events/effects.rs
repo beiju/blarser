@@ -24,11 +24,12 @@ impl Extrapolated for SubsecondsExtrapolated {}
 #[derive(Debug, Clone, PartialInformationCompare)]
 pub struct BatterIdExtrapolated {
     pub(crate) batter_id: Option<Uuid>,
+    pub(crate) batter_mod: String,
 }
 
 impl BatterIdExtrapolated {
-    pub fn new(batter_id: Option<Uuid>) -> Self {
-        Self { batter_id }
+    pub fn new(batter_id: Option<Uuid>, batter_mod: String) -> Self {
+        Self { batter_id, batter_mod }
     }
 }
 

@@ -408,6 +408,11 @@ impl StateGraph {
         where F: Fn(&entity::Team) -> T, T: Debug + Eq {
         self.query_entity_unique::<entity::Team, _, _>(&(EntityType::Team, id), accessor)
     }
+
+    pub fn query_player_unique<F, T>(&self, id: Uuid, accessor: F) -> T
+        where F: Fn(&entity::Player) -> T, T: Debug + Eq {
+        self.query_entity_unique::<entity::Player, _, _>(&(EntityType::Player, id), accessor)
+    }
     
     pub fn games_for_day(&self, season: i32, day: i32) -> impl Iterator<Item=Uuid> + '_ {
         self.ids_for_type.get(&EntityType::Game)

@@ -237,6 +237,14 @@ impl Player {
     //         FeedEventChangeResult::DidNotApply
     //     }
     // }
+    
+    pub fn has_mod(&self, mod_name: &str) -> bool {
+        self.game_attr.iter().flatten().any(|n| n == mod_name) ||
+            self.week_attr.iter().flatten().any(|n| n == mod_name) ||
+            self.seas_attr.iter().flatten().any(|n| n == mod_name) ||
+            self.perm_attr.iter().flatten().any(|n| n == mod_name) ||
+            self.item_attr.iter().flatten().any(|n| n == mod_name)
+    } 
 
     pub fn adjust_attributes(&mut self, lower: f32, upper: f32) {
         self.adjust_batting(lower, upper);
