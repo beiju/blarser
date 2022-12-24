@@ -95,7 +95,7 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
                 game_update: GameUpdate {
                     game_id: game.game_id,
                     play: game.play,
-                    score: None,
+                    scores: None,
                     description,
                 },
                 home_team: game.home_team,
@@ -108,7 +108,7 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
                 game_update: GameUpdate {
                     game_id: game.game_id,
                     play: game.play,
-                    score: None,
+                    scores: None,
                     description,
                 },
                 home_team: game.home_team,
@@ -121,7 +121,7 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
                 game_update: GameUpdate {
                     game_id: game.game_id,
                     play: game.play,
-                    score: None,
+                    scores: None,
                     description,
                 },
                 top_of_inning,
@@ -136,7 +136,7 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
                 game_update: GameUpdate {
                     game_id: game.game_id,
                     play: game.play,
-                    score: None,
+                    scores: None,
                     description,
                 },
                 batter_name: batter_name.clone(),
@@ -148,7 +148,7 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
                 game_update: GameUpdate {
                     game_id: game.game_id,
                     play: game.play,
-                    score: None,
+                    scores: None,
                     description,
                 },
                 which_mod: "SUPERYUMMY".to_string(),
@@ -160,7 +160,7 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
                 game_update: GameUpdate {
                     game_id: game.game_id,
                     play: game.play,
-                    score: None,
+                    scores: None,
                     description,
                 },
                 time: fed_event.created,
@@ -171,7 +171,7 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
                 game_update: GameUpdate {
                     game_id: game.game_id,
                     play: game.play,
-                    score: None,
+                    scores: None,
                     description,
                 },
                 time: fed_event.created,
@@ -184,7 +184,7 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
                 game_update: GameUpdate {
                     game_id: game.game_id,
                     play: game.play,
-                    score: None,
+                    scores: None,
                     description,
                 },
                 time: fed_event.created,
@@ -198,19 +198,19 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
                 game_update: GameUpdate {
                     game_id: game.game_id,
                     play: game.play,
-                    score: None,
+                    scores: None,
                     description,
                 },
                 time: fed_event.created,
             }.into()
         }
-        FedEventData::Flyout { game, .. } |
-        FedEventData::GroundOut { game, .. } => {
+        FedEventData::Flyout { game, scores, .. } |
+        FedEventData::GroundOut { game, scores, .. } => {
             events::CaughtOut {
                 game_update: GameUpdate {
                     game_id: game.game_id,
                     play: game.play,
-                    score: None,
+                    scores: Some(scores),
                     description,
                 },
                 time: fed_event.created,
@@ -221,19 +221,19 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
                 game_update: GameUpdate {
                     game_id: game.game_id,
                     play: game.play,
-                    score: None,
+                    scores: None,
                     description,
                 },
                 time: fed_event.created,
             }.into()
         }
         FedEventData::DoublePlay { .. } => { todo!() }
-        FedEventData::Hit { game, num_bases, .. } => {
+        FedEventData::Hit { game, num_bases, scores, .. } => {
             events::Hit {
                 game_update: GameUpdate {
                     game_id: game.game_id,
                     play: game.play,
-                    score: None,
+                    scores: Some(scores),
                     description,
                 },
                 time: fed_event.created,
@@ -246,7 +246,7 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
                 game_update: GameUpdate {
                     game_id: game.game_id,
                     play: game.play,
-                    score: None,
+                    scores: None,
                     description,
                 },
                 time: fed_event.created,
@@ -258,7 +258,7 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
                 game_update: GameUpdate {
                     game_id: game.game_id,
                     play: game.play,
-                    score: None,
+                    scores: None,
                     description,
                 },
                 time: fed_event.created,
@@ -272,7 +272,7 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
                 game_update: GameUpdate {
                     game_id: game.game_id,
                     play: game.play,
-                    score: None,
+                    scores: None,
                     description,
                 },
                 time: fed_event.created,
@@ -286,7 +286,7 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
                 game_update: GameUpdate {
                     game_id: game.game_id,
                     play: game.play,
-                    score: None,
+                    scores: None,
                     description,
                 },
                 time: fed_event.created,
@@ -297,7 +297,7 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
                 game_update: GameUpdate {
                     game_id: game.game_id,
                     play: game.play,
-                    score: None,
+                    scores: None,
                     description,
                 },
                 time: fed_event.created,

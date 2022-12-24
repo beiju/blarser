@@ -38,11 +38,11 @@ impl Event for CaughtOut {
         if let Some(game) = entity.as_game_mut() {
             let extrapolated: &AdvancementExtrapolated = extrapolated.try_into().unwrap();
 
-            self.game_update.forward(game);
             for (base_occupied, advanced) in zip_eq(&mut game.bases_occupied, &extrapolated.bases) {
                 base_occupied.maybe_add(advanced, 1);
             }
             game.out(1);
+            self.game_update.forward(game);
         }
         entity
     }

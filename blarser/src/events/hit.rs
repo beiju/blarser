@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::entity::{AnyEntity, Base};
 use crate::events::{AnyExtrapolated, Effect, Event, ord_by_time};
 use crate::events::effects::{GamePlayerExtrapolated, NullExtrapolated};
-use crate::events::event_util::{game_effect_with_batter, game_effect_with_new_runner};
+use crate::events::event_util::{game_effect_with_new_runner};
 use crate::events::game_update::GameUpdate;
 use crate::ingest::StateGraph;
 use crate::state::EntityType;
@@ -45,6 +45,7 @@ impl Event for Hit {
             // game.advance_runners(&advancements);
             let batter_mod = extrapolated.player_mod.clone();
             info!("In Hit event pushing baserunner {batter_id} ({batter_name}) with mod \"{batter_mod}\"");
+            game.advance_runners_by(self.to_base as i32 + 1);
             game.push_base_runner(batter_id, batter_name.clone(), batter_mod, self.to_base);
             game.end_at_bat();
         }

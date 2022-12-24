@@ -1,4 +1,5 @@
 use std::fmt::{Display, Formatter};
+use std::ops::Add;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_with::with_prefix;
@@ -372,6 +373,12 @@ impl Game {
         }
     }
 
+    pub fn advance_runners_by(&mut self, by: i32) {
+        for runner_base in &mut self.bases_occupied {
+            runner_base.add_constant(by);
+        }
+    }
+
     // pub(crate) fn remove_base_runner(&mut self, runner_idx: usize) {
     //     self.base_runners.remove(runner_idx);
     //     self.base_runner_names.remove(runner_idx);
@@ -418,6 +425,14 @@ impl Game {
                 last_occupied_base = Some(*base_num);
             }
         }
+    }
+
+    pub(crate) fn pop_base_runner(&mut self) {
+        self.base_runners.remove(0);
+        self.base_runner_names.remove(0);
+        self.base_runner_mods.remove(0);
+        self.bases_occupied.remove(0);
+        self.baserunner_count -= 1;
     }
     //
     // pub(crate) fn apply_successful_steal(&mut self, event: &EventuallyEvent, thief_id: Uuid, base: Base) {
