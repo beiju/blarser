@@ -409,6 +409,7 @@ fn ingest_changed_entity<EntityT, EventT>(
                 all_parents_had_conflicts = false;
                 graph.add_edge(old_parent_idx, new_child_idx, new_extrapolated.clone());
             } else {
+                error!("Conflicts: {:#?}", conflicts);
                 version_conflicts.push(conflicts);
                 todo!("Early exit")
             }

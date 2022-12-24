@@ -78,7 +78,8 @@ impl Event for HalfInning {
                 game.inning += 1;
             }
             game.phase = 6;
-            game.game_start_phase = 10;
+            // Just guessing how this works
+            game.game_start_phase = if game.inning == 0 { 10 } else { 11 };
             game.half_inning_score = 0.0;
         } else if let Some(team) = entity.as_team_mut() {
             // shrug emoji

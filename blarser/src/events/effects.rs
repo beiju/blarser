@@ -36,6 +36,23 @@ impl GamePlayerExtrapolated {
 
 impl Extrapolated for GamePlayerExtrapolated {}
 
+#[derive(Debug, Clone, PartialInformationCompare)]
+pub struct HitExtrapolated {
+    pub(crate) runner: GamePlayerExtrapolated,
+    pub(crate) advancements: AdvancementExtrapolated,
+}
+
+impl HitExtrapolated {
+    pub fn new(runner: GamePlayerExtrapolated, num_occupied_bases: usize) -> Self {
+        Self {
+            runner,
+            advancements: AdvancementExtrapolated::new(num_occupied_bases),
+        }
+    }
+}
+
+impl Extrapolated for HitExtrapolated {}
+
 #[derive(Default, Debug, Clone, PartialInformationCompare)]
 pub struct PitcherExtrapolated {
     pub pitcher_id: MaybeKnown<Uuid>,
@@ -106,6 +123,7 @@ polymorphic_enum! {
         Pitchers(PitchersExtrapolated),
         OddsAndPitchers(OddsAndPitchersExtrapolated),
         Advancement(AdvancementExtrapolated),
+        Hit(HitExtrapolated),
     }
 }
 

@@ -1,6 +1,7 @@
 use std::fmt::{Display, Formatter};
 use std::ops::Add;
 use chrono::{DateTime, Utc};
+use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use serde_with::with_prefix;
 use uuid::Uuid;
@@ -210,6 +211,22 @@ impl Game {
             &mut self.away
         } else {
             &mut self.home
+        }
+    }
+
+    pub(crate) fn current_half_score_mut(&mut self) -> &mut f32 {
+        if self.top_of_inning {
+            &mut self.top_inning_score
+        } else {
+            &mut self.bottom_inning_score
+        }
+    }
+
+    pub(crate) fn current_half_score(&self) -> f32 {
+        if self.top_of_inning {
+            self.top_inning_score
+        } else {
+            self.bottom_inning_score
         }
     }
 
@@ -427,11 +444,27 @@ impl Game {
         }
     }
 
-    pub(crate) fn pop_base_runner(&mut self) {
-        self.base_runners.remove(0);
-        self.base_runner_names.remove(0);
-        self.base_runner_mods.remove(0);
-        self.bases_occupied.remove(0);
+    pub(crate) fn reverse_push_base_runner(&mut self) {
+        self.base_runners.pop()
+            .expect("There must be at least one runner in reverse_push_base_runner");
+        self.base_runner_names.pop()
+            .expect("There must be at least one runner in reverse_push_base_runner");
+        self.base_runner_mods.pop()
+            .expect("There must be at least one runner in reverse_push_base_runner");
+        self.bases_occupied.pop()
+            .expect("There must be at least one runner in reverse_push_base_runner");
+        self.baserunner_count -= 1;
+    }
+
+    pub(crate) fn pop_base_runner(&mut self, runner_id: Uuid) {
+        // APPARENTLY sometimes it's not the first player who scores:
+        // https://reblase.sibr.dev/game/69e70c3d-4928-4fbe-b345-a638f57b51b3#f79c0a5b-1e3c-a00a-dc7b-f2b75e3c594a
+        let (idx, _) = self.base_runners.iter().find_position(|&&id| id == runner_id)
+            .expect("There should be a base runner with this ID");
+        self.base_runners.remove(idx);
+        self.base_runner_names.remove(idx);
+        self.base_runner_mods.remove(idx);
+        self.bases_occupied.remove(idx);
         self.baserunner_count -= 1;
     }
     //

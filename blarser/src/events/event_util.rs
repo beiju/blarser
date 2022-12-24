@@ -9,8 +9,9 @@ use crate::state::EntityType;
 const BATTER_MOD_PRECEDENCE: [&'static str; 1] = [
     "COFFEE_RALLY",
 ];
-const RUNNER_MOD_PRECEDENCE: [&'static str; 1] = [
-    "BLASERUNNING"
+const RUNNER_MOD_PRECEDENCE: [&'static str; 2] = [
+    "BLASERUNNING",
+    "COFFEE_RALLY",
 ];
 
 fn get_displayed_mod(state: &StateGraph, batter_id: Uuid, mods_to_display: &[&str]) -> String {
@@ -48,12 +49,12 @@ pub(crate) fn game_effect_with_next_batter(game_id: Uuid, state: &StateGraph) ->
 }
 
 
-pub(crate) fn game_effect_with_new_runner(game_id: Uuid, state: &StateGraph) -> Effect {
+pub(crate) fn new_runner_extrapolated(game_id: Uuid, state: &StateGraph) -> GamePlayerExtrapolated {
     let batter_id = state.query_game_unique(game_id, |game| {
         game.team_at_bat().batter
             .expect("There must be a batter here")
     });
     let batter_mod = get_displayed_mod(state, batter_id, &RUNNER_MOD_PRECEDENCE);
 
-    Effect::one_id_with(EntityType::Game, game_id, GamePlayerExtrapolated::new(batter_id, batter_mod))
+    GamePlayerExtrapolated::new(batter_id, batter_mod)
 }

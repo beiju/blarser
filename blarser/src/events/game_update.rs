@@ -1,4 +1,4 @@
-use fed::ScoreInfo;
+use fed::{ScoreInfo, ScoringPlayer};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use crate::entity::Game;
@@ -29,21 +29,9 @@ impl GameUpdate {
         game.last_update_full = None;
 
         if let Some(score) = &self.scores && !score.scoring_players.is_empty() {
-            let mut runs_scored = 0.;
-            for score in &score.scoring_players {
-                assert_eq!(&score.player_id, game.base_runners.first().unwrap());
-                game.pop_base_runner();
-                runs_scored += 1.;
-            }
-            game.score_update = Some(format!("{runs_scored} Run{} scored!",
-                                             if runs_scored != 1. { "s" } else { "" }));
-            game.half_inning_score += runs_scored;
-            *game.team_at_bat_mut().score.as_mut().unwrap() += runs_scored;
-            if game.top_of_inning {
-                game.top_inning_score += runs_scored;
-            } else {
-                game.bottom_inning_score += runs_scored;
-            }
+            Self::score(game, &score.scoring_players);
+            // There cant be free refills without scores [falsehoods] so it's fine to do this here
+            game.half_inning_outs -= score.free_refills.len() as i32;
         } else {
             game.score_update = Some(String::new());
         }
@@ -51,6 +39,19 @@ impl GameUpdate {
         // TODO Check the conditionals on this
         game.shame = (game.inning > 8 || game.inning > 7 && !game.top_of_inning) &&
             game.home.score.unwrap() > game.away.score.unwrap();
+    }
+
+    pub fn score(game: &mut Game, scoring_players: &Vec<ScoringPlayer>) {
+        let mut runs_scored = 0.;
+        for score in scoring_players {
+            game.pop_base_runner(score.player_id);
+            runs_scored += 1.;
+        }
+        game.score_update = Some(format!("{runs_scored} Run{} scored!",
+                                         if runs_scored != 1. { "s" } else { "" }));
+        game.half_inning_score += runs_scored;
+        *game.team_at_bat_mut().score.as_mut().unwrap() += runs_scored;
+        *game.current_half_score_mut() += runs_scored;
     }
 
     pub fn reverse(&self, old_game: &Game, new_game: &mut Game) {
@@ -75,12 +76,7 @@ impl GameUpdate {
             }
             new_game.half_inning_score = old_game.half_inning_score;
             new_game.team_at_bat_mut().score = old_game.team_at_bat().score;
-            if new_game.top_of_inning {
-                new_game.top_inning_score = old_game.top_inning_score;
-            } else {
-                new_game.bottom_inning_score = old_game.bottom_inning_score;
-            }
-
+            *new_game.current_half_score_mut() = old_game.current_half_score();
         }
 
         new_game.shame = old_game.shame;

@@ -80,9 +80,15 @@ impl<T> PartialInformationCompare for RangeInclusive<T>
 
     fn observe(&mut self, observed: &Self::Raw) -> Vec<Conflict> {
         if observed < &self.lower || observed > &self.upper {
-            vec![Conflict::new(String::new(),
-                               format!("Expected value between {:?} and {:?}, but observed {:?}",
-                                       self.lower, self.upper, observed))]
+            if self.lower == self.upper {
+                vec![Conflict::new(String::new(),
+                                   format!("Expected {:?}, but observed {:?}",
+                                           self.lower, observed))]
+            } else {
+                vec![Conflict::new(String::new(),
+                                   format!("Expected value between {:?} and {:?}, but observed {:?}",
+                                           self.lower, self.upper, observed))]
+            }
         } else {
             self.upper = observed.clone();
             self.lower = observed.clone();

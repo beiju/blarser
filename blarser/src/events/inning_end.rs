@@ -2,7 +2,7 @@ use std::fmt::{Display, Formatter};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::entity::{AnyEntity, Base};
+use crate::entity::{AnyEntity, Base, Game};
 use crate::events::{AnyExtrapolated, Effect, Event, ord_by_time};
 use crate::events::effects::{GamePlayerExtrapolated, NullExtrapolated};
 use crate::events::event_util::game_effect_with_batter;
@@ -31,13 +31,27 @@ impl Event for InningEnd {
         if let Some(game) = entity.as_game_mut() {
             let _: &NullExtrapolated = extrapolated.try_into().unwrap();
 
+            game.phase = 2;
             self.game_update.forward(game);
         }
         entity
     }
 
     fn reverse(&self, old_parent: &AnyEntity, extrapolated: &mut AnyExtrapolated, new_parent: &mut AnyEntity) {
-        todo!()
+        match old_parent {
+            AnyEntity::Game(old_game) => {
+                let new_game: &mut Game = new_parent.try_into()
+                    .expect("Mismatched entity type");
+                let _: &mut NullExtrapolated = extrapolated.try_into()
+                    .expect("Mismatched extrapolated type");
+
+                new_game.phase = old_game.phase;
+                self.game_update.reverse(old_game, new_game);
+            }
+            _ => {
+                panic!("Mismatched extrapolated type")
+            }
+        }
     }
 }
 

@@ -1,5 +1,6 @@
 use std::fmt::{Display, Formatter};
 use chrono::{DateTime, Utc};
+use fed::ScoringPlayer;
 use itertools::zip_eq;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -7,8 +8,7 @@ use partial_information::{PartialInformationCompare, RangeInclusive};
 
 use crate::entity::{AnyEntity, Base, Game};
 use crate::events::{AnyExtrapolated, Effect, Event, ord_by_time};
-use crate::events::effects::{GamePlayerExtrapolated, NullExtrapolated};
-use crate::events::event_util::game_effect_with_batter;
+use crate::events::effects::NullExtrapolated;
 use crate::events::game_update::GameUpdate;
 use crate::ingest::StateGraph;
 use crate::state::EntityType;
@@ -20,6 +20,7 @@ pub struct StolenBase {
     pub(crate) time: DateTime<Utc>,
     pub(crate) to_base: Base,
     pub(crate) runner_id: Uuid,
+    pub(crate) runner_name: String,
 }
 
 impl Event for StolenBase {
@@ -38,14 +39,23 @@ impl Event for StolenBase {
         if let Some(game) = entity.as_game_mut() {
             let _: &NullExtrapolated = extrapolated.try_into().unwrap();
 
-            // TODO: If someone else is maybe on this base, make them not be on it
-            for (base, id) in zip_eq(&mut game.bases_occupied, game.base_runners.clone()) {
-                if id == self.runner_id && base.could_be(&(self.to_base as i32 - 1)) {
-                    *base = RangeInclusive::from_raw(self.to_base as i32)
+            self.game_update.forward(game);
+
+            // Pretending fifth base doesn't exist
+            if self.to_base == Base::Fourth {
+                // score also pops the runner
+                GameUpdate::score(game, &vec![ScoringPlayer {
+                    player_id: self.runner_id,
+                    player_name: self.runner_name.clone(),
+                }]);
+            } else {
+                // TODO: If someone else is maybe on this base, make them not be on it
+                for (base, id) in zip_eq(&mut game.bases_occupied, game.base_runners.clone()) {
+                    if id == self.runner_id && base.could_be(&(self.to_base as i32 - 1)) {
+                        *base = RangeInclusive::from_raw(self.to_base as i32);
+                    }
                 }
             }
-
-            self.game_update.forward(game);
         }
         entity
     }
@@ -59,8 +69,21 @@ impl Event for StolenBase {
                     .expect("Mismatched extrapolated type");
 
                 self.game_update.reverse(old_game, new_game);
-                for (old_base, new_base) in zip_eq(&mut new_game.bases_occupied, old_game.bases_occupied.clone()) {
-                    *old_base = new_base;
+                if self.to_base == Base::Fourth {
+                    // TODO: Save index in Extrapolated and insert in the right place
+                    // TODO: Put this in a reverse version of GameUpdate::score
+                    new_game.base_runners = old_game.base_runners.clone();
+                    new_game.base_runner_names = old_game.base_runner_names.clone();
+                    new_game.base_runner_mods = old_game.base_runner_mods.clone();
+                    new_game.bases_occupied = old_game.bases_occupied.clone();
+                    new_game.baserunner_count -= 1;
+                    new_game.half_inning_score = old_game.half_inning_score;
+                    new_game.team_at_bat_mut().score = old_game.team_at_bat().score;
+                    *new_game.current_half_score_mut() = old_game.current_half_score();
+                } else {
+                    for (old_base, new_base) in zip_eq(&mut new_game.bases_occupied, old_game.bases_occupied.clone()) {
+                        *old_base = new_base;
+                    }
                 }
             }
             _ => {
@@ -102,21 +125,41 @@ impl Event for CaughtStealing {
 
             self.game_update.forward(game);
 
-            let batter_id = *game.team_at_bat().batter.as_ref()
-                .expect("Batter must exist during CaughtStealing event"); // not sure why clone works and not * for a Copy type but whatever
-            let batter_name = game.team_at_bat().batter_name.clone()
-                .expect("Batter name must exist during CaughtStealing event");
+            // TODO Remove the runner
 
-            // game.advance_runners(&advancements);
-            let batter_mod = game.team_at_bat().batter_mod.clone();
-            game.push_base_runner(batter_id, batter_name.clone(), batter_mod, self.to_base);
-            game.end_at_bat();
+            game.out(1);
+
+            // This is how the game allows the current batter to have another PA at the start of
+            // the next inning
+            let team_batter_count = game.team_at_bat_mut().team_batter_count.as_mut()
+                .expect("team_batter_count must exist during a StolenBase event");
+            *team_batter_count -= 1;
         }
         entity
     }
 
     fn reverse(&self, old_parent: &AnyEntity, extrapolated: &mut AnyExtrapolated, new_parent: &mut AnyEntity) {
-        todo!()
+        match old_parent {
+            AnyEntity::Game(old_game) => {
+                let new_game: &mut Game = new_parent.try_into()
+                    .expect("Mismatched entity type");
+                let _: &mut NullExtrapolated = extrapolated.try_into()
+                    .expect("Mismatched extrapolated type");
+
+                let team_batter_count = new_game.team_at_bat_mut().team_batter_count.as_mut()
+                    .expect("team_batter_count must exist during a StolenBase event");
+                *team_batter_count += 1;
+
+                new_game.reverse_out(1, old_game);
+
+                // TODO Reverse removing the runner
+
+                self.game_update.reverse(old_game, new_game);
+            }
+            _ => {
+                panic!("Mismatched extrapolated type")
+            }
+        }
     }
 }
 

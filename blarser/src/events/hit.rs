@@ -1,12 +1,14 @@
 use std::fmt::{Display, Formatter};
 use chrono::{DateTime, Utc};
+use itertools::zip_eq;
 use log::info;
 use serde::{Deserialize, Serialize};
+use partial_information::{MaybeKnown, PartialInformationCompare, RangeInclusive};
 
-use crate::entity::{AnyEntity, Base};
+use crate::entity::{AnyEntity, Base, Game};
 use crate::events::{AnyExtrapolated, Effect, Event, ord_by_time};
-use crate::events::effects::{GamePlayerExtrapolated, NullExtrapolated};
-use crate::events::event_util::{game_effect_with_new_runner};
+use crate::events::effects::{GamePlayerExtrapolated, HitExtrapolated, NullExtrapolated};
+use crate::events::event_util::{new_runner_extrapolated};
 use crate::events::game_update::GameUpdate;
 use crate::ingest::StateGraph;
 use crate::state::EntityType;
@@ -24,36 +26,80 @@ impl Event for Hit {
     }
 
     fn effects(&self, state: &StateGraph) -> Vec<Effect> {
+        let num_occupied_bases = state.query_game_unique(self.game_update.game_id, |game| {
+            game.bases_occupied.len()
+        });
+
         vec![
-            game_effect_with_new_runner(self.game_update.game_id, state)
+            Effect::one_id_with(EntityType::Game, self.game_update.game_id, HitExtrapolated::new(
+                new_runner_extrapolated(self.game_update.game_id, state), num_occupied_bases))
         ]
     }
 
     fn forward(&self, entity: &AnyEntity, extrapolated: &AnyExtrapolated) -> AnyEntity {
         let mut entity = entity.clone();
         if let Some(game) = entity.as_game_mut() {
-            let extrapolated: &GamePlayerExtrapolated = extrapolated.try_into().unwrap();
-
-            self.game_update.forward(game);
+            let extrapolated: &HitExtrapolated = extrapolated.try_into().unwrap();
 
             let batter_id = *game.team_at_bat().batter.as_ref()
                 .expect("Batter must exist during Hit event"); // not sure why clone works and not * for a Copy type but whatever
-            assert_eq!(batter_id, extrapolated.player_id);
+            assert_eq!(batter_id, extrapolated.runner.player_id);
             let batter_name = game.team_at_bat().batter_name.clone()
                 .expect("Batter name must exist during Hit event");
 
             // game.advance_runners(&advancements);
-            let batter_mod = extrapolated.player_mod.clone();
+            let batter_mod = extrapolated.runner.player_mod.clone();
             info!("In Hit event pushing baserunner {batter_id} ({batter_name}) with mod \"{batter_mod}\"");
             game.advance_runners_by(self.to_base as i32 + 1);
+            for (base_occupied, advanced) in zip_eq(&mut game.bases_occupied, &extrapolated.advancements.bases) {
+                base_occupied.maybe_add(advanced, 1);
+            }
             game.push_base_runner(batter_id, batter_name.clone(), batter_mod, self.to_base);
             game.end_at_bat();
+
+            self.game_update.forward(game);
         }
         entity
     }
 
     fn reverse(&self, old_parent: &AnyEntity, extrapolated: &mut AnyExtrapolated, new_parent: &mut AnyEntity) {
-        todo!()
+        match old_parent {
+            AnyEntity::Game(old_game) => {
+                let new_game: &mut Game = new_parent.try_into()
+                    .expect("Mismatched entity type");
+                let extrapolated: &mut HitExtrapolated = extrapolated.try_into()
+                    .expect("Mismatched extrapolated type");
+
+                self.game_update.reverse(old_game, new_game);
+                new_game.reverse_end_at_bat(old_game);
+                new_game.reverse_push_base_runner();
+                new_game.advance_runners_by(-(self.to_base as i32 + 1));
+
+                for ((new_base_occupied, advanced), old_base_occupied) in zip_eq(zip_eq(&mut new_game.bases_occupied, &mut extrapolated.advancements.bases), &old_game.bases_occupied) {
+                    if old_base_occupied.upper < new_base_occupied.lower {
+                        // If the new base range doesn't overlap with the old base range, we know
+                        // they advanced and that they must have been at the upper end of the old
+                        // base range.
+                        *advanced = MaybeKnown::Known(true);
+                        *new_base_occupied = RangeInclusive::from_raw(old_base_occupied.upper);
+                    } else if old_base_occupied.lower == new_base_occupied.upper {
+                        // If the new base range ends where the old base range starts, we know they
+                        // can't have advanced and that they must have been at the lower end of the
+                        // old ase range
+                        *advanced = MaybeKnown::Known(false);
+                        *new_base_occupied = RangeInclusive::from_raw(old_base_occupied.lower);
+                    } else {
+                        // Otherwise we know nothing
+                        *new_base_occupied = *old_base_occupied;
+                    }
+                }
+
+                self.game_update.reverse(old_game, new_game);
+            }
+            _ => {
+                panic!("Mismatched extrapolated type")
+            }
+        }
     }
 }
 
@@ -89,8 +135,11 @@ impl Event for HomeRun {
             self.game_update.forward(game);
 
             // game_update usually takes care of the scoring but home runs are weird
-            game.score_update = Some(format!("1 Run scored!")); // TODO other run numbers
-            game.top_inning_score += self.num_runs as f32;
+            game.score_update = Some(match self.num_runs {
+                1 => format!("1 Run scored!"),
+                x => format!("{x} Runs scored!"),
+            });
+            *game.current_half_score_mut() += self.num_runs as f32;
             game.half_inning_score += self.num_runs as f32;
             *game.team_at_bat_mut().score.as_mut().unwrap() += self.num_runs as f32;
 

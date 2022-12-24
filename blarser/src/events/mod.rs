@@ -73,11 +73,6 @@ pub trait Event: Serialize + for<'de> Deserialize<'de> + Ord + Display {
 
     // Copy the changed fields of old_parent onto new_parent, leaving the unchanged fields alone.
     fn reverse(&self, old_parent: &AnyEntity, extrapolated: &mut AnyExtrapolated, new_parent: &mut AnyEntity);
-    // #[allow(unused_variables)]
-    // fn reverse(&self, child: &AnyEntity, extrapolated: &mut AnyExtrapolated, parent: &mut AnyEntity) {
-    //     let _: &mut NullExtrapolated = extrapolated.try_into().unwrap();
-    //     todo!("Implement me")
-    // }
 
 }
 

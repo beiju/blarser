@@ -59,6 +59,7 @@ impl Event for CaughtOut {
 
                 // Can't do anything if the bases were cleared
                 if !new_game.bases_occupied.is_empty() {
+                    // TODO Reference Hit event to see how to do this better
                     for ((new_base_occupied, advanced), old_base_occupied) in zip_eq(zip_eq(&mut new_game.bases_occupied, &mut extrapolated.bases), &old_game.bases_occupied) {
                         if !new_base_occupied.is_ambiguous() {
                             if !old_base_occupied.is_ambiguous() {
