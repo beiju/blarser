@@ -202,7 +202,7 @@ pub fn ingest_observation(ingest: &mut Ingest, obs: Observation, debug_history: 
 
     let debug_key = (obs.entity_type, obs.entity_id);
     debug_history.get_mut(&debug_key).unwrap().versions.push(DebugHistoryVersion {
-        event_human_name: format!("Start of ingest at {}", obs.perceived_at),
+        event_human_name: format!("Before ingesting observation at {}", obs.perceived_at),
         time: obs.perceived_at,
         tree: graph.get_debug_tree(),
         queued_for_update: Some(queued_for_update.clone()),
@@ -241,6 +241,48 @@ pub fn ingest_observation(ingest: &mut Ingest, obs: Observation, debug_history: 
     if successes.is_empty() {
         error!("All possible placements failed: {:#?}", failures);
         assert!(false, "TODO Report failures");
+    }
+
+    // Merge step
+    let mut merge_groups: Vec<(&_, Vec<_>)> = Vec::new();
+    for &node_idx in successes.iter().flatten() {
+        let node = graph.get_version(node_idx)
+            .expect("Expected ingest_for_version to return valid node indices");
+        let group = merge_groups.iter_mut()
+            .find(|(other, _)| &node.entity == *other);
+        if let Some((_, group)) = group {
+            group.push(node_idx);
+        } else {
+            merge_groups.push((&node.entity, vec![node_idx]));
+        }
+    }
+    
+    // Drop all the references to nodes because they borrow the graph
+    let merge_groups = merge_groups.into_iter()
+        .map(|(_, group)| group)
+        .collect_vec();
+
+    for merge_group in merge_groups {
+        let (&keep_node_idx, delete_nodes) = merge_group.split_first()
+            .expect("A merge group has to have at least one node");
+        for &delete_node_idx in delete_nodes {
+            let mut parent_walker = graph.graph.parents(delete_node_idx);
+            while let Some((parent_edge_idx, parent_node_idx)) = parent_walker.walk_next(&graph.graph) {
+                let edge_weight = graph.graph.remove_edge(parent_edge_idx)
+                    .expect("Edge must exist in graph");
+                graph.graph.add_edge(parent_node_idx, keep_node_idx, edge_weight)
+                    .expect("This should not cause a cycle");
+            }
+            let mut child_walker = graph.graph.children(delete_node_idx);
+            while let Some((child_edge_idx, child_node_idx)) = child_walker.walk_next(&graph.graph) {
+                let edge_weight = graph.graph.remove_edge(child_edge_idx)
+                    .expect("Edge must exist in graph");
+                graph.graph.add_edge(keep_node_idx, child_node_idx, edge_weight)
+                    .expect("This should not cause a cycle");
+            }
+            graph.graph.remove_node(delete_node_idx)
+                .expect("This node should have been in the graph");
+        }
     }
 
     let prev_nodes = get_reachable_nodes(graph, graph.leafs().clone());
@@ -474,7 +516,7 @@ fn ingest_for_event<EntityT, EventT>(
     }
 
     let entity_was_changed = &new_entity != entity;
-    info!("entity was {}changed", if entity_was_changed { "" } else { "not "});
+    info!("Entity was {}changed", if entity_was_changed { "" } else { "not "});
 
     let new_entity_idx = if entity_was_changed {
         let new_entity_idx = graph.add_observed_child_disconnected(

@@ -122,8 +122,8 @@ pub async fn run_ingest(mut ingest: Ingest, start_time: DateTime<Utc>) {
                 ingest_event(&mut ingest, event).await.unwrap()
             }
             Source::Timed => {
-                let event = timed_events.pop()
-                    .expect("If we got here, the source should not be empty").0;
+                let Reverse(event) = timed_events.pop()
+                    .expect("If we got here, the source should not be empty");
                 ingest_event(&mut ingest, event).await.unwrap()
             }
             Source::Observation => {
