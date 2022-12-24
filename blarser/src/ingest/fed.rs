@@ -98,6 +98,8 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
                     score: None,
                     description,
                 },
+                home_team: game.home_team,
+                away_team: game.away_team,
             }.into()
         }
         FedEventData::PlayBall { game, .. } => {
@@ -109,9 +111,11 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
                     score: None,
                     description,
                 },
+                home_team: game.home_team,
+                away_team: game.away_team,
             }.into()
         }
-        FedEventData::HalfInningStart { game, .. } => {
+        FedEventData::HalfInningStart { game, top_of_inning, inning, .. } => {
             events::HalfInning {
                 time: fed_event.created,
                 game_update: GameUpdate {
@@ -120,6 +124,10 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
                     score: None,
                     description,
                 },
+                top_of_inning,
+                inning,
+                home_team: game.home_team,
+                away_team: game.away_team,
             }.into()
         }
         FedEventData::BatterUp { game, batter_name, ..  } => {
@@ -182,11 +190,11 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
                 time: fed_event.created,
             }.into()
         }
+        // TODO Separate these by whether someone can advance on them
         FedEventData::StrikeoutLooking { game, .. } |
         FedEventData::StrikeoutSwinging { game, .. } |
-        FedEventData::Flyout { game, .. } |
-        FedEventData::GroundOut { game, .. } => {
-            events::Out {
+        FedEventData::CharmStrikeout { game, .. } => {
+            events::Strikeout {
                 game_update: GameUpdate {
                     game_id: game.game_id,
                     play: game.play,
@@ -196,7 +204,29 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
                 time: fed_event.created,
             }.into()
         }
-        FedEventData::FieldersChoice { .. } => { todo!() }
+        FedEventData::Flyout { game, .. } |
+        FedEventData::GroundOut { game, .. } => {
+            events::CaughtOut {
+                game_update: GameUpdate {
+                    game_id: game.game_id,
+                    play: game.play,
+                    score: None,
+                    description,
+                },
+                time: fed_event.created,
+            }.into()
+        }
+        FedEventData::FieldersChoice { game, .. } => {
+            events::FieldersChoice {
+                game_update: GameUpdate {
+                    game_id: game.game_id,
+                    play: game.play,
+                    score: None,
+                    description,
+                },
+                time: fed_event.created,
+            }.into()
+        }
         FedEventData::DoublePlay { .. } => { todo!() }
         FedEventData::Hit { game, num_bases, .. } => {
             events::Hit {
@@ -262,8 +292,17 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
                 time: fed_event.created,
             }.into()
         }
-        FedEventData::InningEnd { .. } => { todo!() }
-        FedEventData::CharmStrikeout { .. } => { todo!() }
+        FedEventData::InningEnd { game, .. } => {
+            events::InningEnd {
+                game_update: GameUpdate {
+                    game_id: game.game_id,
+                    play: game.play,
+                    score: None,
+                    description,
+                },
+                time: fed_event.created,
+            }.into()
+        }
         FedEventData::StrikeZapped { .. } => { todo!() }
         FedEventData::PeanutFlavorText { .. } => { todo!() }
         FedEventData::GameEnd { .. } => { todo!() }

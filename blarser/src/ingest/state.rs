@@ -241,9 +241,10 @@ impl EntityStateGraph {
             for &idx in &next_generation {
                 let node = self.graph.node_weight(idx).unwrap();
                 data.insert(idx, DebugTreeNode {
-                    description: node.entity.description(),
+                    description: node.event.to_string(),
                     is_ambiguous: node.entity.is_ambiguous(),
-                    observed: node.observed.as_ref().map(|obs| obs.perceived_at),
+                    created_at: node.event.time(),
+                    observed_at: node.observed.as_ref().map(|obs| obs.perceived_at),
                     added_reason: node.added_reason,
                     json: node.entity.to_json(),
                     order: *order_map.get(&idx)
@@ -288,7 +289,7 @@ impl StateGraph {
             // interleaved with meaningful work.
             // Debug
             let entity_human_name = entity.to_string();
-            let description = entity.description();
+            let description = start_event.to_string();
             let json = entity.to_json();
             let time = obs.perceived_at;
 
@@ -318,7 +319,8 @@ impl StateGraph {
                         data: iter::once((idx, DebugTreeNode {
                             description,
                             is_ambiguous: false, // can't be ambiguous at start
-                            observed: Some(time),
+                            created_at: start_time,
+                            observed_at: Some(time),
                             added_reason: AddedReason::Start,
                             json,
                             order: 0,

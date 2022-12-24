@@ -19,6 +19,7 @@ mod hit;
 mod stolen_base;
 mod walk;
 mod game_upcoming;
+mod inning_end;
 // mod player_reroll;
 
 pub(crate) use game_update::GameUpdate;
@@ -32,11 +33,12 @@ pub use half_inning::HalfInning;
 pub use storm_warning::StormWarning;
 pub use batter_up::BatterUp;
 pub use count_events::{Strike, Ball, FoulBall};
-pub use out::Out;
+pub use out::{CaughtOut, FieldersChoice, Strikeout};
 pub use hit::{Hit, HomeRun};
 pub use stolen_base::{StolenBase, CaughtStealing};
 pub use walk::Walk;
 pub use game_upcoming::GameUpcoming;
+pub use inning_end::InningEnd;
 
 use std::fmt::{Display, Formatter};
 use chrono::{DateTime, Utc};
@@ -87,13 +89,16 @@ polymorphic_enum!{
         Strike(crate::events::Strike),
         Ball(crate::events::Ball),
         FoulBall(crate::events::FoulBall),
-        Out(crate::events::Out),
+        CaughtOut(crate::events::CaughtOut),
+        Strikeout(crate::events::Strikeout),
         Hit(crate::events::Hit),
         HomeRun(crate::events::HomeRun),
         StolenBase(crate::events::StolenBase),
         Walk(crate::events::Walk),
         CaughtStealing(crate::events::CaughtStealing),
         GameUpcoming(crate::events::GameUpcoming),
+        InningEnd(crate::events::InningEnd),
+        FieldersChoice(crate::events::FieldersChoice),
     }
 }
 

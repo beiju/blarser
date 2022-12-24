@@ -12,6 +12,7 @@ use itertools::Itertools;
 use rocket::info;
 use partial_information::{Conflict, PartialInformationCompare};
 use futures::future::join_all;
+use log::error;
 use petgraph::stable_graph::NodeIndex;
 use petgraph::visit::Walker;
 use serde::Deserialize;
@@ -209,7 +210,7 @@ pub fn ingest_observation(ingest: &mut Ingest, obs: Observation, debug_history: 
         queued_for_delete: None,
     });
 
-    let (successes, _failures): (Vec<_>, Vec<_>) = versions.into_iter()
+    let (successes, failures): (Vec<_>, Vec<_>) = versions.into_iter()
         .map(|version_idx| {
             info!("Running ingest on version {version_idx:?}");
             let node = graph.get_version(version_idx)
@@ -237,7 +238,10 @@ pub fn ingest_observation(ingest: &mut Ingest, obs: Observation, debug_history: 
         queued_for_delete: None,
     });
 
-    assert!(!successes.is_empty(), "TODO Report failures");
+    if successes.is_empty() {
+        error!("All possible placements failed: {:#?}", failures);
+        assert!(false, "TODO Report failures");
+    }
 
     let prev_nodes = get_reachable_nodes(graph, graph.leafs().clone());
     let keep_nodes = get_reachable_nodes(graph, successes.iter().flatten().copied().collect());

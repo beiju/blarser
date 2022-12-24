@@ -38,7 +38,7 @@ impl Observation {
                 self.perceived_at - Duration::seconds(1)
             }
             EntityType::Player => { self.perceived_at - Duration::minutes(6) }
-            EntityType::Team => { self.perceived_at }
+            EntityType::Team => { self.perceived_at - Duration::seconds(30) }
             EntityType::Game => {
                 // If there's a lastUpdateFull, we know exactly when it was from
                 // if let Some(luf) = &self.last_update_full {

@@ -1,8 +1,9 @@
 use std::fmt::{Display, Formatter};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
-use crate::entity::{AnyEntity, Game};
+use crate::entity::{AnyEntity, Game, Team};
 use crate::events::{AnyExtrapolated, Effect, Event, ord_by_time};
 use crate::events::effects::NullExtrapolated;
 use crate::events::game_update::GameUpdate;
@@ -13,6 +14,8 @@ use crate::state::EntityType;
 pub struct LetsGo {
     pub(crate) game_update: GameUpdate,
     pub(crate) time: DateTime<Utc>,
+    pub(crate) home_team: Uuid,
+    pub(crate) away_team: Uuid,
 }
 
 impl Event for LetsGo {

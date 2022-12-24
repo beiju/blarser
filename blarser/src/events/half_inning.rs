@@ -1,10 +1,11 @@
 use std::fmt::{Display, Formatter};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
-use crate::entity::{AnyEntity, Game};
+use crate::entity::{AnyEntity, Game, Team};
 use crate::events::{AnyExtrapolated, Effect, Event, ord_by_time};
-use crate::events::effects::PitchersExtrapolated;
+use crate::events::effects::{NullExtrapolated, PitchersExtrapolated};
 use crate::events::game_update::GameUpdate;
 use crate::ingest::StateGraph;
 use crate::state::EntityType;
@@ -13,6 +14,10 @@ use crate::state::EntityType;
 pub struct HalfInning {
     pub(crate) game_update: GameUpdate,
     pub(crate) time: DateTime<Utc>,
+    pub(crate) top_of_inning: bool,
+    pub(crate) inning: i32,
+    pub(crate) home_team: Uuid,
+    pub(crate) away_team: Uuid,
 }
 
 // fn read_active_pitcher(state: &mut StateInterface, team_id: Uuid, day: i32) -> QueryResult<Vec<(Uuid, String)>> {
@@ -39,9 +44,16 @@ impl Event for HalfInning {
     }
 
     fn effects(&self, _: &StateGraph) -> Vec<Effect> {
-        vec![
+        let mut effects = vec![
             Effect::one_id_with(EntityType::Game, self.game_update.game_id, PitchersExtrapolated::new())
-        ]
+        ];
+
+        if self.top_of_inning && self.inning == 1 {
+            effects.push(Effect::one_id(EntityType::Team, self.away_team));
+            effects.push(Effect::one_id(EntityType::Team, self.home_team));
+        }
+
+        effects
     }
 
     fn forward(&self, entity: &AnyEntity, extrapolated: &AnyExtrapolated) -> AnyEntity {
@@ -68,6 +80,11 @@ impl Event for HalfInning {
             game.phase = 6;
             game.game_start_phase = 10;
             game.half_inning_score = 0.0;
+        } else if let Some(team) = entity.as_team_mut() {
+            // shrug emoji
+            if team.shame_runs > 0. {
+                team.shame_runs = 0.;
+            }
         }
 
         entity
@@ -105,6 +122,13 @@ impl Event for HalfInning {
                 }
 
                 self.game_update.reverse(old_game, new_game);
+            }
+            AnyEntity::Team(old_team) => {
+                let new_team: &mut Team = new_parent.try_into()
+                    .expect("Mismatched event types");
+                let _: &mut NullExtrapolated = extrapolated.try_into()
+                    .expect("Extrapolated type mismatch");
+                new_team.shame_runs = old_team.shame_runs;
             }
             _ => {
                 panic!("Mismatched extrapolated type")

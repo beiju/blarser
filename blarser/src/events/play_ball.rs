@@ -1,9 +1,10 @@
 use std::fmt::{Display, Formatter};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 use partial_information::MaybeKnown;
 
-use crate::entity::{AnyEntity, Game};
+use crate::entity::{AnyEntity, Game, Team};
 use crate::events::{Effect, Event, ord_by_time, AnyExtrapolated};
 use crate::events::effects::NullExtrapolated;
 use crate::events::game_update::GameUpdate;
@@ -14,6 +15,8 @@ use crate::state::EntityType;
 pub struct PlayBall {
     pub(crate) game_update: GameUpdate,
     pub(crate) time: DateTime<Utc>,
+    pub(crate) home_team: Uuid,
+    pub(crate) away_team: Uuid,
 }
 
 impl Event for PlayBall {
@@ -23,7 +26,9 @@ impl Event for PlayBall {
 
     fn effects(&self, _: &StateGraph) -> Vec<Effect> {
         vec![
-            Effect::one_id(EntityType::Game, self.game_update.game_id)
+            Effect::one_id(EntityType::Game, self.game_update.game_id),
+            Effect::one_id(EntityType::Team, self.away_team),
+            Effect::one_id(EntityType::Team, self.home_team),
         ]
     }
 
@@ -44,6 +49,8 @@ impl Event for PlayBall {
             game.away.pitcher = None;
             game.away.pitcher_name = Some(MaybeKnown::Known(String::new()));
             game.away.pitcher_mod = MaybeKnown::Known(String::new());
+        } else if let Some(team) = entity.as_team_mut() {
+            team.rotation_slot += 1;
         }
 
         entity
@@ -70,6 +77,13 @@ impl Event for PlayBall {
                 new_game.top_of_inning = old_game.top_of_inning;
 
                 self.game_update.reverse(old_game, new_game);
+            }
+            AnyEntity::Team(old_team) => {
+                let new_team: &mut Team = new_parent.try_into()
+                    .expect("Mismatched event types");
+                let _: &mut NullExtrapolated = extrapolated.try_into()
+                    .expect("Extrapolated type mismatch");
+                new_team.rotation_slot = old_team.rotation_slot;
             }
             _ => {
                 panic!("Can't reverse-apply PlayBall to this entity type");
