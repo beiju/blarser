@@ -5,7 +5,7 @@ use partial_information::{DatetimeWithResettingMs, MaybeKnown};
 
 use crate::entity::{AnyEntity, Sim};
 use crate::events::{AnyEvent, AnyExtrapolated, Effect, Event, GameUpcoming, ord_by_time};
-use crate::events::effects::SubsecondsExtrapolated;
+use crate::events::effects::EarlseasonStartSubsecondsExtrapolated;
 use crate::ingest::StateGraph;
 use crate::state::EntityType;
 
@@ -40,7 +40,7 @@ impl Event for EarlseasonStart {
 
     fn effects(&self, _: &StateGraph) -> Vec<Effect> {
         vec![
-            Effect::null_id_with(EntityType::Sim, SubsecondsExtrapolated::default()),
+            Effect::null_id_with(EntityType::Sim, EarlseasonStartSubsecondsExtrapolated::default()),
         ]
     }
 
@@ -48,17 +48,13 @@ impl Event for EarlseasonStart {
         let mut entity = entity.clone();
 
         if let Some(sim) = entity.as_sim_mut() {
-            let extrapolated: &SubsecondsExtrapolated = extrapolated.try_into()
+            let extrapolated: &EarlseasonStartSubsecondsExtrapolated = extrapolated.try_into()
                 .expect("Mismatched extrapolated type");
             if sim.phase == 1 {
                 sim.phase = 2;
                 sim.next_phase_time = DatetimeWithResettingMs::from_without_ms(sim.earlseason_date);
-                if let MaybeKnown::Known(ns) = extrapolated.ns {
-                    sim.gods_day_date.set_ns(ns);
-                    sim.next_phase_time.set_ns(ns);
-                } else {
-                    sim.gods_day_date.forget_ms();
-                }
+                sim.next_phase_time.maybe_set_ns(extrapolated.next_phase_ns);
+                sim.gods_day_date.maybe_set_ns(extrapolated.gods_day_ns);
             } else {
                 panic!("Tried to apply EarlseasonStart event while not in Preseason phase")
             }
@@ -72,9 +68,10 @@ impl Event for EarlseasonStart {
             AnyEntity::Sim(old_sim) => {
                 let new_sim: &mut Sim = new_parent.try_into()
                     .expect("Mismatched event types");
-                let extrapolated: &mut SubsecondsExtrapolated = extrapolated.try_into()
+                let extrapolated: &mut EarlseasonStartSubsecondsExtrapolated = extrapolated.try_into()
                     .expect("Extrapolated type mismatch");
-                extrapolated.ns = new_sim.next_phase_time.ns();
+                extrapolated.next_phase_ns = new_sim.next_phase_time.ns();
+                extrapolated.gods_day_ns = new_sim.gods_day_date.ns();
 
                 if new_sim.phase == 2 {
                     new_sim.phase = 1;

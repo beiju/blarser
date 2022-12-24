@@ -34,8 +34,8 @@ impl Observation {
     pub fn earliest_time(&self) -> DateTime<Utc> {
         match self.entity_type {
             EntityType::Sim => {
-                // This accounts for fuzzy JS timers. I want to find a better way
-                self.perceived_at - Duration::seconds(1)
+                // StreamData can be this laggy, believe it or not
+                self.perceived_at - Duration::seconds(10)
             }
             EntityType::Player => { self.perceived_at - Duration::minutes(6) }
             EntityType::Team => { self.perceived_at - Duration::seconds(30) }

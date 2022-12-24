@@ -37,7 +37,6 @@ pub struct Sim {
     pub sim_start: Option<DateTime<Utc>>,
     pub agitations: i32, // what
     pub tournament: i32,
-    // TODO: Only the milliseconds part of this needs to be unknown
     pub gods_day_date: DatetimeWithResettingMs,
     pub salutations: i32,
     pub sub_era_color: String,
@@ -46,7 +45,6 @@ pub struct Sim {
     pub election_date: DateTime<Utc>,
     pub endseason_date: DateTime<Utc>,
     pub midseason_date: DateTime<Utc>,
-    // TODO: Only the milliseconds part of this needs to be unknown
     pub next_phase_time: DatetimeWithResettingMs,
     pub preseason_date: DateTime<Utc>,
     pub earlseason_date: DateTime<Utc>,

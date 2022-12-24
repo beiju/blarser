@@ -10,6 +10,7 @@ use crate::entity::Base;
 use crate::events;
 use crate::events::{Effect, AnyEvent, GameUpdate};
 use crate::ingest::error::IngestResult;
+use crate::ingest::{GraphDebugHistory, StateGraph};
 use crate::ingest::task::{DebugHistoryVersion, Ingest};
 
 pub struct EventStreamItem {
@@ -58,11 +59,28 @@ pub async fn get_timed_event_list(ingest: &mut Ingest, start_time: DateTime<Utc>
 
 pub async fn ingest_event(ingest: &mut Ingest, event: AnyEvent) -> IngestResult<Vec<AnyEvent>> {
     let mut history = ingest.debug_history.lock().await;
-    let event = Arc::new(event);
     let mut state = ingest.state.lock().unwrap();
+    let mut new_timed_events = Vec::new();
+
+    while let Some(predecessor) = event.generate_predecessor(&state) {
+        info!("Event {event} has predecessor {predecessor}; ingesting that first");
+        new_timed_events.extend(ingest_event_internal(&mut state, Arc::new(predecessor), &mut history)?);
+    }
+
+    new_timed_events.extend(ingest_event_internal(&mut state,  Arc::new(event), &mut history)?);
+
+    Ok(new_timed_events)
+}
+
+fn ingest_event_internal(
+    state: &mut StateGraph,
+    event: Arc<AnyEvent>,
+    history: &mut GraphDebugHistory
+) -> IngestResult<Vec<AnyEvent>> {
+    let mut new_timed_events = Vec::new();
+
     info!("Ingesting event {event}");
     let effects: Vec<Effect> = event.effects(&state);
-    let mut new_timed_events = Vec::new();
     for effect in effects {
         for id in state.ids_for(&effect) {
             let graph = state.entity_graph_mut(effect.ty, id)
@@ -98,6 +116,7 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
                     scores: None,
                     description,
                 },
+                season: fed_event.season,
                 home_team: game.home_team,
                 away_team: game.away_team,
             }.into()

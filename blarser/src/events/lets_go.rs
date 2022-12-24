@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::entity::{AnyEntity, Game, Team};
-use crate::events::{AnyExtrapolated, Effect, Event, ord_by_time};
+use crate::events::{AnyEvent, AnyExtrapolated, EarlseasonStart, Effect, Event, ord_by_time};
 use crate::events::effects::NullExtrapolated;
 use crate::events::game_update::GameUpdate;
 use crate::ingest::StateGraph;
@@ -14,6 +14,7 @@ use crate::state::EntityType;
 pub struct LetsGo {
     pub(crate) game_update: GameUpdate,
     pub(crate) time: DateTime<Utc>,
+    pub(crate) season: i32,
     pub(crate) home_team: Uuid,
     pub(crate) away_team: Uuid,
 }
@@ -21,6 +22,14 @@ pub struct LetsGo {
 impl Event for LetsGo {
     fn time(&self) -> DateTime<Utc> {
         self.time
+    }
+
+    fn generate_predecessor(&self, state: &StateGraph) -> Option<AnyEvent> {
+        if state.query_sim_unique(|sim| sim.phase) == 1 {
+            Some(EarlseasonStart::new(self.time, self.season).into())
+        } else {
+            None
+        }
     }
 
     fn effects(&self, _: &StateGraph) -> Vec<Effect> {

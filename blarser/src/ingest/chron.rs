@@ -245,7 +245,7 @@ pub fn ingest_observation(ingest: &mut Ingest, obs: Observation, debug_history: 
 
     // Merge step
     let mut merge_groups: Vec<(&_, Vec<_>)> = Vec::new();
-    for &node_idx in successes.iter().flatten() {
+    for node_idx in successes.into_iter().flatten() {
         let node = graph.get_version(node_idx)
             .expect("Expected ingest_for_version to return valid node indices");
         let group = merge_groups.iter_mut()
@@ -262,6 +262,9 @@ pub fn ingest_observation(ingest: &mut Ingest, obs: Observation, debug_history: 
         .map(|(_, group)| group)
         .collect_vec();
 
+    let new_leafs = merge_groups.iter()
+        .map(|l| *l.first().expect("A merge group has to have at least one node"))
+        .collect_vec();
     for merge_group in merge_groups {
         let (&keep_node_idx, delete_nodes) = merge_group.split_first()
             .expect("A merge group has to have at least one node");
@@ -286,7 +289,7 @@ pub fn ingest_observation(ingest: &mut Ingest, obs: Observation, debug_history: 
     }
 
     let prev_nodes = get_reachable_nodes(graph, graph.leafs().clone());
-    let keep_nodes = get_reachable_nodes(graph, successes.iter().flatten().copied().collect());
+    let keep_nodes = get_reachable_nodes(graph, new_leafs.clone());
     let delete_nodes: HashSet<_> = prev_nodes.difference(&keep_nodes).copied().collect();
 
     debug_history.get_mut(&debug_key).unwrap().versions.push(DebugHistoryVersion {
@@ -302,7 +305,7 @@ pub fn ingest_observation(ingest: &mut Ingest, obs: Observation, debug_history: 
         graph.remove_node(node_idx);
     }
 
-    graph.set_leafs(successes.into_iter().flatten().collect());
+    graph.set_leafs(new_leafs);
 
     debug_history.get_mut(&debug_key).unwrap().versions.push(DebugHistoryVersion {
         event_human_name: format!("After delete from ingest at {}", obs.perceived_at),

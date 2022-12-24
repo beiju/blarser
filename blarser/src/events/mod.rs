@@ -51,6 +51,14 @@ use crate::ingest::StateGraph;
 pub trait Event: Serialize + for<'de> Deserialize<'de> + Ord + Display {
     fn time(&self) -> DateTime<Utc>;
 
+    // "Predecessors" are events that occur immediately before this event occurs, but their timing
+    // isn't known until this event is received. This can be used to fill in for invisible events.
+    // This function will be called, and the resulting event applied, until it returns None.
+    #[allow(unused_variables)]
+    fn generate_predecessor(&self, state: &StateGraph) -> Option<AnyEvent> {
+        None
+    }
+
     // "Successors" are events that are generated when this event occurs. Typically they are timed
     // events scheduled for some time in the future. This can be used to fill in for known-missing
     // Feed events.
@@ -113,6 +121,10 @@ impl Display for AnyEvent {
 impl AnyEvent {
     pub fn time(&self) -> DateTime<Utc> {
         with_any_event!(self, |e| { e.time() })
+    }
+
+    pub fn generate_predecessor(&self, state: &StateGraph) -> Option<AnyEvent> {
+        with_any_event!(self, |e| { e.generate_predecessor(state) })
     }
 
     pub fn generate_successors(&self, state: &StateGraph) -> Vec<AnyEvent> {

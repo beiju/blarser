@@ -15,11 +15,12 @@ pub struct NullExtrapolated {}
 impl Extrapolated for NullExtrapolated {}
 
 #[derive(Default, Debug, Clone, PartialInformationCompare)]
-pub struct SubsecondsExtrapolated {
-    pub(crate) ns: MaybeKnown<u32>,
+pub struct EarlseasonStartSubsecondsExtrapolated {
+    pub(crate) gods_day_ns: MaybeKnown<u32>,
+    pub(crate) next_phase_ns: MaybeKnown<u32>,
 }
 
-impl Extrapolated for SubsecondsExtrapolated {}
+impl Extrapolated for EarlseasonStartSubsecondsExtrapolated {}
 
 #[derive(Debug, Clone, PartialInformationCompare)]
 pub struct GamePlayerExtrapolated {
@@ -100,7 +101,7 @@ polymorphic_enum! {
     #[try_into(owned, ref, ref_mut)]
     pub AnyExtrapolated: with_extrapolated {
         Null(NullExtrapolated),
-        Subseconds(SubsecondsExtrapolated),
+        Subseconds(EarlseasonStartSubsecondsExtrapolated),
         GamePlayer(GamePlayerExtrapolated),
         Pitchers(PitchersExtrapolated),
         OddsAndPitchers(OddsAndPitchersExtrapolated),

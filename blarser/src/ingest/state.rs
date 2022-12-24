@@ -344,25 +344,26 @@ impl StateGraph {
         self.graphs.get_mut(&(entity_type, id))
     }
 
-    pub fn get_timed_events(&self, after: DateTime<Utc>) -> Vec<AnyEvent> {
-        // This function is not intended to be generic. I need to see the natural usage pattern in
-        // the normal case before deciding what the general API will look like.
-        let sim_graph = self.entity_graph(EntityType::Sim, Uuid::nil())
-            .expect("Error: Missing sim graph");
-        let sim_idx = sim_graph.leafs()
-            .into_iter().exactly_one()
-            .expect("There must be exactly one sim node when calling get_timed_events");
-        let entity = &sim_graph.get_version(*sim_idx)
-            .expect("Sim was not found in graph")
-            .entity;
-        let sim: &entity::Sim = entity.try_into()
-            .expect("Sim object was not Sim type");
-
-        if sim.phase == 1 && sim.earlseason_date > after {
-            vec![AnyEvent::from(EarlseasonStart::new(sim.earlseason_date, sim.season))]
-        } else {
-            vec![]
-        }
+    pub fn get_timed_events(&self, _after: DateTime<Utc>) -> Vec<AnyEvent> {
+        vec![]
+        // // This function is not intended to be generic. I need to see the natural usage pattern in
+        // // the normal case before deciding what the general API will look like.
+        // let sim_graph = self.entity_graph(EntityType::Sim, Uuid::nil())
+        //     .expect("Error: Missing sim graph");
+        // let sim_idx = sim_graph.leafs()
+        //     .into_iter().exactly_one()
+        //     .expect("There must be exactly one sim node when calling get_timed_events");
+        // let entity = &sim_graph.get_version(*sim_idx)
+        //     .expect("Sim was not found in graph")
+        //     .entity;
+        // let sim: &entity::Sim = entity.try_into()
+        //     .expect("Sim object was not Sim type");
+        //
+        // if sim.phase == 1 && sim.earlseason_date > after {
+        //     vec![AnyEvent::from(EarlseasonStart::new(sim.earlseason_date, sim.season))]
+        // } else {
+        //     vec![]
+        // }
     }
 
     pub fn ids_for(&self, effect: &Effect) -> Vec<Uuid> {
@@ -399,6 +400,11 @@ impl StateGraph {
         }
 
         result.expect("Leafs array for entity is empty")
+    }
+
+    pub fn query_sim_unique<F, T>(&self, accessor: F) -> T
+        where F: Fn(&entity::Sim) -> T, T: Debug + Eq {
+        self.query_entity_unique::<entity::Sim, _, _>(&(EntityType::Sim, Uuid::nil()), accessor)
     }
 
     pub fn query_game_unique<F, T>(&self, id: Uuid, accessor: F) -> T

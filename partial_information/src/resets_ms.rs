@@ -46,6 +46,15 @@ impl DatetimeWithResettingMs {
         self.date = self.date.with_nanosecond(ns).unwrap();
         self.ms_known = true;
     }
+
+    pub fn maybe_set_ns(&mut self, maybe_ns: MaybeKnown<u32>) {
+        if let MaybeKnown::Known(ns) = maybe_ns {
+            self.date = self.date.with_nanosecond(ns).unwrap();
+            self.ms_known = true;
+        } else {
+            self.ms_known = false;
+        }
+    }
 }
 
 impl From<DateTime<Utc>> for DatetimeWithResettingMs {
