@@ -1,4 +1,4 @@
-use fed::{ScoreInfo, ScoringPlayer};
+use fed::{FreeRefill, ScoreInfo, ScoringPlayer};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use crate::entity::Game;
@@ -29,9 +29,7 @@ impl GameUpdate {
         game.last_update_full = None;
 
         if let Some(score) = &self.scores && !score.scoring_players.is_empty() {
-            Self::score(game, &score.scoring_players);
-            // There cant be free refills without scores [falsehoods] so it's fine to do this here
-            game.half_inning_outs -= score.free_refills.len() as i32;
+            Self::score(game, &score.scoring_players, &score.free_refills);
         } else {
             game.score_update = Some(String::new());
         }
@@ -41,7 +39,7 @@ impl GameUpdate {
             game.home.score.unwrap() > game.away.score.unwrap();
     }
 
-    pub fn score(game: &mut Game, scoring_players: &Vec<ScoringPlayer>) {
+    pub fn score(game: &mut Game, scoring_players: &[ScoringPlayer], free_refills: &[FreeRefill]) {
         let mut runs_scored = 0.;
         for score in scoring_players {
             game.pop_base_runner(score.player_id);
@@ -52,6 +50,8 @@ impl GameUpdate {
         game.half_inning_score += runs_scored;
         *game.team_at_bat_mut().score.as_mut().unwrap() += runs_scored;
         *game.current_half_score_mut() += runs_scored;
+        // There cant be free refills without scores [falsehoods] so it's fine to do this here
+        game.half_inning_outs -= free_refills.len() as i32;
     }
 
     pub fn reverse(&self, old_game: &Game, new_game: &mut Game) {
@@ -66,32 +66,36 @@ impl GameUpdate {
 
         new_game.score_update = old_game.score_update.clone();
         if let Some(score) = &self.scores && !score.scoring_players.is_empty() {
-            // I think re-using the iterator will let us properly handle multiple of the same
-            // player. Using enumerate to get index rather than find_position because I think
-            // find_position will reset the index.
-            //
-            // This is made much more complicated by just a few games where players could score
-            // from positions other than the front of the array.
-            let mut old_base_runners_it = old_game.base_runners.iter()
-                .enumerate();
-            for scorer in &score.scoring_players {
-                let (idx, _) = old_base_runners_it
-                    .find(|(_, &id)| id == scorer.player_id)
-                    .expect("The scorer must be present in the base_runners list");
-                new_game.base_runners.insert(idx, old_game.base_runners[idx].clone());
-                new_game.base_runner_names.insert(idx, old_game.base_runner_names[idx].clone());
-                new_game.base_runner_mods.insert(idx, old_game.base_runner_mods[idx].clone());
-                new_game.bases_occupied.insert(idx, old_game.bases_occupied[idx].clone());
-                new_game.baserunner_count += 1;
-            }
-            new_game.half_inning_score = old_game.half_inning_score;
-            new_game.team_at_bat_mut().score = old_game.team_at_bat().score;
-            *new_game.current_half_score_mut() = old_game.current_half_score();
-            // There cant be free refills without scores [falsehoods] so it's fine to do this here
-            new_game.half_inning_outs += score.free_refills.len() as i32;
+            Self::reverse_score(old_game, new_game, &score.scoring_players, &score.free_refills);
         }
 
         new_game.shame = old_game.shame;
+    }
+
+    pub fn reverse_score(old_game: &Game, new_game: &mut Game, scoring_players: &[ScoringPlayer], free_refills: &[FreeRefill]) {
+        // I think re-using the iterator will let us properly handle multiple of the same
+        // player. Using enumerate to get index rather than find_position because I think
+        // find_position will reset the index.
+        //
+        // This is made much more complicated by just a few games where players could score
+        // from positions other than the front of the array.
+        let mut old_base_runners_it = old_game.base_runners.iter()
+            .enumerate();
+        for scorer in scoring_players {
+            let (idx, _) = old_base_runners_it
+                .find(|(_, &id)| id == scorer.player_id)
+                .expect("The scorer must be present in the base_runners list");
+            new_game.base_runners.insert(idx, old_game.base_runners[idx].clone());
+            new_game.base_runner_names.insert(idx, old_game.base_runner_names[idx].clone());
+            new_game.base_runner_mods.insert(idx, old_game.base_runner_mods[idx].clone());
+            new_game.bases_occupied.insert(idx, old_game.bases_occupied[idx].clone());
+            new_game.baserunner_count += 1;
+        }
+        new_game.half_inning_score = old_game.half_inning_score;
+        new_game.team_at_bat_mut().score = old_game.team_at_bat().score;
+        *new_game.current_half_score_mut() = old_game.current_half_score();
+        // There cant be free refills without scores [falsehoods] so it's fine to do this here
+        new_game.half_inning_outs += free_refills.len() as i32;
     }
 }
 

@@ -67,7 +67,7 @@ pub async fn ingest_event(ingest: &mut Ingest, event: AnyEvent) -> IngestResult<
         new_timed_events.extend(ingest_event_internal(&mut state, Arc::new(predecessor), &mut history)?);
     }
 
-    new_timed_events.extend(ingest_event_internal(&mut state,  Arc::new(event), &mut history)?);
+    new_timed_events.extend(ingest_event_internal(&mut state, Arc::new(event), &mut history)?);
 
     Ok(new_timed_events)
 }
@@ -75,7 +75,7 @@ pub async fn ingest_event(ingest: &mut Ingest, event: AnyEvent) -> IngestResult<
 fn ingest_event_internal(
     state: &mut StateGraph,
     event: Arc<AnyEvent>,
-    history: &mut GraphDebugHistory
+    history: &mut GraphDebugHistory,
 ) -> IngestResult<Vec<AnyEvent>> {
     let mut new_timed_events = Vec::new();
 
@@ -149,7 +149,7 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
                 away_team: game.away_team,
             }.into()
         }
-        FedEventData::BatterUp { game, batter_name, ..  } => {
+        FedEventData::BatterUp { game, batter_name, .. } => {
             events::BatterUp {
                 time: fed_event.created,
                 game_update: GameUpdate {
@@ -198,7 +198,7 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
         }
         FedEventData::StrikeSwinging { game, .. } |
         FedEventData::StrikeLooking { game, .. } |
-        FedEventData::StrikeFlinching { game, .. }=> {
+        FedEventData::StrikeFlinching { game, .. } => {
             events::Strike {
                 game_update: GameUpdate {
                     game_id: game.game_id,
@@ -247,7 +247,7 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
             }.into()
         }
         FedEventData::DoublePlay { .. } => { todo!() }
-        FedEventData::Hit { game, num_bases, scores, .. } => {
+        FedEventData::Hit { game, num_bases, scores, batter_id, .. } => {
             events::Hit {
                 game_update: GameUpdate {
                     game_id: game.game_id,
@@ -256,11 +256,12 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
                     description,
                 },
                 time: fed_event.created,
+                batter_id,
                 to_base: Base::try_from(num_bases)
                     .expect("Invalid num_bases in Hit event"),
             }.into()
         }
-        FedEventData::HomeRun { game, num_runs, .. } => {
+        FedEventData::HomeRun { game, num_runs, batter_id, .. } => {
             events::HomeRun {
                 game_update: GameUpdate {
                     game_id: game.game_id,
@@ -269,10 +270,11 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
                     description,
                 },
                 time: fed_event.created,
-                num_runs
+                batter_id,
+                num_runs,
             }.into()
         }
-        FedEventData::StolenBase { game, base_stolen, runner_id, runner_name, .. } => {
+        FedEventData::StolenBase { game, base_stolen, runner_id, runner_name, free_refill, .. } => {
             events::StolenBase {
                 game_update: GameUpdate {
                     game_id: game.game_id,
@@ -285,6 +287,7 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
                     .expect("Invalid base_stolen in StolenBase event"),
                 runner_id,
                 runner_name,
+                free_refill,
             }.into()
         }
         FedEventData::CaughtStealing { game, base_stolen, .. } => {
@@ -299,7 +302,6 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
                 to_base: Base::try_from(base_stolen)
                     .expect("Invalid base_stolen in StolenBase event"),
             }.into()
-
         }
         FedEventData::Walk { game, .. } => {
             events::Walk {

@@ -1,14 +1,16 @@
 use std::fmt::{Display, Formatter};
+use std::iter;
 use chrono::{DateTime, Utc};
 use itertools::zip_eq;
 use log::info;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 use partial_information::{MaybeKnown, PartialInformationCompare, RangeInclusive};
 
-use crate::entity::{AnyEntity, Base, Game};
+use crate::entity::{AnyEntity, Base, Game, Player};
 use crate::events::{AnyExtrapolated, Effect, Event, ord_by_time};
-use crate::events::effects::{GamePlayerExtrapolated, HitExtrapolated, NullExtrapolated};
-use crate::events::event_util::{new_runner_extrapolated};
+use crate::events::effects::{AdvancementExtrapolated, DisplayedModChangeExtrapolated, HitExtrapolated, NullExtrapolated};
+use crate::events::event_util::{get_displayed_mod_excluding, new_runner_extrapolated, PITCHER_MOD_PRECEDENCE, RUNNER_MOD_PRECEDENCE};
 use crate::events::game_update::GameUpdate;
 use crate::ingest::StateGraph;
 use crate::state::EntityType;
@@ -17,6 +19,7 @@ use crate::state::EntityType;
 pub struct Hit {
     pub(crate) game_update: GameUpdate,
     pub(crate) time: DateTime<Utc>,
+    pub(crate) batter_id: Uuid,
     pub(crate) to_base: Base,
 }
 
@@ -29,10 +32,17 @@ impl Event for Hit {
         let num_occupied_bases = state.query_game_unique(self.game_update.game_id, |game| {
             game.bases_occupied.len()
         });
+        
+        let scores = self.game_update.scores.as_ref()
+            .expect("Hit type always has a Scores");
 
         vec![
-            Effect::one_id_with(EntityType::Game, self.game_update.game_id, HitExtrapolated::new(
-                new_runner_extrapolated(self.game_update.game_id, state), num_occupied_bases))
+            Effect::one_id_with(EntityType::Game, self.game_update.game_id, HitExtrapolated {
+                runner: new_runner_extrapolated(self.game_update.game_id, state),
+                advancements: AdvancementExtrapolated::new(num_occupied_bases),
+                mod_changes: DisplayedModChangeExtrapolated::new(self.game_update.game_id, &scores.free_refills, state),
+            }),
+            Effect::one_id(EntityType::Player, self.batter_id),
         ]
     }
 
@@ -57,7 +67,15 @@ impl Event for Hit {
             game.push_base_runner(batter_id, batter_name.clone(), batter_mod, self.to_base);
             game.end_at_bat();
 
+            extrapolated.mod_changes.forward(game);
+
             self.game_update.forward(game);
+        } else if let Some(player) = entity.as_player_mut() {
+            let _: &NullExtrapolated = extrapolated.try_into()
+                .expect("Mismatched extrapolated type");
+
+            *player.consecutive_hits.as_mut()
+                .expect("Everyone but phantom sixpack has this") += 1;
         }
         entity
     }
@@ -70,14 +88,12 @@ impl Event for Hit {
                 let extrapolated: &mut HitExtrapolated = extrapolated.try_into()
                     .expect("Mismatched extrapolated type");
 
-                if self.game_update.scores.as_ref().map_or(false, |s| !s.free_refills.is_empty()) {
-                    info!("BREAK");
-                }
-
                 self.game_update.reverse(old_game, new_game);
                 new_game.reverse_end_at_bat(old_game);
                 new_game.reverse_push_base_runner();
                 new_game.advance_runners_by(-(self.to_base as i32 + 1));
+                
+                extrapolated.mod_changes.reverse(old_game, new_game);
 
                 for ((new_base_occupied, advanced), old_base_occupied) in zip_eq(zip_eq(&mut new_game.bases_occupied, &mut extrapolated.advancements.bases), &old_game.bases_occupied) {
                     if old_base_occupied.upper < new_base_occupied.lower {
@@ -98,6 +114,15 @@ impl Event for Hit {
                     }
                 }
             }
+            AnyEntity::Player(_old_player) => {
+                let new_player: &mut Player = new_parent.try_into()
+                    .expect("Mismatched entity type");
+                let _: &mut NullExtrapolated = extrapolated.try_into()
+                    .expect("Mismatched extrapolated type");
+
+                *new_player.consecutive_hits.as_mut()
+                    .expect("Everyone but phantom sixpack has this") -= 1;
+            }
             _ => {
                 panic!("Mismatched extrapolated type")
             }
@@ -117,6 +142,7 @@ ord_by_time!(Hit);
 pub struct HomeRun {
     pub(crate) game_update: GameUpdate,
     pub(crate) time: DateTime<Utc>,
+    pub(crate) batter_id: Uuid,
     pub(crate) num_runs: i32,
 }
 
@@ -126,7 +152,10 @@ impl Event for HomeRun {
     }
 
     fn effects(&self, _: &StateGraph) -> Vec<Effect> {
-        vec![Effect::one_id(EntityType::Game, self.game_update.game_id)]
+        vec![
+            Effect::one_id(EntityType::Game, self.game_update.game_id),
+            Effect::one_id(EntityType::Player, self.batter_id),
+        ]
     }
 
     fn forward(&self, entity: &AnyEntity, extrapolated: &AnyExtrapolated) -> AnyEntity {
@@ -147,6 +176,12 @@ impl Event for HomeRun {
 
             game.clear_bases();
             game.end_at_bat();
+        } else if let Some(player) = entity.as_player_mut() {
+            let _: &NullExtrapolated = extrapolated.try_into()
+                .expect("Mismatched extrapolated type");
+
+            *player.consecutive_hits.as_mut()
+                .expect("Everyone but phantom sixpack has this") += 1;
         }
         entity
     }

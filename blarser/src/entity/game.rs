@@ -198,6 +198,22 @@ impl EntityRaw for <Game as PartialInformationCompare>::Raw {
 }
 
 impl Game {
+    pub(crate) fn defending_team(&self) -> &GameByTeam {
+        if self.top_of_inning {
+            &self.home
+        } else {
+            &self.away
+        }
+    }
+    
+    pub(crate) fn defending_team_mut(&mut self) -> &mut GameByTeam {
+        if self.top_of_inning {
+            &mut self.home
+        } else {
+            &mut self.away
+        }
+    }
+
     pub(crate) fn team_at_bat(&self) -> &GameByTeam {
         if self.top_of_inning {
             &self.away

@@ -591,11 +591,7 @@ fn ingest_for_event<EntityT, EventT>(
                 let old_child_node = graph.graph.node_weight(old_child_idx)
                     .expect("Must exist");
                 let new_child_unobserved = old_child_node.event.forward(&old_entity_node.entity, &extrapolated);
-                info!("Old parent: {:?}", old_entity_node.entity);
-                info!("New parent: {:?}", new_entity_node.entity);
                 info!("Applying Event: {:?}", old_child_node.event);
-                info!("Old child: {:?}", old_child_node.entity);
-                info!("New child: {:?}", new_child_unobserved);
                 // for debugging, placed here because of borrow rules
                 let event_description = old_child_node.event.to_string();
 

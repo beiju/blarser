@@ -6,17 +6,24 @@ use crate::ingest::StateGraph;
 use crate::state::EntityType;
 
 // Theses lists are very much in flux
-const BATTER_MOD_PRECEDENCE: [&'static str; 1] = [
+pub const BATTER_MOD_PRECEDENCE: [&'static str; 1] = [
     "COFFEE_RALLY",
 ];
-const RUNNER_MOD_PRECEDENCE: [&'static str; 2] = [
+pub const RUNNER_MOD_PRECEDENCE: [&'static str; 2] = [
     "BLASERUNNING",
     "COFFEE_RALLY",
 ];
+pub const PITCHER_MOD_PRECEDENCE: [&'static str; 0] = [];
 
-fn get_displayed_mod(state: &StateGraph, batter_id: Uuid, mods_to_display: &[&str]) -> String {
-    state.query_player_unique(batter_id, |player| {
+pub fn get_displayed_mod(state: &StateGraph, player_id: Uuid, mods_to_display: &[&str]) -> String {
+    get_displayed_mod_excluding(state, player_id, &[], mods_to_display)
+}
+
+pub fn get_displayed_mod_excluding(state: &StateGraph, player_id: Uuid, mods_to_exclude: &[&str], mods_to_display: &[&str]) -> String {
+    state.query_player_unique(player_id, |player| {
         for &mod_name in mods_to_display {
+            if mods_to_exclude.iter().any(|&n| n == mod_name) { continue }
+            
             if player.has_mod(mod_name) ||
                 // Special logic for legacy items, I guess
                 (mod_name == "BLASERUNNING" && player.is_wielding("AN_ACTUAL_AIRPLANE")) {

@@ -1,9 +1,16 @@
+use std::collections::HashMap;
 use std::fmt::Debug;
+use std::iter;
 use as_any::AsAny;
 use derive_more::{From, TryInto};
+use fed::{FreeRefill, ScoreInfo};
+use itertools::zip_eq;
 use uuid::Uuid;
 use partial_information::MaybeKnown;
 use partial_information_derive::PartialInformationCompare;
+use crate::entity::Game;
+use crate::events::event_util::{get_displayed_mod_excluding, PITCHER_MOD_PRECEDENCE, RUNNER_MOD_PRECEDENCE};
+use crate::ingest::StateGraph;
 use crate::polymorphic_enum::polymorphic_enum;
 use crate::state::EntityType;
 
@@ -40,18 +47,86 @@ impl Extrapolated for GamePlayerExtrapolated {}
 pub struct HitExtrapolated {
     pub(crate) runner: GamePlayerExtrapolated,
     pub(crate) advancements: AdvancementExtrapolated,
+    pub(crate) mod_changes: DisplayedModChangeExtrapolated,
 }
 
-impl HitExtrapolated {
-    pub fn new(runner: GamePlayerExtrapolated, num_occupied_bases: usize) -> Self {
+impl Extrapolated for HitExtrapolated {}
+
+#[derive(Debug, Clone, PartialInformationCompare)]
+pub struct DisplayedModChangeExtrapolated {
+    pub(crate) new_pitcher_mod: Option<String>,
+    pub(crate) new_runner_mods: HashMap<Uuid, Option<String>>,
+}
+
+impl DisplayedModChangeExtrapolated {
+    pub fn new(game_id: Uuid, refills: &[FreeRefill], state: &StateGraph) -> Self {
+        let pitcher_id = state.query_game_unique(game_id, |game| {
+            *game.defending_team().pitcher
+                .expect("There must be a pitcher during a Free-Refill-eligible event")
+                .known()
+                .expect("Pitcher must be known during a Free-Refill-eligible event")
+        });
+
+        let batter_id = state.query_game_unique(game_id, |game| {
+            game.team_at_bat().batter
+                .expect("There must be a batter during a Free-Refill-eligible event")
+        });
+
+        let runner_ids = state.query_game_unique(game_id, |game| game.base_runners.clone());
+
+        fn displayed_mod(state: &StateGraph, refills: &[FreeRefill], player_id: Uuid, mods_to_display: &[&str]) -> Option<String> {
+            if refills.iter().any(|refill| refill.player_id == player_id) {
+                Some(get_displayed_mod_excluding(state, player_id, &["COFFEE_RALLY"], mods_to_display))
+            } else {
+                None
+            }
+        }
+
+        let new_pitcher_mod = displayed_mod(state, refills, pitcher_id, &PITCHER_MOD_PRECEDENCE);
+
+        let new_runner_mods = runner_ids.iter()
+            .chain(iter::once(&batter_id))
+            .map(|&runner_id| {
+                (runner_id, displayed_mod(state, refills, runner_id, &RUNNER_MOD_PRECEDENCE))
+            })
+            .collect();
+
         Self {
-            runner,
-            advancements: AdvancementExtrapolated::new(num_occupied_bases),
+            new_pitcher_mod,
+            new_runner_mods,
+        }
+    }
+    
+    pub fn forward(&self, game: &mut Game) {
+        if let Some(new_mod) = &self.new_pitcher_mod {
+            game.defending_team_mut().pitcher_mod = MaybeKnown::Known(new_mod.clone());
+        }
+
+        for (runner_id, runner_mod) in zip_eq(&game.base_runners, &mut game.base_runner_mods) {
+            let new_mod = self.new_runner_mods.get(runner_id)
+                .expect("Extrapolated should have an entry for every runner");
+            if let Some(new_mod) = new_mod {
+                *runner_mod = new_mod.clone();
+            }
+        }
+    }
+    
+    pub fn reverse(&self, old_game: &Game, new_game: &mut Game) {
+        if self.new_pitcher_mod.is_some() {
+            new_game.defending_team_mut().pitcher_mod = old_game.defending_team().pitcher_mod.clone();
+        }
+
+        for (runner_id, (old_mod, new_mod)) in zip_eq(&old_game.base_runners, zip_eq(&old_game.base_runner_mods, &mut new_game.base_runner_mods)) {
+            let extrapolated_mod = self.new_runner_mods.get(runner_id)
+                .expect("Extrapolated should have an entry for every runner");
+            if extrapolated_mod.is_some() {
+                *new_mod = old_mod.clone();
+            }
         }
     }
 }
 
-impl Extrapolated for HitExtrapolated {}
+impl Extrapolated for DisplayedModChangeExtrapolated {}
 
 #[derive(Default, Debug, Clone, PartialInformationCompare)]
 pub struct PitcherExtrapolated {
@@ -124,6 +199,7 @@ polymorphic_enum! {
         OddsAndPitchers(OddsAndPitchersExtrapolated),
         Advancement(AdvancementExtrapolated),
         Hit(HitExtrapolated),
+        DisplayedModChange(DisplayedModChangeExtrapolated),
     }
 }
 
