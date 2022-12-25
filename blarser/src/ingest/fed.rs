@@ -161,7 +161,7 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
                 batter_name: batter_name.clone(),
             }.into()
         }
-        FedEventData::SuperyummyGameStart { game, .. } => {
+        FedEventData::SuperyummyGameStart { game, toggle, .. } => {
             events::TogglePerforming {
                 time: fed_event.created,
                 game_update: GameUpdate {
@@ -170,7 +170,9 @@ fn blarser_event_from_fed_event(fed_event: FedEvent) -> Option<AnyEvent> {
                     scores: None,
                     description,
                 },
-                which_mod: "SUPERYUMMY".to_string(),
+                player_id: toggle.player_id,
+                source_mod: "SUPERYUMMY".to_string(),
+                is_overperforming: toggle.is_overperforming,
             }.into()
         }
         FedEventData::EchoedSuperyummyGameStart { .. } => { todo!() }
