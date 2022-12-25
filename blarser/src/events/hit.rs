@@ -70,6 +70,10 @@ impl Event for Hit {
                 let extrapolated: &mut HitExtrapolated = extrapolated.try_into()
                     .expect("Mismatched extrapolated type");
 
+                if self.game_update.scores.as_ref().map_or(false, |s| !s.free_refills.is_empty()) {
+                    info!("BREAK");
+                }
+
                 self.game_update.reverse(old_game, new_game);
                 new_game.reverse_end_at_bat(old_game);
                 new_game.reverse_push_base_runner();
@@ -93,8 +97,6 @@ impl Event for Hit {
                         *new_base_occupied = *old_base_occupied;
                     }
                 }
-
-                self.game_update.reverse(old_game, new_game);
             }
             _ => {
                 panic!("Mismatched extrapolated type")

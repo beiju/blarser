@@ -243,50 +243,7 @@ pub fn ingest_observation(ingest: &mut Ingest, obs: Observation, debug_history: 
         assert!(false, "TODO Report failures");
     }
 
-    // Merge step
-    let mut merge_groups: Vec<(&_, Vec<_>)> = Vec::new();
-    for node_idx in successes.into_iter().flatten() {
-        let node = graph.get_version(node_idx)
-            .expect("Expected ingest_for_version to return valid node indices");
-        let group = merge_groups.iter_mut()
-            .find(|(other, _)| &node.entity == *other);
-        if let Some((_, group)) = group {
-            group.push(node_idx);
-        } else {
-            merge_groups.push((&node.entity, vec![node_idx]));
-        }
-    }
-    
-    // Drop all the references to nodes because they borrow the graph
-    let merge_groups = merge_groups.into_iter()
-        .map(|(_, group)| group)
-        .collect_vec();
-
-    let new_leafs = merge_groups.iter()
-        .map(|l| *l.first().expect("A merge group has to have at least one node"))
-        .collect_vec();
-    for merge_group in merge_groups {
-        let (&keep_node_idx, delete_nodes) = merge_group.split_first()
-            .expect("A merge group has to have at least one node");
-        for &delete_node_idx in delete_nodes {
-            let mut parent_walker = graph.graph.parents(delete_node_idx);
-            while let Some((parent_edge_idx, parent_node_idx)) = parent_walker.walk_next(&graph.graph) {
-                let edge_weight = graph.graph.remove_edge(parent_edge_idx)
-                    .expect("Edge must exist in graph");
-                graph.graph.add_edge(parent_node_idx, keep_node_idx, edge_weight)
-                    .expect("This should not cause a cycle");
-            }
-            let mut child_walker = graph.graph.children(delete_node_idx);
-            while let Some((child_edge_idx, child_node_idx)) = child_walker.walk_next(&graph.graph) {
-                let edge_weight = graph.graph.remove_edge(child_edge_idx)
-                    .expect("Edge must exist in graph");
-                graph.graph.add_edge(keep_node_idx, child_node_idx, edge_weight)
-                    .expect("This should not cause a cycle");
-            }
-            graph.graph.remove_node(delete_node_idx)
-                .expect("This node should have been in the graph");
-        }
-    }
+    let new_leafs = merge_generations(graph, successes.into_iter().flatten());
 
     let prev_nodes = get_reachable_nodes(graph, graph.leafs().clone());
     let keep_nodes = get_reachable_nodes(graph, new_leafs.clone());
@@ -317,6 +274,65 @@ pub fn ingest_observation(ingest: &mut Ingest, obs: Observation, debug_history: 
     });
 
     Vec::new() // TODO Generate new timed events
+}
+
+fn merge_generations(graph: &mut EntityStateGraph, first_generation: impl IntoIterator<Item=NodeIndex>) -> Vec<NodeIndex> {
+    let mut generation: HashSet<NodeIndex> = first_generation.into_iter().collect();
+    let mut next_generation = HashSet::new();
+    let mut new_leafs = None;
+    while !generation.is_empty() {
+        let mut merge_groups: Vec<(&_, Vec<_>)> = Vec::new();
+        for &node_idx in &generation {
+            let node = graph.get_version(node_idx)
+                .expect("Expected ingest_for_version to return valid node indices");
+            let group = merge_groups.iter_mut()
+                .find(|(other, _)| &node.entity == *other);
+            if let Some((_, group)) = group {
+                group.push(node_idx);
+            } else {
+                merge_groups.push((&node.entity, vec![node_idx]));
+            }
+        }
+
+        // Drop all the references to nodes because they borrow the graph
+        let merge_groups = merge_groups.into_iter()
+            .map(|(_, group)| group)
+            .collect_vec();
+
+        // On the first iteration, save the new leafs
+        if new_leafs.is_none() {
+            new_leafs = Some(merge_groups.iter()
+                .map(|l| *l.first().expect("A merge group has to have at least one node"))
+                .collect_vec());
+        }
+
+        for merge_group in merge_groups {
+            let (&keep_node_idx, delete_nodes) = merge_group.split_first()
+                .expect("A merge group has to have at least one node");
+            for &delete_node_idx in delete_nodes {
+                let mut parent_walker = graph.graph.parents(delete_node_idx);
+                while let Some((parent_edge_idx, parent_node_idx)) = parent_walker.walk_next(&graph.graph) {
+                    next_generation.insert(parent_node_idx);
+                    let edge_weight = graph.graph.remove_edge(parent_edge_idx)
+                        .expect("Edge must exist in graph");
+                    graph.graph.add_edge(parent_node_idx, keep_node_idx, edge_weight)
+                        .expect("This should not cause a cycle");
+                }
+                let mut child_walker = graph.graph.children(delete_node_idx);
+                while let Some((child_edge_idx, child_node_idx)) = child_walker.walk_next(&graph.graph) {
+                    let edge_weight = graph.graph.remove_edge(child_edge_idx)
+                        .expect("Edge must exist in graph");
+                    graph.graph.add_edge(keep_node_idx, child_node_idx, edge_weight)
+                        .expect("This should not cause a cycle");
+                }
+                graph.graph.remove_node(delete_node_idx)
+                    .expect("This node should have been in the graph");
+            }
+        }
+        std::mem::swap(&mut generation, &mut next_generation);
+        next_generation.clear();
+    }
+    new_leafs.expect("There should have been at least one generation")
 }
 
 fn get_reachable_nodes(graph: &EntityStateGraph, mut stack: Vec<NodeIndex>) -> HashSet<NodeIndex> {
@@ -409,7 +425,7 @@ fn ingest_changed_entity<EntityT, EventT>(
                 all_parents_had_conflicts = false;
                 graph.add_edge(old_parent_idx, new_child_idx, new_extrapolated.clone());
             } else {
-                error!("Conflicts: {:#?}", conflicts);
+                error!("Parent was not reconstructed correctly. Conflicts: {:#?}", conflicts);
                 version_conflicts.push(conflicts);
                 todo!("Early exit")
             }

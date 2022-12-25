@@ -65,18 +65,30 @@ impl GameUpdate {
         new_game.score_ledger = old_game.score_ledger.clone();
 
         new_game.score_update = old_game.score_update.clone();
-        // TODO Logic about who was where based on how they advanced
         if let Some(score) = &self.scores && !score.scoring_players.is_empty() {
-            for _ in &score.scoring_players {
-                new_game.base_runners.insert(0, old_game.base_runners.first().unwrap().clone());
-                new_game.base_runner_names.insert(0, old_game.base_runner_names.first().unwrap().clone());
-                new_game.base_runner_mods.insert(0, old_game.base_runner_mods.first().unwrap().clone());
-                new_game.bases_occupied.insert(0, old_game.bases_occupied.first().unwrap().clone());
+            // I think re-using the iterator will let us properly handle multiple of the same
+            // player. Using enumerate to get index rather than find_position because I think
+            // find_position will reset the index.
+            //
+            // This is made much more complicated by just a few games where players could score
+            // from positions other than the front of the array.
+            let mut old_base_runners_it = old_game.base_runners.iter()
+                .enumerate();
+            for scorer in &score.scoring_players {
+                let (idx, _) = old_base_runners_it
+                    .find(|(_, &id)| id == scorer.player_id)
+                    .expect("The scorer must be present in the base_runners list");
+                new_game.base_runners.insert(idx, old_game.base_runners[idx].clone());
+                new_game.base_runner_names.insert(idx, old_game.base_runner_names[idx].clone());
+                new_game.base_runner_mods.insert(idx, old_game.base_runner_mods[idx].clone());
+                new_game.bases_occupied.insert(idx, old_game.bases_occupied[idx].clone());
                 new_game.baserunner_count += 1;
             }
             new_game.half_inning_score = old_game.half_inning_score;
             new_game.team_at_bat_mut().score = old_game.team_at_bat().score;
             *new_game.current_half_score_mut() = old_game.current_half_score();
+            // There cant be free refills without scores [falsehoods] so it's fine to do this here
+            new_game.half_inning_outs += score.free_refills.len() as i32;
         }
 
         new_game.shame = old_game.shame;
