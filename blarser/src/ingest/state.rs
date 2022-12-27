@@ -308,7 +308,7 @@ impl StateGraph {
             self.ids_for_type.entry(entity_type).or_default().push(entity_id);
 
             // Debug
-            history.insert((entity_type, entity_id), DebugHistoryItem {
+            history.push_item((entity_type, entity_id), DebugHistoryItem {
                 entity_human_name,
                 versions: vec![DebugHistoryVersion {
                     event_human_name: "Start".to_string(),

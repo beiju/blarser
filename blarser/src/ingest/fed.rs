@@ -87,7 +87,7 @@ fn ingest_event_internal(
                 .expect("Tried to apply event to entity that does not exist");
             info!("Applying {event} to {} {id} with {:?}", effect.ty, effect.extrapolated);
             graph.apply_event(event.clone(), &effect.extrapolated);
-            history.get_mut(&(effect.ty, id)).unwrap().versions.push(DebugHistoryVersion {
+            history.push(&(effect.ty, id), DebugHistoryVersion {
                 event_human_name: format!("After applying {event}"),
                 time: event.time(),
                 tree: graph.get_debug_tree(),

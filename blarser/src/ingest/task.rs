@@ -145,7 +145,39 @@ pub struct DebugHistoryItem {
     pub versions: Vec<DebugHistoryVersion>,
 }
 
-pub type GraphDebugHistory = HashMap<(EntityType, Uuid), DebugHistoryItem>;
+pub struct GraphDebugHistory {
+    disabled: bool,
+    inner: HashMap<(EntityType, Uuid), DebugHistoryItem>,
+}
+
+impl GraphDebugHistory {
+    pub fn new(disabled: bool) -> Self {
+        Self {
+            disabled,
+            inner: Default::default(),
+        }
+    }
+
+    pub fn push_item(&mut self, key: (EntityType, Uuid), item: DebugHistoryItem) {
+        if self.disabled { return }
+        self.inner.insert(key, item);
+    }
+
+    // Shortcut for push_version
+    pub fn push(&mut self, key: &(EntityType, Uuid), version: DebugHistoryVersion) {
+        if self.disabled { return }
+        self.inner.get_mut(key).unwrap().versions.push(version);
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item=(&(EntityType, Uuid), &DebugHistoryItem)> {
+        self.inner.iter()
+    }
+
+    pub fn get(&self, key: &(EntityType, Uuid)) -> Option<&DebugHistoryItem> {
+        self.inner.get(key)
+    }
+}
+
 pub type GraphDebugHistorySync = Arc<TokioMutex<GraphDebugHistory>>;
 
 pub struct Ingest {
@@ -164,7 +196,7 @@ impl Ingest {
             db,
             pending_approvals: Arc::new(StdMutex::new(Default::default())),
             state: Arc::new(StdMutex::new(StateGraph::new())),
-            debug_history: Arc::new(TokioMutex::new(Default::default())),
+            debug_history: Arc::new(TokioMutex::new(GraphDebugHistory::new(false))),
             pause_request,
         }
     }
