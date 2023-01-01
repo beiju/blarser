@@ -55,6 +55,7 @@ impl Event for StolenBase {
                                   &[ScoringPlayer {
                                       player_id: self.runner_id,
                                       player_name: self.runner_name.clone(),
+                                      item_damage: None
                                   }],
                                   self.free_refill.as_ref()
                                       .map(core::slice::from_ref)
@@ -84,9 +85,10 @@ impl Event for StolenBase {
                 if self.to_base == Base::Fourth {
                     extrapolated.reverse(old_game, new_game);
                     // what the hell is this formatting. the auto formatter insists on it
-                    GameUpdate::reverse_score(old_game, new_game, &[ScoringPlayer {
+                    GameUpdate::reverse_score(old_game, new_game, &[ ScoringPlayer {
                         player_id: self.runner_id,
                         player_name: self.runner_name.clone(),
+                        item_damage: None,
                     }],
                                               self.free_refill.as_ref()
                                                   .map(core::slice::from_ref)

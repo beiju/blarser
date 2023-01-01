@@ -2,8 +2,7 @@ use std::fmt::{Display, Formatter};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::entity::AnyEntity;
-use crate::events::{AnyExtrapolated, Effect, Event, ord_by_time};
+use crate::events::{AnyEffect, Event, ord_by_time};
 use crate::ingest::StateGraph;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -28,16 +27,8 @@ impl Event for Start {
         self.time
     }
 
-    fn effects(&self, _: &StateGraph) -> Vec<Effect> {
+    fn into_effects(self, _: &StateGraph) -> Vec<AnyEffect> {
         Vec::new()
-    }
-
-    fn forward(&self, _: &AnyEntity, _: &AnyExtrapolated) -> AnyEntity {
-        panic!("Cannot re-apply a Start event");
-    }
-
-    fn reverse(&self, old_parent: &AnyEntity, extrapolated: &mut AnyExtrapolated, new_parent: &mut AnyEntity) {
-        todo!()
     }
 }
 

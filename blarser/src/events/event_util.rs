@@ -1,4 +1,3 @@
-use log::info;
 use uuid::Uuid;
 use crate::events::Effect;
 use crate::events::effects::GamePlayerExtrapolated;
@@ -34,26 +33,26 @@ pub fn get_displayed_mod_excluding(state: &StateGraph, player_id: Uuid, mods_to_
     })
 }
 
-fn game_effect_with_modified_batter(game_id: Uuid, state: &StateGraph, add: isize) -> Effect {
-    let (team_id, team_batter_count) = state.query_game_unique(game_id, |game| {
-        let team = game.team_at_bat();
-        (team.team, team.team_batter_count.expect("Team batter count must exist here"))
-    });
-    let batter_id = state.query_team_unique(team_id, |team| {
-        team.lineup[(team_batter_count as isize + add) as usize % team.lineup.len()]
-    });
-    let batter_mod = get_displayed_mod(state, batter_id, &BATTER_MOD_PRECEDENCE);
-
-    Effect::one_id_with(EntityType::Game, game_id, GamePlayerExtrapolated::new(batter_id, batter_mod))
-}
-
-pub(crate) fn game_effect_with_batter(game_id: Uuid, state: &StateGraph) -> Effect {
-    game_effect_with_modified_batter(game_id, state, 0)
-}
-
-pub(crate) fn game_effect_with_next_batter(game_id: Uuid, state: &StateGraph) -> Effect {
-    game_effect_with_modified_batter(game_id, state, 1)
-}
+// fn game_effect_with_modified_batter(game_id: Uuid, state: &StateGraph, add: isize) -> Effect {
+//     let (team_id, team_batter_count) = state.query_game_unique(game_id, |game| {
+//         let team = game.team_at_bat();
+//         (team.team, team.team_batter_count.expect("Team batter count must exist here"))
+//     });
+//     let batter_id = state.query_team_unique(team_id, |team| {
+//         team.lineup[(team_batter_count as isize + add) as usize % team.lineup.len()]
+//     });
+//     let batter_mod = get_displayed_mod(state, batter_id, &BATTER_MOD_PRECEDENCE);
+//
+//     Effect::one_id_with(EntityType::Game, game_id, GamePlayerExtrapolated::new(batter_id, batter_mod))
+// }
+//
+// pub(crate) fn game_effect_with_batter(game_id: Uuid, state: &StateGraph) -> Effect {
+//     game_effect_with_modified_batter(game_id, state, 0)
+// }
+//
+// pub(crate) fn game_effect_with_next_batter(game_id: Uuid, state: &StateGraph) -> Effect {
+//     game_effect_with_modified_batter(game_id, state, 1)
+// }
 
 
 pub(crate) fn new_runner_extrapolated(game_id: Uuid, state: &StateGraph) -> GamePlayerExtrapolated {

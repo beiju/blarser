@@ -356,7 +356,7 @@ impl<'conn> StateInterface<'conn> {
     //     let (new_versions, parents): (Vec<_>, Vec<_>) = successors.into_iter()
     //         .map(|((entity, event_aux_data, observations), parents)| {
     //             let entity_type = entity.name();
-    //             let new_version = with_any_entity!(entity, e => NewVersion {
+    //             let new_version = with_entity!(entity, e => NewVersion {
     //                 ingest_id: self.ingest_id,
     //                 entity_type,
     //                 entity_id: e.id(),

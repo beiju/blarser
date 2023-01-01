@@ -352,7 +352,7 @@ fn get_reachable_nodes(graph: &EntityStateGraph, mut stack: Vec<NodeIndex>) -> H
 
 // Within this function, the "old" and "new" prefixes refer to two parallel subtrees. "old" already
 // exists and "new" is being built
-fn ingest_changed_entity<EntityT, EventT>(
+fn ingest_changed_entity<EntityT>(
     graph: &mut EntityStateGraph,
     old_child_idx: NodeIndex,
     new_child_idx: NodeIndex,
@@ -363,22 +363,12 @@ fn ingest_changed_entity<EntityT, EventT>(
         AnyEntity: TryInto<EntityT>,
         <AnyEntity as TryInto<EntityT>>::Error: Debug,
         for<'a> &'a AnyEntityRaw: TryInto<&'a EntityT::Raw>,
-        for<'a> <&'a AnyEntityRaw as TryInto<&'a EntityT::Raw>>::Error: Debug,
-        EventT: Event,
-        for<'a> &'a AnyEvent: TryInto<&'a EventT>,
-        for<'a> <&'a AnyEvent as TryInto<&'a EventT>>::Error: Debug {
-    let event_arc = graph.get_version(old_child_idx)
-        .expect("Expected node index supplied to ingest_changed_event to be valid")
-        .event.clone();
-
-    let event: &EventT = event_arc.as_ref().try_into()
-        .expect("This coercion should always succeed");
-
+        for<'a> <&'a AnyEntityRaw as TryInto<&'a EntityT::Raw>>::Error: Debug {
     let mut all_parents_had_conflicts = true; // starts as vacuous truth
-    let mut version_conflicts = Vec::new();
+    // let mut version_conflicts = Vec::new();
     let mut parent_walker = graph.graph.parents(old_child_idx);
     while let Some((old_edge_idx, old_parent_idx)) = parent_walker.walk_next(&graph.graph) {
-        let old_extrapolated = graph.graph.edge_weight(old_edge_idx)
+        let old_effect = graph.graph.edge_weight(old_edge_idx)
             .expect("This should always be a valid edge index");
 
         let new_child_node = graph.get_version(new_child_idx)
@@ -387,83 +377,87 @@ fn ingest_changed_entity<EntityT, EventT>(
         let old_parent_node = graph.get_version(old_parent_idx)
             .expect("This should always be a valid edge index");
 
-        let mut new_extrapolated = old_extrapolated.clone();
+        let mut new_effect = old_effect.clone();
         let mut new_parent = new_child_node.entity.clone();
-        event.reverse(&old_parent_node.entity, &mut new_extrapolated, &mut new_parent);
-
-        { // Debug stuff
-            // Need to call get_version again because of lifetimes
-            let new_child = &graph.get_version(new_child_idx)
-                .expect("Come on I literally just added this node")
-                .entity;
-
-            let mut debug_graph = graph.clone();
-            debug_graph.add_edge(old_parent_idx, new_child_idx, new_extrapolated.clone());
-            debug_history.push(&(new_child.entity_type(), new_child.id()), DebugHistoryVersion {
-                event_human_name: format!("After adding parent {old_parent_idx:?} to {}", new_child.description()),
-                time: debug_time,
-                tree: debug_graph.get_debug_tree(),
-                queued_for_update: Some(queued_for_update.clone()),
-                currently_updating: Some(old_child_idx),
-                queued_for_delete: None,
-            });
-        }
-
-        // Never recurse past an observed node, but do use our reconstructed parent to check that
-        // this is working
-        let new_parent_idx = if let Some(obs) = &old_parent_node.observed {
-            info!("Parent has been observed; checking compatibility");
-            let raw: &EntityT::Raw = (&obs.entity_raw).try_into()
-                .expect("Mismatched entity types");
-            let mut new_parent: EntityT = new_parent.try_into()
-                .expect("I just added this one");
-            let conflicts = new_parent.observe(raw);
-            if conflicts.is_empty() {
-                all_parents_had_conflicts = false;
-                graph.add_edge(old_parent_idx, new_child_idx, new_extrapolated.clone());
-            } else {
-                error!("Parent was not reconstructed correctly. Conflicts: {:#?}", conflicts);
-                version_conflicts.push(conflicts);
-                todo!("Early exit")
-            }
-            old_parent_idx
-        } else {
-            info!("Parent has not been observed; propagating changes");
-            all_parents_had_conflicts = false;
-            if &old_parent_node.entity != &new_parent {
-                info!("Saving changes and recursing");
-                // Then a change was made and we need to save it to the graph and then recurse
-                let new_parent_idx = graph.add_child_disconnected(new_parent.into(), old_parent_node.event.clone(), AddedReason::RefinedFromObservation);
-                graph.add_edge(new_parent_idx, new_child_idx, new_extrapolated.clone());
-                // Recurse with the different event type
-                let child_event_arc = &graph.get_version(old_parent_idx)
-                    .expect("Expected node index supplied to ingest_changed_event to be valid")
-                    .event;
-                with_any_event!(child_event_arc.as_ref(), |_: EventT| {
-                    ingest_changed_entity::<EntityT, EventT>(graph, old_parent_idx, new_parent_idx, debug_history, queued_for_update, debug_time)
-                });
-
-                new_parent_idx
-            } else {
-                info!("No changes to save");
-                graph.add_edge(old_parent_idx, new_child_idx, new_extrapolated.clone());
-                old_parent_idx
-            }
-        };
-
-        let new_parent_node = graph.get_version(new_parent_idx)
-            .expect("This should always be a valid node index");
-        let new_child_node = &graph.get_version(new_child_idx)
-            .expect("This should always be a valid node index");
-
-        // Test reconstructing child from parent, now that parent should be appropriately modified
-        assert_eq!(&event.forward(&new_parent_node.entity, &new_extrapolated), &new_child_node.entity);
+        todo!();
+        // event.reverse(&old_parent_node.entity, &mut new_extrapolated, &mut new_parent);
+        //
+        // { // Debug stuff
+        //     // Need to call get_version again because of lifetimes
+        //     let new_child = &graph.get_version(new_child_idx)
+        //         .expect("Come on I literally just added this node")
+        //         .entity;
+        //
+        //     let mut debug_graph = graph.clone();
+        //     debug_graph.add_edge(old_parent_idx, new_child_idx, new_effect);
+        //     debug_history.push(&(new_child.entity_type(), new_child.id()), DebugHistoryVersion {
+        //         event_human_name: format!("After adding parent {old_parent_idx:?} to {}", new_child.description()),
+        //         time: debug_time,
+        //         tree: debug_graph.get_debug_tree(),
+        //         queued_for_update: Some(queued_for_update.clone()),
+        //         currently_updating: Some(old_child_idx),
+        //         queued_for_delete: None,
+        //     });
+        // }
+        //
+        // // Never recurse past an observed node, but do use our reconstructed parent to check that
+        // // this is working
+        // let new_parent_idx = if let Some(obs) = &old_parent_node.observed {
+        //     info!("Parent has been observed; checking compatibility");
+        //     let raw: &EntityT::Raw = (&obs.entity_raw).try_into()
+        //         .expect("Mismatched entity types");
+        //     let mut new_parent: EntityT = new_parent.try_into()
+        //         .expect("I just added this one");
+        //     let conflicts = new_parent.observe(raw);
+        //     if conflicts.is_empty() {
+        //         all_parents_had_conflicts = false;
+        //         graph.add_edge(old_parent_idx, new_child_idx, new_effect);
+        //     } else {
+        //         error!("Parent was not reconstructed correctly. Conflicts: {:#?}", conflicts);
+        //         version_conflicts.push(conflicts);
+        //         todo!("Early exit")
+        //     }
+        //     old_parent_idx
+        // } else {
+        //     info!("Parent has not been observed; propagating changes");
+        //     all_parents_had_conflicts = false;
+        //     if &old_parent_node.entity != &new_parent {
+        //         info!("Saving changes and recursing");
+        //         // Then a change was made and we need to save it to the graph and then recurse
+        //         let new_parent_idx = graph.add_child_disconnected(new_parent.into(), todo!(), AddedReason::RefinedFromObservation);
+        //         graph.add_edge(new_parent_idx, new_child_idx, new_effect);
+        //         // Recurse with the different event type
+        //         // let child_event_arc = &graph.get_version(old_parent_idx)
+        //         //     .expect("Expected node index supplied to ingest_changed_event to be valid")
+        //         //     .event;
+        //         todo!();
+        //         // with_any_event!(child_event_arc.as_ref(), |_: EventT| {
+        //         //     ingest_changed_entity::<EntityT, EventT>(graph, old_parent_idx, new_parent_idx, debug_history, queued_for_update, debug_time)
+        //         // });
+        //
+        //         new_parent_idx
+        //     } else {
+        //         info!("No changes to save");
+        //         graph.add_edge(old_parent_idx, new_child_idx, new_effect);
+        //         old_parent_idx
+        //     }
+        // };
+        //
+        // let new_parent_node = graph.get_version(new_parent_idx)
+        //     .expect("This should always be a valid node index");
+        // let new_child_node = &graph.get_version(new_child_idx)
+        //     .expect("This should always be a valid node index");
+        //
+        // // Test reconstructing child from parent, now that parent should be appropriately modified
+        // todo!();
+        // // assert_eq!(&event.forward(&new_parent_node.entity, &new_extrapolated), &new_child_node.entity);
     }
 
-    if all_parents_had_conflicts {
-        // oh no!
-        panic!("All parents had conflicts: \n{version_conflicts:?}");
-    }
+    todo!("just uncomment this")
+    // if all_parents_had_conflicts {
+    //     // oh no!
+    //     panic!("All parents had conflicts: \n{version_conflicts:?}");
+    // }
 }
 
 fn ingest_for_version<EntityT>(
@@ -491,33 +485,6 @@ fn ingest_for_version<EntityT>(
         queued_for_delete: None,
     });
 
-    let event = &graph.get_version(entity_idx)
-        .expect("Expected node index supplied to ingest_for_version to be valid")
-        .event;
-    with_any_event!(event.as_ref(), |_: EventT| {
-        ingest_for_event::<EntityT, EventT>(graph, entity_idx, obs, debug_history, queued_for_update, debug_time)
-    })
-}
-
-fn ingest_for_event<EntityT, EventT>(
-    graph: &mut EntityStateGraph,
-    entity_idx: NodeIndex,
-    obs: Arc<Observation>,
-    debug_history: &mut GraphDebugHistory,
-    queued_for_update: &HashSet<NodeIndex>,
-    debug_time: DateTime<Utc>,
-) -> Result<Vec<NodeIndex>, Vec<Conflict>>
-// Disgustang
-    where EntityT: Entity + PartialInformationCompare + Into<AnyEntity> + 'static,
-          AnyEntity: TryInto<EntityT>,
-          <AnyEntity as TryInto<EntityT>>::Error: Debug,
-          for<'a> &'a AnyEntity: TryInto<&'a EntityT>,
-          for<'a> <&'a AnyEntity as TryInto<&'a EntityT>>::Error: Debug,
-          for<'a> &'a AnyEntityRaw: TryInto<&'a EntityT::Raw>,
-          for<'a> <&'a AnyEntityRaw as TryInto<&'a EntityT::Raw>>::Error: Debug,
-          EventT: Event,
-          for<'a> &'a AnyEvent: TryInto<&'a EventT>,
-          for<'a> <&'a AnyEvent as TryInto<&'a EventT>>::Error: Debug {
     let node = graph.get_version(entity_idx)
         .expect("Expected node index supplied to ingest_for_event to be valid");
 
@@ -538,11 +505,11 @@ fn ingest_for_event<EntityT, EventT>(
     let new_entity_idx = if entity_was_changed {
         let new_entity_idx = graph.add_observed_child_disconnected(
             new_entity.into(),
-            node.event.clone(),
+            node.valid_from,
             AddedReason::RefinedFromObservation,
             obs.clone(),
         );
-        ingest_changed_entity::<EntityT, _>(
+        ingest_changed_entity::<EntityT>(
             graph,
             entity_idx,
             new_entity_idx,
@@ -587,10 +554,10 @@ fn ingest_for_event<EntityT, EventT>(
                     .expect("Must exist");
                 let old_child_node = graph.graph.node_weight(old_child_idx)
                     .expect("Must exist");
-                let new_child_unobserved = old_child_node.event.forward(&old_entity_node.entity, &extrapolated);
-                info!("Applying Event: {:?}", old_child_node.event);
+                let new_child_unobserved: AnyEntity = todo!(); // old_child_node.event.forward(&old_entity_node.entity, &extrapolated);
+                info!("Applying effect: {:?}", todo!("old_child_node.event"));
                 // for debugging, placed here because of borrow rules
-                let event_description = old_child_node.event.to_string();
+                let event_description: String = todo!("old_child_node.event.to_string()");
 
                 // Unfortunately, observations are not totally ordered, so sometimes we need to
                 // reapply an observation in the forward pass
@@ -618,7 +585,7 @@ fn ingest_for_event<EntityT, EventT>(
 
                 let (_, new_child_idx) = graph.graph.add_child(new_entity_idx, extrapolated.clone(), StateGraphNode {
                     entity: new_child,
-                    event: old_child_node.event.clone(),
+                    valid_from: todo!(),
                     observed,
                     added_reason: AddedReason::DescendantOfObservedNode,
                 });

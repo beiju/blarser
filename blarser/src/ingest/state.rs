@@ -10,8 +10,7 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use crate::entity::{self, AnyEntity, Entity};
-use crate::events::{Effect, AnyEvent, EarlseasonStart, Event, AnyExtrapolated, Start, with_any_event};
-use crate::ingest::error::IngestResult;
+use crate::events::{AnyEvent, Start, AnyEffect, EffectVariant, AnyEffectVariant, with_effect_variant};
 use crate::ingest::{GraphDebugHistory, Observation};
 use crate::ingest::task::{DebugHistoryItem, DebugHistoryVersion, DebugTree, DebugTreeNode};
 use crate::state::EntityType;
@@ -27,7 +26,7 @@ pub enum AddedReason {
 #[derive(Debug, Clone)]
 pub struct StateGraphNode {
     pub entity: AnyEntity,
-    pub event: Arc<AnyEvent>,
+    pub valid_from: DateTime<Utc>,
     pub observed: Option<Arc<Observation>>,
     // For debugging mostly
     pub added_reason: AddedReason,
@@ -36,20 +35,20 @@ pub struct StateGraphNode {
 impl StateGraphNode {
     pub fn new_observed(
         entity: AnyEntity,
-        event: Arc<AnyEvent>,
+        valid_from: DateTime<Utc>,
         observation: Arc<Observation>,
         added_reason: AddedReason,
     ) -> Self {
         Self {
             entity,
-            event,
+            valid_from,
             observed: Some(observation),
             added_reason,
         }
     }
 }
 
-pub type StateGraphEdge = AnyExtrapolated;
+pub type StateGraphEdge = AnyEffectVariant;
 
 #[derive(Default, Clone)]
 pub struct EntityStateGraph {
@@ -100,28 +99,28 @@ impl EntityStateGraph {
     pub fn add_child_version(&mut self,
                              parent_idx: NodeIndex,
                              new_entity: AnyEntity,
-                             event: Arc<AnyEvent>,
-                             extrapolated: AnyExtrapolated,
+                             valid_from: DateTime<Utc>,
+                             effect: AnyEffectVariant,
                              added_reason: AddedReason,
     ) -> NodeIndex {
         let child_idx = self.graph.add_node(StateGraphNode {
             entity: new_entity,
-            event,
+            valid_from,
             observed: None,
             added_reason,
         });
-        self.graph.add_edge(parent_idx, child_idx, extrapolated.clone()).unwrap();
+        self.graph.add_edge(parent_idx, child_idx, effect).unwrap();
         child_idx
     }
 
     pub fn add_child_disconnected(&mut self,
                                   new_entity: AnyEntity,
-                                  event: Arc<AnyEvent>,
+                                  valid_from: DateTime<Utc>,
                                   added_reason: AddedReason,
     ) -> NodeIndex {
         self.graph.add_node(StateGraphNode {
             entity: new_entity,
-            event,
+            valid_from,
             observed: None,
             added_reason,
         })
@@ -130,19 +129,19 @@ impl EntityStateGraph {
 
     pub fn add_observed_child_disconnected(&mut self,
                                            new_entity: AnyEntity,
-                                           event: Arc<AnyEvent>,
+                                           valid_from: DateTime<Utc>,
                                            added_reason: AddedReason,
                                            obs: Arc<Observation>,
     ) -> NodeIndex {
         self.graph.add_node(StateGraphNode {
             entity: new_entity,
-            event,
+            valid_from,
             observed: Some(obs),
             added_reason,
         })
     }
 
-    pub fn add_edge(&mut self, from: NodeIndex, to: NodeIndex, weight: AnyExtrapolated) -> EdgeIndex {
+    pub fn add_edge(&mut self, from: NodeIndex, to: NodeIndex, weight: StateGraphEdge) -> EdgeIndex {
         self.graph.add_edge(from, to, weight)
             .expect("Adding edge would cycle")
     }
@@ -166,21 +165,20 @@ impl EntityStateGraph {
             // Get time span of this node
             let node = self.graph.node_weight(node_idx)
                 .expect("Stack contained a node that was not in the graph");
-            let earliest_node_time: DateTime<Utc> = node.event.time();
+            let earliest_node_time: DateTime<Utc> = node.valid_from;
             let mut latest_node_time = None;
             let mut child_walker = self.graph.children(node_idx);
             while let Some((_, child_idx)) = child_walker.walk_next(&self.graph) {
-                let parent_event = &self.graph.node_weight(child_idx)
-                    .expect("Graph gave me an invalid index")
-                    .event;
-                if let Some(prev_time) = latest_node_time.replace(parent_event.time()) {
-                    assert_eq!(prev_time, parent_event.time(),
+                let child_node = self.graph.node_weight(child_idx)
+                    .expect("Graph gave me an invalid index");
+                if let Some(prev_time) = latest_node_time.replace(child_node.valid_from) {
+                    assert_eq!(prev_time, child_node.valid_from,
                                "All children of the same node must have the same time");
                 }
             }
             // If this node's time span ends before the observation's time span begins, we can stop
             // traversing its branch and not add it to outputs
-            if latest_node_time.map_or(false, |t| t < earliest) { continue; }
+            if latest_node_time.map_or(false, |t: DateTime<Utc>| t < earliest) { continue; }
             // I thought you could stop walking if you hit an already-observed node but, alas, nope
             let mut parent_walker = self.graph.parents(node_idx);
             while let Some((_, parent_idx)) = parent_walker.walk_next(&self.graph) {
@@ -195,26 +193,30 @@ impl EntityStateGraph {
         outputs
     }
 
-    pub fn apply_event(&mut self, event: Arc<AnyEvent>, extrapolated: &AnyExtrapolated) {
+    pub fn apply_effect(&mut self, effect: &AnyEffect) {
         let new_leafs = self.leafs.clone().into_iter()
             .map(|entity_idx| {
-                self.apply_event_to_entity(event.clone(), entity_idx, extrapolated)
+                self.apply_effect_to_entity(effect.variant(), entity_idx)
             })
             .collect();
 
         self.leafs = new_leafs;
     }
 
-    fn apply_event_to_entity(&mut self, event: Arc<AnyEvent>, entity_idx: NodeIndex, extrapolated: &AnyExtrapolated) -> NodeIndex {
-        let entity = &self.get_version(entity_idx)
-            .expect("Indices in State.leafs should always be valid")
-            .entity;
-        
-        let new_entity = with_any_event!(event.as_ref(), |e| { 
-            e.forward(entity, extrapolated) 
+    fn apply_effect_to_entity(&mut self, effect: AnyEffectVariant, entity_idx: NodeIndex) -> NodeIndex {
+        let entity_node = &self.get_version(entity_idx)
+            .expect("Indices in State.leafs should always be valid");
+
+
+        let new_entity = with_effect_variant!(&effect, |effect: EffectT| {
+            let entity: &<EffectT as EffectVariant>::EntityType = (&entity_node.entity).try_into()
+                .expect("Tried to apply effect to the wrong entity");
+            let mut new_entity = entity.clone();
+            effect.forward(&mut new_entity);
+            new_entity.into()
         });
 
-        self.add_child_version(entity_idx, new_entity, event, extrapolated.clone(), AddedReason::NewFromEvent)
+        self.add_child_version(entity_idx, new_entity, entity_node.valid_from, effect, AddedReason::NewFromEvent)
     }
 
     pub fn get_debug_tree(&self) -> DebugTree {
@@ -241,9 +243,9 @@ impl EntityStateGraph {
             for &idx in &next_generation {
                 let node = self.graph.node_weight(idx).unwrap();
                 data.insert(idx, DebugTreeNode {
-                    description: node.event.to_string(),
+                    description: node.entity.description(),
                     is_ambiguous: node.entity.is_ambiguous(),
-                    created_at: node.event.time(),
+                    created_at: node.valid_from,
                     observed_at: node.observed.as_ref().map(|obs| obs.perceived_at),
                     added_reason: node.added_reason,
                     json: node.entity.to_json(),
@@ -297,7 +299,7 @@ impl StateGraph {
             let entity_type = obs.entity_type;
             let entity_id = obs.entity_id;
             let new_graph = EntityStateGraph::new(StateGraphNode::new_observed(
-                entity, start_event.clone(), Arc::new(obs), AddedReason::Start));
+                entity, start_time, Arc::new(obs), AddedReason::Start));
 
             // Debug
             let generations = vec![new_graph.roots().iter().cloned().collect()];
@@ -366,10 +368,10 @@ impl StateGraph {
         // }
     }
 
-    pub fn ids_for(&self, effect: &Effect) -> Vec<Uuid> {
-        if let Some(id) = effect.id {
+    pub fn ids_for(&self, effect: &AnyEffect) -> Vec<Uuid> {
+        if let Some(id) = effect.entity_id() {
             vec![id]
-        } else if let Some(d) = self.ids_for_type.get(&effect.ty) {
+        } else if let Some(d) = self.ids_for_type.get(&effect.entity_type()) {
             d.clone()
         } else {
             Vec::new()

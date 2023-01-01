@@ -48,7 +48,7 @@ impl Display for WrongEntityError {
 polymorphic_enum! {
     #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, From, TryInto, Unwrap)]
     #[try_into(owned, ref, ref_mut)]
-    pub AnyEntity: with_any_entity {
+    pub AnyEntity: with_entity {
         Sim(Sim),
         Player(Player),
         Team(Team),
@@ -58,24 +58,25 @@ polymorphic_enum! {
     }
 }
 
+pub(crate) use with_entity;
 
 impl Display for AnyEntity {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        with_any_entity!(self, |e| { e.fmt(f) })
+        with_entity!(self, |e| { e.fmt(f) })
     }
 }
 
 impl Entity for AnyEntity {
     fn entity_type(&self) -> EntityType {
-        with_any_entity!(&self, |e| { e.entity_type() })
+        with_entity!(&self, |e| { e.entity_type() })
     }
 
     fn id(&self) -> Uuid {
-        with_any_entity!(&self, |e| { e.id() })
+        with_entity!(&self, |e| { e.id() })
     }
 
     fn description(&self) -> String {
-        with_any_entity!(&self, |e| { e.description() })
+        with_entity!(&self, |e| { e.description() })
     }
 }
 
@@ -130,11 +131,11 @@ impl AnyEntity {
     }
 
     pub fn to_json(&self) -> serde_json::Value {
-        with_any_entity!(&self, |e| { serde_json::to_value(e).unwrap() })
+        with_entity!(&self, |e| { serde_json::to_value(e).unwrap() })
     }
 
     pub fn is_ambiguous(&self) -> bool {
-        with_any_entity!(&self, |e| { e.is_ambiguous() })
+        with_entity!(&self, |e| { e.is_ambiguous() })
     }
 
     impl_as_ref!(Sim, AnyEntity::Sim, as_sim, as_sim_mut);

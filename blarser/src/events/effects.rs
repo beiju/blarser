@@ -1,14 +1,14 @@
 use std::collections::HashMap;
-use std::fmt::Debug;
+use std::fmt::{Debug, Display, Formatter};
 use std::iter;
 use as_any::AsAny;
 use derive_more::{From, TryInto};
-use fed::{FreeRefill, ScoreInfo};
+use fed::FreeRefill;
 use itertools::zip_eq;
 use uuid::Uuid;
 use partial_information::MaybeKnown;
 use partial_information_derive::PartialInformationCompare;
-use crate::entity::Game;
+use crate::entity::{AnyEntity, Entity, Game};
 use crate::events::event_util::{get_displayed_mod_excluding, PITCHER_MOD_PRECEDENCE, RUNNER_MOD_PRECEDENCE};
 use crate::ingest::StateGraph;
 use crate::polymorphic_enum::polymorphic_enum;
@@ -203,38 +203,67 @@ polymorphic_enum! {
     }
 }
 
-#[derive(Debug)]
-pub struct Effect {
-    pub ty: EntityType,
-    pub id: Option<Uuid>,
-    pub extrapolated: AnyExtrapolated,
+pub trait Effect {
+    type Variant: Into<AnyEffectVariant>;
+
+    fn entity_type(&self) -> EntityType;
+    fn entity_id(&self) -> Option<Uuid>;
+
+    fn variant(&self) -> Self::Variant;
 }
 
-impl Effect {
-    pub fn one_id(ty: EntityType, id: Uuid) -> Self {
-        Self::one_id_with(ty, id, NullExtrapolated::default())
+polymorphic_enum! {
+    #[derive(From, TryInto, Clone, Debug)]
+    #[try_into(owned, ref, ref_mut)]
+    pub AnyEffect: with_effect {
+        EarlseasonStart(crate::events::EarlseasonStartEffect),
+        LetsGo(crate::events::LetsGoEffect),
     }
+}
 
-    pub fn all_ids(ty: EntityType) -> Self {
-        Self::all_ids_with(ty, NullExtrapolated::default())
+pub(crate) use with_effect;
+
+impl AnyEffect {
+    pub fn entity_type(&self) -> EntityType {
+        with_effect!(self, |e| { e.entity_type() })
     }
-
-    pub fn null_id(ty: EntityType) -> Self {
-        Self::one_id(ty, Uuid::nil())
+    pub fn entity_id(&self) -> Option<Uuid> {
+        with_effect!(self, |e| { e.entity_id() })
     }
-
-    pub fn one_id_with<T>(ty: EntityType, id: Uuid, extrapolated: T) -> Self
-        where T: Extrapolated + Send + Sync, AnyExtrapolated: From<T> {
-        Self { ty, id: Some(id), extrapolated: AnyExtrapolated::from(extrapolated) }
+    
+    pub fn variant(&self) -> AnyEffectVariant {
+        with_effect!(self, |e| { e.variant().into() })
     }
+}
 
-    pub fn all_ids_with<T>(ty: EntityType, extrapolated: T) -> Self
-        where T: Extrapolated + Send + Sync, AnyExtrapolated: From<T> {
-        Self { ty, id: None, extrapolated: AnyExtrapolated::from(extrapolated) }
+impl Display for AnyEffect {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        with_effect!(self, |e| { e.fmt(f) })
     }
+}
 
-    pub fn null_id_with<T>(ty: EntityType, extrapolated: T) -> Self
-        where T: Extrapolated + Send + Sync, AnyExtrapolated: From<T> {
-        Self::one_id_with(ty, Uuid::nil(), extrapolated)
+
+pub trait EffectVariant {
+    type EntityType: Entity;
+
+    fn forward(&self, entity: &mut Self::EntityType);
+    fn reverse(&mut self, old_entity: &Self::EntityType, new_entity: &mut Self::EntityType);
+}
+
+polymorphic_enum! {
+    #[derive(From, TryInto, Clone, Debug)]
+    #[try_into(owned, ref, ref_mut)]
+    pub AnyEffectVariant: with_effect_variant {
+        EarlseasonStart(crate::events::EarlseasonStartEffectVariant),
+        LetsGo(crate::events::LetsGoEffectVariant),
+    }
+}
+
+pub(crate) use with_effect_variant;
+use crate::entity;
+
+impl Display for AnyEffectVariant {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        with_effect_variant!(self, |e| { e.fmt(f) })
     }
 }
