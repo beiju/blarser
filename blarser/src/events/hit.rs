@@ -8,7 +8,7 @@ use uuid::Uuid;
 use partial_information::{MaybeKnown, PartialInformationCompare, RangeInclusive};
 
 use crate::entity::{AnyEntity, Base, Game, Player};
-use crate::events::{AnyExtrapolated, Effect, Event, ord_by_time};
+use crate::events::{AnyExtrapolated, Effect, Event};
 use crate::events::effects::{AdvancementExtrapolated, DisplayedModChangeExtrapolated, HitExtrapolated, NullExtrapolated};
 use crate::events::event_util::{get_displayed_mod_excluding, new_runner_extrapolated, PITCHER_MOD_PRECEDENCE, RUNNER_MOD_PRECEDENCE};
 use crate::events::game_update::GameUpdate;
@@ -136,7 +136,6 @@ impl Display for Hit {
     }
 }
 
-ord_by_time!(Hit);
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct HomeRun {

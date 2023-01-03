@@ -38,7 +38,7 @@ pub use fed_event::*;
 // pub use hit::{Hit, HomeRun};
 // pub use stolen_base::{StolenBase, CaughtStealing};
 // pub use walk::Walk;
-pub use game_upcoming::GameUpcoming;
+pub use game_upcoming::{GameUpcoming, GameUpcomingEffect, GameUpcomingEffectVariant};
 // pub use inning_end::InningEnd;
 
 use crate::polymorphic_enum::polymorphic_enum;
@@ -49,7 +49,7 @@ use derive_more::{From, TryInto};
 
 use crate::ingest::StateGraph;
 
-pub trait Event: Serialize + for<'de> Deserialize<'de> + Ord {
+pub trait Event: Serialize + for<'de> Deserialize<'de> {
     fn time(&self) -> DateTime<Utc>;
 
     // "Predecessors" are events that occur immediately before this event occurs, but their timing
@@ -107,31 +107,3 @@ impl AnyEvent {
         with_any_event!(self, |e| { e.into_effects(state) })
     }
 }
-
-macro_rules! ord_by_time {
-    ($tn:ty) => {
-        impl Eq for $tn {}
-
-        impl PartialEq<Self> for $tn {
-            fn eq(&self, other: &Self) -> bool {
-                self.time().eq(&other.time())
-            }
-        }
-
-        impl PartialOrd<Self> for $tn {
-            fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-                self.time().partial_cmp(&other.time())
-            }
-        }
-
-        impl Ord for $tn {
-            fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-                self.time().cmp(&other.time())
-            }
-        }
-    }
-}
-
-ord_by_time!(AnyEvent);
-
-pub(crate) use ord_by_time;

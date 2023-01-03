@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::entity::{AnyEntity, Game, Team};
-use crate::events::{AnyExtrapolated, Effect, Event, ord_by_time};
+use crate::events::{AnyExtrapolated, Effect, Event};
 use crate::events::effects::{NullExtrapolated, PitchersExtrapolated};
 use crate::events::game_update::GameUpdate;
 use crate::ingest::StateGraph;

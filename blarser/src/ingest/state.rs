@@ -193,17 +193,17 @@ impl EntityStateGraph {
         outputs
     }
 
-    pub fn apply_effect(&mut self, effect: &AnyEffect) {
+    pub fn apply_effect(&mut self, effect: &AnyEffect, event_time: DateTime<Utc>) {
         let new_leafs = self.leafs.clone().into_iter()
             .map(|entity_idx| {
-                self.apply_effect_to_entity(effect.variant(), entity_idx)
+                self.apply_effect_to_entity(effect.variant(), entity_idx, event_time)
             })
             .collect();
 
         self.leafs = new_leafs;
     }
 
-    fn apply_effect_to_entity(&mut self, effect: AnyEffectVariant, entity_idx: NodeIndex) -> NodeIndex {
+    fn apply_effect_to_entity(&mut self, effect: AnyEffectVariant, entity_idx: NodeIndex, event_time: DateTime<Utc>) -> NodeIndex {
         let entity_node = &self.get_version(entity_idx)
             .expect("Indices in State.leafs should always be valid");
 
@@ -216,7 +216,7 @@ impl EntityStateGraph {
             new_entity.into()
         });
 
-        self.add_child_version(entity_idx, new_entity, entity_node.valid_from, effect, AddedReason::NewFromEvent)
+        self.add_child_version(entity_idx, new_entity, event_time, effect, AddedReason::NewFromEvent)
     }
 
     pub fn get_debug_tree(&self) -> DebugTree {

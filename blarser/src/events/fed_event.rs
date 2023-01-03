@@ -1,12 +1,14 @@
+use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use enum_flatten::EnumFlatten;
-use fed::{FedEvent as BaseFedEvent, FedEventData, FedEventLetsGo, FedEventFlat};
+use fed::{FedEvent as BaseFedEvent, FedEventData, FedEventFlat, FedEventLetsGo, FedEventPlayBall};
 use uuid::Uuid;
-use crate::entity::Game;
-use crate::events::{AnyEffect, AnyEvent, Effect, EffectVariant, Event, ord_by_time};
+use partial_information::MaybeKnown;
+use crate::entity::{Game, Team};
+use crate::events::{AnyEffect, AnyEvent, Effect, EffectVariant, Event};
 use crate::events::EarlseasonStart;
 use crate::ingest::StateGraph;
 use crate::state::EntityType;
@@ -14,7 +16,6 @@ use crate::state::EntityType;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct FedEvent(BaseFedEvent);
-ord_by_time!(FedEvent);
 
 impl FedEvent {
     pub fn new(event: BaseFedEvent) -> Self {
@@ -41,139 +42,21 @@ impl Event for FedEvent {
     }
 
     fn into_effects(self, _: &StateGraph) -> Vec<AnyEffect> {
+        // Perhaps one day I will remove the clone requirement here but this is not that day
+        let last_update = self.0.clone().last_update();
         // IDE keeps trying to use Iterator::flatten so I'm using UFCS to force it to get the right one
-       match EnumFlatten::flatten(self.0) {
+        match EnumFlatten::flatten(self.0) {
             FedEventFlat::BeingSpeech(_) => {
                 // BeingSpeech doesn't affect any entities I'm tracking
                 Vec::new()
             }
             FedEventFlat::LetsGo(event) => {
-                vec![LetsGoEffect::new(event).into()]
+                vec![LetsGoEffect::new(event, last_update).into()]
             }
-            FedEventFlat::PlayBall(_) => { todo!() }
-            FedEventFlat::HalfInningStart(_) => { todo!() }
-            FedEventFlat::BatterUp(_) => { todo!() }
-            FedEventFlat::SuperyummyGameStart(_) => { todo!() }
-            FedEventFlat::EchoedSuperyummyGameStart(_) => { todo!() }
-            FedEventFlat::Ball(_) => { todo!() }
-            FedEventFlat::FoulBall(_) => { todo!() }
-            FedEventFlat::StrikeSwinging(_) => { todo!() }
-            FedEventFlat::StrikeLooking(_) => { todo!() }
-            FedEventFlat::StrikeFlinching(_) => { todo!() }
-            FedEventFlat::Flyout(_) => { todo!() }
-            FedEventFlat::GroundOut(_) => { todo!() }
-            FedEventFlat::FieldersChoice(_) => { todo!() }
-            FedEventFlat::DoublePlay(_) => { todo!() }
-            FedEventFlat::Hit(_) => { todo!() }
-            FedEventFlat::HomeRun(_) => { todo!() }
-            FedEventFlat::StolenBase(_) => { todo!() }
-            FedEventFlat::CaughtStealing(_) => { todo!() }
-            FedEventFlat::StrikeoutSwinging(_) => { todo!() }
-            FedEventFlat::StrikeoutLooking(_) => { todo!() }
-            FedEventFlat::Walk(_) => { todo!() }
-            FedEventFlat::InningEnd(_) => { todo!() }
-            FedEventFlat::CharmStrikeout(_) => { todo!() }
-            FedEventFlat::StrikeZapped(_) => { todo!() }
-            FedEventFlat::PeanutFlavorText(_) => { todo!() }
-            FedEventFlat::GameEnd(_) => { todo!() }
-            FedEventFlat::MildPitch(_) => { todo!() }
-            FedEventFlat::MildPitchWalk(_) => { todo!() }
-            FedEventFlat::CoffeeBean(_) => { todo!() }
-            FedEventFlat::BecameMagmatic(_) => { todo!() }
-            FedEventFlat::Blooddrain(_) => { todo!() }
-            FedEventFlat::SpecialBlooddrain(_) => { todo!() }
-            FedEventFlat::PlayerModExpires(_) => { todo!() }
-            FedEventFlat::TeamModExpires(_) => { todo!() }
-            FedEventFlat::BirdsCircle(_) => { todo!() }
-            FedEventFlat::AmbushedByCrows(_) => { todo!() }
-            FedEventFlat::Sun2SetWin(_) => { todo!() }
-            FedEventFlat::BlackHoleSwallowedWin(_) => { todo!() }
-            FedEventFlat::Sun2(_) => { todo!() }
-            FedEventFlat::BlackHole(_) => { todo!() }
-            FedEventFlat::TeamDidShame(_) => { todo!() }
-            FedEventFlat::TeamWasShamed(_) => { todo!() }
-            FedEventFlat::CharmWalk(_) => { todo!() }
-            FedEventFlat::GainFreeRefill(_) => { todo!() }
-            FedEventFlat::AllergicReaction(_) => { todo!() }
-            FedEventFlat::PerkUp(_) => { todo!() }
-            FedEventFlat::Feedback(_) => { todo!() }
-            FedEventFlat::BestowReverberating(_) => { todo!() }
-            FedEventFlat::Reverb(_) => { todo!() }
-            FedEventFlat::TarotReading(_) => { todo!() }
-            FedEventFlat::TarotReadingAddedOrRemovedMod(_) => { todo!() }
-            FedEventFlat::TeamEnteredPartyTime(_) => { todo!() }
-            FedEventFlat::BecomeTripleThreat(_) => { todo!() }
-            FedEventFlat::UnderOver(_) => { todo!() }
-            FedEventFlat::OverUnder(_) => { todo!() }
-            FedEventFlat::TasteTheInfinite(_) => { todo!() }
-            FedEventFlat::BatterSkipped(_) => { todo!() }
-            FedEventFlat::FeedbackBlocked(_) => { todo!() }
-            FedEventFlat::FlagPlanted(_) => { todo!() }
-            FedEventFlat::EmergencyAlert(_) => { todo!() }
-            FedEventFlat::TeamJoinedILB(_) => { todo!() }
-            FedEventFlat::FloodingSwept(_) => { todo!() }
-            FedEventFlat::ReturnFromElsewhere(_) => { todo!() }
-            FedEventFlat::Incineration(_) => { todo!() }
-            FedEventFlat::PitcherChange(_) => { todo!() }
-            FedEventFlat::Party(_) => { todo!() }
-            FedEventFlat::PlayerHatched(_) => { todo!() }
-            FedEventFlat::PostseasonBirth(_) => { todo!() }
-            FedEventFlat::FinalStandings(_) => { todo!() }
-            FedEventFlat::TeamLeftPartyTimeForPostseason(_) => { todo!() }
-            FedEventFlat::EarnedPostseasonSlot(_) => { todo!() }
-            FedEventFlat::PostseasonAdvance(_) => { todo!() }
-            FedEventFlat::PostseasonEliminated(_) => { todo!() }
-            FedEventFlat::PlayerBoosted(_) => { todo!() }
-            FedEventFlat::TeamWonInternetSeries(_) => { todo!() }
-            FedEventFlat::BottomDwellers(_) => { todo!() }
-            FedEventFlat::WillReceived(_) => { todo!() }
-            FedEventFlat::BlessingWon(_) => { todo!() }
-            FedEventFlat::EarlbirdsAdded(_) => { todo!() }
-            FedEventFlat::DecreePassed(_) => { todo!() }
-            FedEventFlat::PlayerJoinedILB(_) => { todo!() }
-            FedEventFlat::PlayerPermittedToStay(_) => { todo!() }
-            FedEventFlat::FireproofIncineration(_) => { todo!() }
-            FedEventFlat::LineupSorted(_) => { todo!() }
-            FedEventFlat::EarlbirdsRemoved(_) => { todo!() }
-            FedEventFlat::Undersea(_) => { todo!() }
-            FedEventFlat::RenovationBuilt(_) => { todo!() }
-            FedEventFlat::LateToThePartyAdded(_) => { todo!() }
-            FedEventFlat::PeanutMister(_) => { todo!() }
-            FedEventFlat::PlayerNamedMvp(_) => { todo!() }
-            FedEventFlat::LateToThePartyRemoved(_) => { todo!() }
-            FedEventFlat::BirdsUnshell(_) => { todo!() }
-            FedEventFlat::ReplaceReturnedPlayerFromShadows(_) => { todo!() }
-            FedEventFlat::PlayerCalledBackToHall(_) => { todo!() }
-            FedEventFlat::TeamUsedFreeWill(_) => { todo!() }
-            FedEventFlat::PlayerLostMod(_) => { todo!() }
-            FedEventFlat::InvestigationMessage(_) => { todo!() }
-            FedEventFlat::HighPressure(_) => { todo!() }
-            FedEventFlat::PlayerPulledThroughRift(_) => { todo!() }
-            FedEventFlat::PlayerLocalized(_) => { todo!() }
-            FedEventFlat::Echo(_) => { todo!() }
-            FedEventFlat::SolarPanelsAwait(_) => { todo!() }
-            FedEventFlat::EchoIntoStatic(_) => { todo!() }
-            FedEventFlat::Psychoacoustics(_) => { todo!() }
-            FedEventFlat::EchoReceiver(_) => { todo!() }
-            FedEventFlat::ConsumerAttack(_) => { todo!() }
-            FedEventFlat::TeamGainedFreeWill(_) => { todo!() }
-            FedEventFlat::Tidings(_) => { todo!() }
-            FedEventFlat::HomebodyGameStart(_) => { todo!() }
-            FedEventFlat::SalmonSwim(_) => { todo!() }
-            FedEventFlat::HitByPitch(_) => { todo!() }
-            FedEventFlat::SolarPanelsActivate(_) => { todo!() }
-            FedEventFlat::RunsOverflowing(_) => { todo!() }
-            FedEventFlat::Middling(_) => { todo!() }
-            FedEventFlat::EnterCrimeScene(_) => { todo!() }
-            FedEventFlat::ReturnFromInvestigation(_) => { todo!() }
-            FedEventFlat::InvestigationConcluded(_) => { todo!() }
-            FedEventFlat::GrindRail(_) => { todo!() }
-            FedEventFlat::EnterSecretBase(_) => { todo!() }
-            FedEventFlat::ExitSecretBase(_) => { todo!() }
-            FedEventFlat::EchoChamber(_) => { todo!() }
-            FedEventFlat::Roam(_) => { todo!() }
-            FedEventFlat::GlitterCrate(_) => { todo!() }
-            FedEventFlat::ModsFromAnotherModRemoved(_) => { todo!() }
+            FedEventFlat::PlayBall(event) => {
+                vec![PlayBallGameEffect::new(event, last_update).into()]
+            }
+            _ => { todo!() }
         }
     }
 }
@@ -182,6 +65,31 @@ impl Display for FedEvent {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         self.0.data.fmt(f)
     }
+}
+
+pub fn game_forward(game: &mut Game, game_event: &fed::GameEvent, description: String) {
+    game.play_count = game_event.play + 1;
+
+    game.last_update = Some(description);
+
+    game.last_update_full = None;
+
+    // TODO Check the conditionals on this
+    game.shame = (game.inning > 8 || game.inning > 7 && !game.top_of_inning) &&
+        game.home.score.unwrap() > game.away.score.unwrap();
+}
+
+pub fn game_reverse(old_game: &Game, new_game: &mut Game, game_event: &fed::GameEvent) {
+    new_game.play_count = game_event.play;  // + 1 for the offset, - 1 for going in reverse
+
+    new_game.last_update = old_game.last_update.clone();
+
+    new_game.last_update_full = old_game.last_update_full.clone();
+
+    new_game.score_update = old_game.score_update.clone();
+    new_game.score_ledger = old_game.score_ledger.clone();
+
+    new_game.shame = old_game.shame;
 }
 
 pub fn game_score_forward(game: &mut Game, scoring_players: &[fed::ScoringPlayer], free_refills: &[fed::FreeRefill]) {
@@ -225,54 +133,16 @@ pub fn game_score_reverse(old_game: &Game, new_game: &mut Game, scoring_players:
     new_game.half_inning_outs += free_refills.len() as i32;
 }
 
-
-impl EffectVariant for fed::GameEvent {
-    type EntityType = Game;
-
-    fn forward(&self, game: &mut Game) {
-        game.play_count = self.play + 1;
-
-        game.last_update = Some(self.description.clone());
-
-        game.last_update_full = None;
-
-        if let Some(score) = &self.scores && !score.scores.is_empty() {
-            game_score_forward(game, &score.scores, &score.free_refills);
-        } else {
-            game.score_update = Some(String::new());
-        }
-
-        // TODO Check the conditionals on this
-        game.shame = (game.inning > 8 || game.inning > 7 && !game.top_of_inning) &&
-            game.home.score.unwrap() > game.away.score.unwrap();
-    }
-
-    fn reverse(&mut self, old_game: &Game, new_game: &mut Game) {
-        new_game.play_count = self.play;
-
-        new_game.last_update = old_game.last_update.clone();
-
-        new_game.last_update_full = old_game.last_update_full.clone();
-
-        new_game.score_update = old_game.score_update.clone();
-        new_game.score_ledger = old_game.score_ledger.clone();
-
-        new_game.score_update = old_game.score_update.clone();
-        if let Some(score) = &self.scores && !score.scores.is_empty() {
-            game_score_reverse(old_game, new_game, &score.scores, &score.free_refills);
-        }
-
-        new_game.shame = old_game.shame;
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct LetsGoEffect {
-    event: Arc<FedEventLetsGo>
+    event: Arc<FedEventLetsGo>,
+    last_update: String,
 }
 
 impl LetsGoEffect {
-    pub fn new(event: FedEventLetsGo) -> Self { Self { event: Arc::new(event) } }
+    pub fn new(event: FedEventLetsGo, last_update: String) -> Self {
+        Self { event: Arc::new(event), last_update }
+    }
 }
 
 impl Effect for LetsGoEffect {
@@ -283,24 +153,28 @@ impl Effect for LetsGoEffect {
     fn entity_id(&self) -> Option<Uuid> { Some(self.event.game.game_id) }
 
     fn variant(&self) -> Self::Variant {
-        LetsGoEffectVariant::new(self.event.clone())
+        LetsGoEffectVariant::new(self.event.clone(), self.last_update.clone())
     }
 }
 
 #[derive(Clone, Debug)]
 pub struct LetsGoEffectVariant {
-    event: Arc<FedEventLetsGo>
+    event: Arc<FedEventLetsGo>,
+    // TODO: Try making this a &str (borrowing from LetsGoEffect) and see if it explodes
+    last_update: String,
 }
 
 impl LetsGoEffectVariant {
-    pub fn new(event: Arc<FedEventLetsGo>) -> Self { Self { event } }
+    pub fn new(event: Arc<FedEventLetsGo>, description: String) -> Self {
+        Self { event, last_update: description }
+    }
 }
 
 impl EffectVariant for LetsGoEffectVariant {
     type EntityType = Game;
 
     fn forward(&self, game: &mut Game) {
-        self.event.game.forward(game);
+        game_forward(game, &self.event.game, self.last_update.clone());
 
         game.game_start = true;
         game.game_start_phase = -1;
@@ -310,5 +184,120 @@ impl EffectVariant for LetsGoEffectVariant {
 
     fn reverse(&mut self, old_entity: &Self::EntityType, new_entity: &mut Self::EntityType) {
         todo!()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct PlayBallGameEffect {
+    event: Arc<FedEventPlayBall>,
+    last_update: String,
+}
+
+impl PlayBallGameEffect {
+    pub fn new(event: FedEventPlayBall, last_update: String) -> Self {
+        Self { event: Arc::new(event), last_update }
+    }
+}
+
+impl Effect for PlayBallGameEffect {
+    type Variant = PlayBallGameEffectVariant;
+
+    fn entity_type(&self) -> EntityType { EntityType::Game }
+
+    fn entity_id(&self) -> Option<Uuid> { Some(self.event.game.game_id) }
+
+    fn variant(&self) -> Self::Variant {
+        PlayBallGameEffectVariant::new(self.event.clone(), self.last_update.clone())
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct PlayBallGameEffectVariant {
+    event: Arc<FedEventPlayBall>,
+    // TODO: Try making this a &str (borrowing from PlayBallEffect) and see if it explodes
+    last_update: String,
+}
+
+impl PlayBallGameEffectVariant {
+    pub fn new(event: Arc<FedEventPlayBall>, description: String) -> Self {
+        Self { event, last_update: description }
+    }
+}
+
+impl EffectVariant for PlayBallGameEffectVariant {
+    type EntityType = Game;
+
+    fn forward(&self, game: &mut Game) {
+        game_forward(game, &self.event.game, self.last_update.clone());
+
+        game.game_start_phase = -1; // not sure about this
+        game.inning = -1;
+        game.phase = 2;
+        game.top_of_inning = false;
+
+        // It unsets pitchers :(
+        game.home.pitcher = None;
+        game.home.pitcher_name = Some(MaybeKnown::Known(String::new()));
+        game.home.pitcher_mod = MaybeKnown::Known(String::new());
+        game.away.pitcher = None;
+        game.away.pitcher_name = Some(MaybeKnown::Known(String::new()));
+        game.away.pitcher_mod = MaybeKnown::Known(String::new());
+    }
+
+    fn reverse(&mut self, old_game: &Game, new_game: &mut Game) {
+        new_game.home.pitcher = old_game.home.pitcher;
+        new_game.home.pitcher_name = old_game.home.pitcher_name.clone();
+        new_game.home.pitcher_mod = old_game.home.pitcher_mod.clone();
+        new_game.away.pitcher = old_game.away.pitcher;
+        new_game.away.pitcher_name = old_game.away.pitcher_name.clone();
+        new_game.away.pitcher_mod = old_game.away.pitcher_mod.clone();
+
+        // TODO Hard-code these for better error detection
+        new_game.game_start_phase = old_game.game_start_phase;
+        new_game.inning = old_game.inning;
+        new_game.phase = old_game.phase;
+        new_game.top_of_inning = old_game.top_of_inning;
+
+        game_reverse(old_game, new_game, &self.event.game);
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct PlayBallTeamEffect {
+    team_id: Uuid,
+}
+
+impl PlayBallTeamEffect {
+    pub fn new(team_id: Uuid) -> Self { Self { team_id } }
+}
+
+impl Effect for PlayBallTeamEffect {
+    type Variant = PlayBallTeamEffectVariant;
+
+    fn entity_type(&self) -> EntityType { EntityType::Team }
+
+    fn entity_id(&self) -> Option<Uuid> { Some(self.team_id) }
+
+    fn variant(&self) -> Self::Variant {
+        PlayBallTeamEffectVariant::new()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct PlayBallTeamEffectVariant;
+
+impl PlayBallTeamEffectVariant {
+    pub fn new() -> Self { Self }
+}
+
+impl EffectVariant for PlayBallTeamEffectVariant {
+    type EntityType = Team;
+
+    fn forward(&self, team: &mut Team) {
+        team.rotation_slot += 1;
+    }
+
+    fn reverse(&mut self, _: &Team, new_team: &mut Team) {
+        new_team.rotation_slot -= 1;
     }
 }

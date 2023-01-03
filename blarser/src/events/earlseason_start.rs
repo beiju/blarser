@@ -5,7 +5,7 @@ use uuid::Uuid;
 use partial_information::{DatetimeWithResettingMs, MaybeKnown};
 
 use crate::entity::{AnyEntity, Sim};
-use crate::events::{AnyEvent, AnyExtrapolated, Effect, Event, GameUpcoming, ord_by_time};
+use crate::events::{AnyEvent, AnyExtrapolated, Effect, Event, GameUpcoming};
 use crate::events::effects::{AnyEffect, EarlseasonStartSubsecondsExtrapolated, EffectVariant};
 use crate::ingest::StateGraph;
 use crate::state::EntityType;
@@ -51,8 +51,6 @@ impl Display for EarlseasonStart {
         write!(f, "EarlseasonStart at {}", self.time)
     }
 }
-
-ord_by_time!(EarlseasonStart);
 
 #[derive(Clone, Debug)]
 pub struct EarlseasonStartEffect;

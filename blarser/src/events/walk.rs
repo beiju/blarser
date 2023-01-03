@@ -3,7 +3,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::entity::{AnyEntity, Base};
-use crate::events::{AnyExtrapolated, Effect, Event, ord_by_time};
+use crate::events::{AnyExtrapolated, Effect, Event};
 use crate::events::effects::{GamePlayerExtrapolated, NullExtrapolated};
 use crate::events::event_util::game_effect_with_batter;
 use crate::events::game_update::GameUpdate;
@@ -57,4 +57,3 @@ impl Display for Walk {
     }
 }
 
-ord_by_time!(Walk);

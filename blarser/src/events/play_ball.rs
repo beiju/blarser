@@ -5,7 +5,7 @@ use uuid::Uuid;
 use partial_information::MaybeKnown;
 
 use crate::entity::{AnyEntity, Game, Team};
-use crate::events::{Effect, Event, ord_by_time, AnyExtrapolated};
+use crate::events::{Effect, Event, AnyExtrapolated};
 use crate::events::effects::NullExtrapolated;
 use crate::events::game_update::GameUpdate;
 use crate::ingest::StateGraph;

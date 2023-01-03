@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use partial_information::{MaybeKnown, PartialInformationCompare};
 
 use crate::entity::{AnyEntity, Game};
-use crate::events::{AnyExtrapolated, Effect, Event, ord_by_time};
+use crate::events::{AnyExtrapolated, Effect, Event};
 use crate::events::effects::{AdvancementExtrapolated, NullExtrapolated};
 use crate::events::game_update::GameUpdate;
 use crate::ingest::StateGraph;
@@ -89,7 +89,6 @@ impl Display for CaughtOut {
     }
 }
 
-ord_by_time!(CaughtOut);
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct FieldersChoice {
@@ -167,7 +166,6 @@ impl Display for FieldersChoice {
     }
 }
 
-ord_by_time!(FieldersChoice);
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Strikeout {

@@ -3,7 +3,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::entity::AnyEntity;
-use crate::events::{AnyExtrapolated, Effect, Event, ord_by_time};
+use crate::events::{AnyExtrapolated, Effect, Event};
 use crate::events::effects::GamePlayerExtrapolated;
 use crate::events::event_util::game_effect_with_next_batter;
 use crate::events::game_update::GameUpdate;

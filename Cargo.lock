@@ -747,12 +747,12 @@ dependencies = [
 [[package]]
 name = "enum_flatten"
 version = "0.1.0"
-source = "git+https://github.com/beiju/fed.git#557138b96ba3cd2712828411b4860aaff1d510b7"
+source = "git+https://github.com/beiju/fed.git#fd9b88ee8101fc5d58fe45946d4916b5b45d8f66"
 
 [[package]]
 name = "enum_flatten_derive"
 version = "0.1.0"
-source = "git+https://github.com/beiju/fed.git#557138b96ba3cd2712828411b4860aaff1d510b7"
+source = "git+https://github.com/beiju/fed.git#fd9b88ee8101fc5d58fe45946d4916b5b45d8f66"
 dependencies = [
  "itertools",
  "macro_state",
@@ -779,7 +779,7 @@ dependencies = [
 [[package]]
 name = "eventually_api"
 version = "0.1.0"
-source = "git+https://github.com/beiju/fed.git#557138b96ba3cd2712828411b4860aaff1d510b7"
+source = "git+https://github.com/beiju/fed.git#fd9b88ee8101fc5d58fe45946d4916b5b45d8f66"
 dependencies = [
  "chrono",
  "derive_builder",
@@ -809,7 +809,7 @@ dependencies = [
 [[package]]
 name = "fed"
 version = "0.1.0"
-source = "git+https://github.com/beiju/fed.git#557138b96ba3cd2712828411b4860aaff1d510b7"
+source = "git+https://github.com/beiju/fed.git#fd9b88ee8101fc5d58fe45946d4916b5b45d8f66"
 dependencies = [
  "chrono",
  "derive_builder",
@@ -3465,7 +3465,7 @@ dependencies = [
 [[package]]
 name = "with_structure"
 version = "0.1.0"
-source = "git+https://github.com/beiju/fed.git#557138b96ba3cd2712828411b4860aaff1d510b7"
+source = "git+https://github.com/beiju/fed.git#fd9b88ee8101fc5d58fe45946d4916b5b45d8f66"
 dependencies = [
  "chrono",
  "uuid",
@@ -3474,7 +3474,7 @@ dependencies = [
 [[package]]
 name = "with_structure_derive"
 version = "0.1.0"
-source = "git+https://github.com/beiju/fed.git#557138b96ba3cd2712828411b4860aaff1d510b7"
+source = "git+https://github.com/beiju/fed.git#fd9b88ee8101fc5d58fe45946d4916b5b45d8f66"
 dependencies = [
  "proc-macro2 1.0.47",
  "quote 1.0.21",

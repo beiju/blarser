@@ -39,10 +39,7 @@ pub async fn run_ingest(mut ingest: Ingest, start_time: DateTime<Utc>) {
     }
 
     let mut timed_events = get_timed_event_list(&mut ingest, start_time).await;
-    info!("Initial state has {} timed events:", timed_events.len());
-    for evt in &timed_events {
-        info!(" - {}", evt.0);
-    }
+    info!("Initial state has {} timed events", timed_events.len());
 
     info!("Getting fed events stream");
     let fed_events = get_fed_event_stream().peekable();
@@ -81,13 +78,13 @@ pub async fn run_ingest(mut ingest: Ingest, start_time: DateTime<Utc>) {
         info!("Next feed event is at {next_fed_event_time}");
 
         info!("Getting next timed event time");
-        let next_timed_event_time = timed_events.peek()
-            .map(|event| event.0.time());
-        if let Some(t) = next_timed_event_time {
-            info!("Next timed event is at {t}");
+        let next_timed_event = timed_events.peek_with_index();
+        if let Some((i, event)) = next_timed_event {
+            info!("Next timed event is at {} (index {i})", event.time());
         } else {
-            info!("No next time events");
+            info!("No timed events");
         }
+        let next_timed_event_time = next_timed_event.map(|(_, event)| event.time());
 
         // TODO Allow this to be None if there are currently no observations
         info!("Getting next observation time");
@@ -122,7 +119,7 @@ pub async fn run_ingest(mut ingest: Ingest, start_time: DateTime<Utc>) {
                 ingest_event(&mut ingest, event).await.unwrap()
             }
             Source::Timed => {
-                let Reverse(event) = timed_events.pop()
+                let event = timed_events.pop()
                     .expect("If we got here, the source should not be empty");
                 ingest_event(&mut ingest, event).await.unwrap()
             }
@@ -135,6 +132,6 @@ pub async fn run_ingest(mut ingest: Ingest, start_time: DateTime<Utc>) {
             }
         };
 
-        timed_events.extend(new_timed_events.into_iter().map(Reverse));
+        timed_events.extend(new_timed_events);
     }
 }

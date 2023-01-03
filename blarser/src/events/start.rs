@@ -2,7 +2,7 @@ use std::fmt::{Display, Formatter};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::events::{AnyEffect, Event, ord_by_time};
+use crate::events::{AnyEffect, Event};
 use crate::ingest::StateGraph;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -31,5 +31,3 @@ impl Event for Start {
         Vec::new()
     }
 }
-
-ord_by_time!(Start);

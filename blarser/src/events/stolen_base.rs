@@ -7,7 +7,7 @@ use uuid::Uuid;
 use partial_information::{PartialInformationCompare, RangeInclusive};
 
 use crate::entity::{AnyEntity, Base, Game};
-use crate::events::{AnyExtrapolated, Effect, Event, ord_by_time};
+use crate::events::{AnyExtrapolated, Effect, Event};
 use crate::events::effects::{DisplayedModChangeExtrapolated, NullExtrapolated};
 use crate::events::game_update::GameUpdate;
 use crate::ingest::StateGraph;
@@ -112,7 +112,6 @@ impl Display for StolenBase {
     }
 }
 
-ord_by_time!(StolenBase);
 
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -182,4 +181,3 @@ impl Display for CaughtStealing {
     }
 }
 
-ord_by_time!(CaughtStealing);

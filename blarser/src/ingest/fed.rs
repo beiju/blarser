@@ -1,4 +1,4 @@
-use std::cmp::Reverse;
+use std::cmp::{Ordering, Reverse};
 use std::collections::BinaryHeap;
 use std::sync::Arc;
 use chrono::{DateTime, Utc};
@@ -46,13 +46,99 @@ pub fn get_fed_event_stream() -> impl Stream<Item=EventStreamItem> {
     stream::iter(iter)
 }
 
-pub async fn get_timed_event_list(ingest: &mut Ingest, start_time: DateTime<Utc>) -> BinaryHeap<Reverse<AnyEvent>> {
+#[derive(Debug, Default)]
+pub struct TimedEventQueue {
+    heap: BinaryHeap<TimedEventRecord>,
+    next_index: u64,
+}
+
+impl TimedEventQueue {
+    pub fn new() -> Self { Self::default() }
+
+    pub fn push(&mut self, item: AnyEvent) {
+        self.heap.push(TimedEventRecord {
+            index: self.next_index,
+            event: item,
+        });
+        self.next_index += 1;
+    }
+
+    pub fn extend(&mut self, items: impl IntoIterator<Item=AnyEvent>) {
+        for item in items {
+            self.push(item)
+        }
+    }
+
+    pub fn peek(&self) -> Option<&AnyEvent> {
+        self.heap.peek().map(|value| &value.event)
+    }
+
+    pub fn peek_with_index(&self) -> Option<(u64, &AnyEvent)> {
+        self.heap.peek().map(|value| (value.index, &value.event))
+    }
+
+    pub fn pop(&mut self) -> Option<AnyEvent> {
+        self.heap.pop().map(|value| value.event)
+    }
+
+    pub fn len(&self) -> usize { self.heap.len() }
+}
+
+impl<T: IntoIterator<Item=AnyEvent>> From<T> for TimedEventQueue {
+    fn from(value: T) -> Self {
+        let mut queue = TimedEventQueue::new();
+
+        for item in value.into_iter() {
+            queue.push(item);
+        }
+
+        queue
+    }
+}
+
+#[derive(Debug)]
+struct TimedEventRecord {
+    index: u64,
+    event: AnyEvent
+}
+
+impl Eq for TimedEventRecord {}
+
+impl PartialEq<Self> for TimedEventRecord {
+    fn eq(&self, other: &Self) -> bool {
+        self.event.time().eq(&other.event.time()) && self.index.eq(&other.index)
+    }
+}
+
+impl PartialOrd<Self> for TimedEventRecord {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        // Reversed order to turn the default max-heap behavior of BinaryHeap into min-heap.
+        other.event.time().partial_cmp(&self.event.time())
+            .and_then(|ord| {
+                if ord == Ordering::Equal {
+                    other.index.partial_cmp(&self.index)
+                } else {
+                    Some(ord)
+                }
+            })
+    }
+}
+
+impl Ord for TimedEventRecord {
+    fn cmp(&self, other: &Self) -> Ordering {
+        // Reversed order to turn the default max-heap behavior of BinaryHeap into min-heap.
+        other.event.time().cmp(&self.event.time())
+            .then_with(|| other.index.cmp(&self.index))
+    }
+}
+
+pub async fn get_timed_event_list(ingest: &mut Ingest, start_time: DateTime<Utc>) -> TimedEventQueue {
     let events = {
         let state = ingest.state.lock().unwrap();
         state.get_timed_events(start_time)
     };
 
-    BinaryHeap::from(events.into_iter().map(Reverse).collect::<Vec<_>>())
+    events.into()
 }
 
 
@@ -61,12 +147,16 @@ pub async fn ingest_event(ingest: &mut Ingest, event: AnyEvent) -> IngestResult<
     let mut state = ingest.state.lock().unwrap();
     let mut new_timed_events = Vec::new();
 
-    while let Some(predecessor) = event.generate_predecessor(&state) {
-        info!("Event {event} has predecessor {predecessor}; ingesting that first");
+    if let Some(predecessor) = event.generate_predecessor(&state) {
+        info!("Event {event} has predecessor {predecessor}; ingesting that instead");
         new_timed_events.extend(ingest_event_internal(&mut state, predecessor, &mut history)?);
+        // The original event becomes a timed event. Crucially, it gets inserted *after* the
+        // successors of its predecessor.
+        new_timed_events.push(event);
+    } else {
+        new_timed_events.extend(ingest_event_internal(&mut state, event, &mut history)?);
     }
 
-    new_timed_events.extend(ingest_event_internal(&mut state, event, &mut history)?);
 
     Ok(new_timed_events)
 }
@@ -87,7 +177,7 @@ fn ingest_event_internal(
             info!("Applying {effect} to {ty} {id}");
             let graph = state.entity_graph_mut(ty, id)
                 .expect("Tried to apply event to entity that does not exist");
-            graph.apply_effect(&effect);
+            graph.apply_effect(&effect, event_time);
             history.push(&(effect.entity_type(), id), DebugHistoryVersion {
                 event_human_name: format!("After applying {effect}"),
                 time: event_time,

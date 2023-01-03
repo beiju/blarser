@@ -218,6 +218,9 @@ polymorphic_enum! {
     pub AnyEffect: with_effect {
         EarlseasonStart(crate::events::EarlseasonStartEffect),
         LetsGo(crate::events::LetsGoEffect),
+        GameUpcoming(crate::events::GameUpcomingEffect),
+        PlayBallForGame(crate::events::PlayBallGameEffect),
+        PlayBallForTeam(crate::events::PlayBallTeamEffect),
     }
 }
 
@@ -256,6 +259,9 @@ polymorphic_enum! {
     pub AnyEffectVariant: with_effect_variant {
         EarlseasonStart(crate::events::EarlseasonStartEffectVariant),
         LetsGo(crate::events::LetsGoEffectVariant),
+        GameUpcoming(crate::events::GameUpcomingEffectVariant),
+        PlayBallForGame(crate::events::PlayBallGameEffectVariant),
+        PlayBallForTeam(crate::events::PlayBallTeamEffectVariant),
     }
 }
 
